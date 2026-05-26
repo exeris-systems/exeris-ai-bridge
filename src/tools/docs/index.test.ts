@@ -656,7 +656,7 @@ test("docs:list_repo_docs returns isError for a non-existent repo without leakin
   const res = await tool.handler({ repo: "exeris-nonexistent" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.match(text, /has no docs\/ directory|not present in the ecosystem/);
+  assert.match(text, /not present as a real directory|has no real docs/);
   assert.ok(!text.includes(config.ecosystemRoot));
 });
 
@@ -707,6 +707,198 @@ test("docs:get_repo_doc rejects malformed inputs", async () => {
   assert.equal(r2.isError, true);
   assert.equal(r3.isError, true);
   assert.equal(r4.isError, true);
+});
+
+test("docs:get_repo_doc cannot read cross-repo files via ../ traversal (sandbox at <repo>/docs, not ecosystemRoot)", async () => {
+  // Plant a file in a DIFFERENT sibling repo's checkout (not in docs/).
+  // Reviewer's scenario: get_repo_doc with repo='exeris-sdk' and path that
+  // escapes to '../../exeris-kernel/pom.xml'. Pre-fix the sandbox was
+  // anchored at ecosystemRoot, so containment passed and the file leaked.
+  const kernelRoot = join(config.ecosystemRoot, "exeris-kernel");
+  mkdirSync(kernelRoot, { recursive: true });
+  writeFileSync(join(kernelRoot, "pom.xml"), "<project>secret</project>", "utf8");
+  seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# Guide" });
+
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({
+    repo: "exeris-sdk",
+    path: "../../exeris-kernel/pom.xml",
+  });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /sandbox escape|not found/);
+  // Must NOT have served the pom.xml content.
+  assert.ok(!text.includes("<project>"));
+});
+
+test("docs:get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", async () => {
+  // Reviewer's scenario: literal startsWith('adr/') is false for './adr/...',
+  // path.join would normalise it back, and the ADR file would leak past the
+  // registry-only contract. The fast-path lowercase check catches this
+  // before resolution because './adr/...' lower-startsWith('adr/') === false
+  // but the POST-resolution guard catches it on the normalised relative path.
+  // Plant a real ADR file in the sibling docs/adr/ directory.
+  const adrDir = join(config.ecosystemRoot, "exeris-kernel", "docs", "adr");
+  mkdirSync(adrDir, { recursive: true });
+  writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
+
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-kernel", path: "./adr/ADR-007.md" });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+});
+
+test("docs:get_repo_doc ADR-redirect catches traversal-normalised paths (foo/../adr/X.md)", async () => {
+  const adrDir = join(config.ecosystemRoot, "exeris-kernel", "docs", "adr");
+  mkdirSync(adrDir, { recursive: true });
+  writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
+  mkdirSync(join(config.ecosystemRoot, "exeris-kernel", "docs", "foo"), { recursive: true });
+
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({
+    repo: "exeris-kernel",
+    path: "foo/../adr/ADR-007.md",
+  });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+});
+
+test("docs:get_repo_doc fast-path catches case-insensitive ADR prefix (ADR/...)", async () => {
+  // On case-insensitive FS (macOS/Windows), 'ADR/...' resolves to 'adr/...'.
+  // The lowercase fast-path catches the input shape directly; the
+  // post-resolution guard would also catch the normalised path on those
+  // platforms. On Linux (case-sensitive) the file genuinely doesn't exist
+  // at 'ADR/...' — fast-path still redirects so the agent gets the hint
+  // instead of "not found".
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-kernel", path: "ADR/ADR-007.md" });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+});
+
+test("docs:get_repo_doc serves a legitimate top-level adr.md meta-doc (not an ADR record)", async () => {
+  // Reviewer's scenario: `adr.md` is a meta-doc about ADRs, NOT an ADR
+  // record. The earlier overly-strict exclusion blocked it entirely.
+  // Now it's reachable.
+  seedSiblingRepoFixture("exeris-sdk", { "adr.md": "# How we use ADRs in the SDK\n" });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-sdk", path: "adr.md" });
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# How we use ADRs/);
+});
+
+test("docs:list_repo_docs includes adr-adjacent dirs (adr-drafts/, adr-extras/) — those are NOT registry content", async () => {
+  seedSiblingRepoFixture("exeris-sdk", {
+    "adr-drafts/wip-ADR-110.md": "# Draft",
+    "adr-extras/historical.md": "# Notes",
+    "adr/ADR-100.md": "# Should be excluded (registry)",
+  });
+  const tool = tools().get("docs:list_repo_docs")!;
+  const res = await tool.handler({ repo: "exeris-sdk" });
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  const paths = payload.docs.map((d: { path: string }) => d.path);
+  assert.ok(paths.some((p: string) => p.startsWith("adr-drafts/")));
+  assert.ok(paths.some((p: string) => p.startsWith("adr-extras/")));
+  assert.ok(!paths.some((p: string) => p.startsWith("adr/")));
+});
+
+test("docs:list_repo_docs includes adr.md as a regular file", async () => {
+  seedSiblingRepoFixture("exeris-sdk", { "adr.md": "# Meta-doc" });
+  const tool = tools().get("docs:list_repo_docs")!;
+  const res = await tool.handler({ repo: "exeris-sdk" });
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.ok(payload.docs.some((d: { path: string }) => d.path === "adr.md"));
+});
+
+test("docs:list_repos excludes exeris-docs itself (covered by registry tools)", async () => {
+  // Plant exeris-docs/docs/ to make sure even with that present it's NOT
+  // listed (the discovery filters it out by name).
+  mkdirSync(join(config.ecosystemRoot, "exeris-docs", "docs"), { recursive: true });
+  const tool = tools().get("docs:list_repos")!;
+  const res = await tool.handler({});
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.ok(!payload.repos.includes("exeris-docs"));
+});
+
+test("docs:get_repo_doc rejects repo='exeris-docs' with a hint to use registry tools", async () => {
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-docs", path: "high-level-architecture.md" });
+  assert.equal(res.isError, true);
+  assert.match(
+    (res.content[0] as { text: string }).text,
+    /covered by the registry-tier tools/,
+  );
+});
+
+test("docs:list_repos with a non-existent ecosystemRoot actually exercises the readdirSync catch", async () => {
+  // Reviewer's #15: the previous test used a real-but-empty tmpdir, which
+  // doesn't throw — it returns []. To genuinely exercise the try/catch we
+  // need readdirSync to fail. A long unique random path that definitely
+  // doesn't exist does it.
+  const fakeRoot = "/__exeris-bridge-does-not-exist-" + Math.random().toString(36).slice(2) + "__";
+  const altConfig: BridgeConfig = { docsRoot: fakeRoot, ecosystemRoot: fakeRoot };
+  const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
+  const res = await altTool.handler({});
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.equal(payload.count, 0);
+  assert.deepEqual(payload.repos, []);
+});
+
+test("docs:search returns isError when docsRoot is unreadable (no silent 'no matches')", async () => {
+  rmSync(config.docsRoot, { recursive: true, force: true });
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "anything" });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /not a readable directory|EXERIS_DOCS_ROOT/);
+});
+
+test("docs:search marks truncated=true when oversize files are skipped (no false 'all matches returned')", async () => {
+  // Plant a file just over SEARCH_MAX_BYTES_PER_FILE (10MB). Use a
+  // size-only sparse write would be faster, but writeFileSync of a 10MB
+  // string is fast enough for one test.
+  const oversizeContent = "x".repeat(10_000_001);
+  writeFileSync(join(config.docsRoot, "huge.md"), oversizeContent, "utf8");
+  // Plant a small file that DOES contain the query so hits=1, not 0.
+  writeFileSync(join(config.docsRoot, "small.md"), "# small\nThe Wall here\n", "utf8");
+
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "The Wall" });
+  const text = (res.content[0] as { text: string }).text;
+  const payload = JSON.parse(text);
+  assert.ok(payload.hitCount >= 1);
+  assert.equal(payload.truncated, true, `expected truncated:true when oversize files skipped, payload: ${text}`);
+});
+
+test("docs:get_adr writes a structured stderr line on SandboxEscape (parity with other handlers)", async () => {
+  // Capture stderr writes to verify formatSandboxStderrLine fires from the
+  // get_adr inline catch — earlier this path was the only sandbox-error
+  // surface without operator-debug output, even though it's the most
+  // likely legit-escape path (cross-repo registry links).
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  const captured: string[] = [];
+  (process.stderr as unknown as { write: (chunk: string) => boolean }).write = (chunk) => {
+    captured.push(String(chunk));
+    return true;
+  };
+  try {
+    // Plant a registry entry whose target escapes via real ../traversal.
+    writeFileSync(
+      join(config.docsRoot, "adr-index.md"),
+      `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 099 | Escape | exeris-docs | platform | public | accepted (2026-01-01) | [x](../../../etc/passwd) |
+`,
+      "utf8",
+    );
+    const tool = tools().get("docs:get_adr")!;
+    await tool.handler({ number: 99 });
+  } finally {
+    (process.stderr as unknown as { write: typeof originalWrite }).write = originalWrite;
+  }
+  const sandboxLines = captured.filter((line) => line.includes('"event":"SandboxEscape"'));
+  assert.ok(sandboxLines.length >= 1, `expected SandboxEscape stderr line, captured: ${JSON.stringify(captured)}`);
 });
 
 test("docs:search skips symlinks that escape the ecosystem (no content served)", async (t) => {

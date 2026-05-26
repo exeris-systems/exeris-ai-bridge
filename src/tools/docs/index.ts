@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { BridgeConfig } from "../../config/env.js";
@@ -22,7 +22,16 @@ const WHITEPAPER_FILENAME = "b2b-technical-whitepaper.md";
 // smuggling path traversal via repo name (e.g. repo="../etc").
 const REPO_NAME_RE = /^exeris-[a-z0-9][a-z0-9-]*$/;
 const REPO_DOCS_DIRNAME = "docs";
-const REPO_DOCS_ADR_SUBDIR = "adr"; // excluded — get_adr / list_adrs is the registry's territory
+// Exactly the `adr/` subdirectory is registry territory — entries listed in
+// adr-index.md live there and flow through docs:get_adr. Sibling directories
+// like `adr-drafts/`, `adr-extras/`, `adr-archive/` are NOT registry content
+// and are intentionally surfaced via per-repo tools.
+const REPO_DOCS_ADR_SUBDIR = "adr";
+// `exeris-docs` itself is covered by the registry-tier tools (list_adrs,
+// get_adr, get_hla, get_whitepaper, get_template) and must not appear as a
+// "sibling" in list_repos / get_repo_doc — would create overlapping access
+// paths with different visibility semantics.
+const REPO_NAME_DOCS_SELF = "exeris-docs";
 
 const TEMPLATE_FILES: Record<TemplateKind, string> = {
   ADR: "templates/ADR-TEMPLATE.md",
@@ -174,6 +183,10 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
         resolved = resolveInside(config.ecosystemRoot, joined);
       } catch (err) {
         if (err instanceof SandboxEscapeError) {
+          // Operator-debug stderr parity with the other handlers — get_adr is
+          // the most likely legit-escape surface (cross-repo links) so the
+          // operator needs the structured fields on both branches below.
+          process.stderr.write(formatSandboxStderrLine(err));
           if (err.resolved === null) {
             return errorResult(missingAdrContentMessage(entry, config, joined));
           }
@@ -337,16 +350,22 @@ function searchTool(config: BridgeConfig): RegisteredTool {
         maxResults = Math.max(1, Math.min(args.maxResults, SEARCH_MAX_RESULTS_CAP));
       }
 
-      let files: string[];
-      try {
-        files = walkDocsRoot(config);
-      } catch (err) {
-        return errorResult(describeReadError(err, config, "docs root"));
+      // Explicit docsRoot readability check — walkMarkdownFiles silently
+      // swallows readdirSync errors per-directory; without this, a missing
+      // or unreadable docsRoot would surface as `hitCount=0` indistinguishable
+      // from "no matches".
+      if (!isRealDirectory(config.docsRoot)) {
+        return errorResult(
+          "Failed to scan docs root: not a readable directory (check EXERIS_DOCS_ROOT)",
+        );
       }
+
+      const files = walkDocsRoot(config);
 
       const hits: SearchHit[] = [];
       let totalBytes = 0;
       let truncated = false;
+      let skippedOversize = false;
 
       for (const absPath of files) {
         if (hits.length >= maxResults) break;
@@ -358,13 +377,31 @@ function searchTool(config: BridgeConfig): RegisteredTool {
         const rel = relative(config.docsRoot, absPath);
         if (pathFilter.length > 0 && !rel.includes(pathFilter)) continue;
 
-        // Defence-in-depth: re-route through sandbox before reading. A symlink
-        // planted under docsRoot pointing outside the ecosystem is silently
-        // skipped here rather than serving its contents.
+        // Defence-in-depth: re-route through sandbox before reading.
+        // Sandbox is docsRoot (not ecosystemRoot) — search is scoped to the
+        // docs tree per the tool description; a symlink under docsRoot
+        // pointing to a sibling repo would silently broaden the surface.
         let resolved: string;
         try {
-          resolved = resolveInside(config.ecosystemRoot, absPath);
+          resolved = resolveInside(config.docsRoot, absPath);
         } catch {
+          continue;
+        }
+
+        // statSync BEFORE readFileSync — the per-file size cap must protect
+        // memory, not just filter post-hoc. A multi-GB .md (legit growth
+        // or planted) would OOM the Node process if read first.
+        let size: number;
+        try {
+          size = statSync(resolved).size;
+        } catch {
+          continue;
+        }
+        if (size > SEARCH_MAX_BYTES_PER_FILE) {
+          // Track oversize-skips so `truncated` honestly reflects "some
+          // content was not scanned"; a clean `truncated:false` payload
+          // promised "all matches returned" and would be a false negative.
+          skippedOversize = true;
           continue;
         }
 
@@ -374,7 +411,6 @@ function searchTool(config: BridgeConfig): RegisteredTool {
         } catch {
           continue;
         }
-        if (body.length > SEARCH_MAX_BYTES_PER_FILE) continue;
         totalBytes += body.length;
 
         const lines = body.split(/\r?\n/);
@@ -401,7 +437,7 @@ function searchTool(config: BridgeConfig): RegisteredTool {
             pathFilter: pathFilter.length > 0 ? pathFilter : null,
             maxResults,
             hitCount: hits.length,
-            truncated: truncated || hits.length >= maxResults,
+            truncated: truncated || skippedOversize || hits.length >= maxResults,
             hits,
           },
           null,
@@ -467,8 +503,26 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
+      if (repo === REPO_NAME_DOCS_SELF) {
+        return errorResult(
+          `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools, not the per-repo surface. ` +
+            `Use docs:list_adrs / docs:get_hla / docs:search etc. instead.`,
+        );
+      }
 
-      const repoDocsAbs = join(config.ecosystemRoot, repo, REPO_DOCS_DIRNAME);
+      // Conservative symlink posture (matches discoverReposWithDocs):
+      // a symlinked repo dir or symlinked docs/ would silently re-attribute
+      // another location's files under the queried repo name. Reject up-front
+      // rather than walk the resolved realpath.
+      const repoDirAbs = join(config.ecosystemRoot, repo);
+      if (!isRealDirectory(repoDirAbs) || isSymlink(repoDirAbs)) {
+        return errorResult(`Repo '${repo}' is not present as a real directory in the ecosystem checkout.`);
+      }
+      const repoDocsAbs = join(repoDirAbs, REPO_DOCS_DIRNAME);
+      if (!isRealDirectory(repoDocsAbs) || isSymlink(repoDocsAbs)) {
+        return errorResult(`Repo '${repo}' has no real docs/ directory (missing or symlinked).`);
+      }
+
       let resolved: string;
       try {
         resolved = resolveInside(config.ecosystemRoot, repoDocsAbs);
@@ -484,9 +538,11 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
 
       const docs = walkMarkdownFiles(resolved, SEARCH_MAX_FILES_VISITED)
         .map((abs) => relative(resolved, abs))
-        // Exclude the per-repo ADR directory — those flow through the
-        // registry tools, not the per-repo doc tools.
-        .filter((rel) => !rel.startsWith(`${REPO_DOCS_ADR_SUBDIR}${sep}`) && rel !== `${REPO_DOCS_ADR_SUBDIR}.md`)
+        // Exclude exactly the `adr/` subtree — its entries are registry
+        // content flowing through docs:get_adr. ADR-adjacent dirs
+        // (adr-drafts/, adr-extras/, adr-archive/) and `adr.md` (meta-doc
+        // about ADRs, not a record) remain visible.
+        .filter((rel) => rel !== REPO_DOCS_ADR_SUBDIR && !rel.startsWith(REPO_DOCS_ADR_SUBDIR + sep))
         .sort((a, b) => a.localeCompare(b))
         .map((path) => ({ path }));
 
@@ -524,23 +580,98 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
+      if (repo === REPO_NAME_DOCS_SELF) {
+        return errorResult(
+          `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
+            `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
+            `Use those instead of docs:get_repo_doc.`,
+        );
+      }
 
       if (typeof args.path !== "string" || args.path.trim().length === 0) {
         return errorResult("Invalid input: 'path' must be a non-empty string");
       }
       const trimmedPath = args.path.trim();
-      // ADR paths under the per-repo docs surface are intentionally
-      // unreachable here — agents must use docs:get_adr so the registry's
-      // visibility / sandbox / cross-repo resolution flows uniformly.
-      if (trimmedPath.startsWith(`${REPO_DOCS_ADR_SUBDIR}/`) || trimmedPath === `${REPO_DOCS_ADR_SUBDIR}.md`) {
+
+      // Fast-path ADR redirect: covers the common case (literal `adr/`-prefixed
+      // input) so an agent typing a non-existent ADR path still gets the
+      // helpful "use docs:get_adr" hint instead of "not found". The
+      // post-resolution guard below is the load-bearing security check —
+      // it catches normalised (./adr/...), traversal (foo/../adr/...),
+      // case-insensitive (ADR/... on macOS/Windows FS), and backslash
+      // (adr\... on Windows after join normalisation) bypasses.
+      const lowerLiteral = trimmedPath.toLowerCase();
+      if (
+        lowerLiteral === REPO_DOCS_ADR_SUBDIR ||
+        lowerLiteral.startsWith(REPO_DOCS_ADR_SUBDIR + "/") ||
+        lowerLiteral.startsWith(REPO_DOCS_ADR_SUBDIR + sep)
+      ) {
         return errorResult(
           `'${trimmedPath}' is an ADR path; use docs:get_adr with the ADR number instead.`,
         );
       }
 
-      const relPath = join(repo, REPO_DOCS_DIRNAME, trimmedPath);
-      const displayName = `${repo}/${REPO_DOCS_DIRNAME}/${trimmedPath}`;
-      return readSandboxedFile(config, config.ecosystemRoot, relPath, displayName);
+      // Step 1: sandbox repoDocsRoot inside ecosystemRoot. After this the
+      // per-path sandbox uses repoDocsRoot — NOT ecosystemRoot — so `..` in
+      // `path` cannot reach cross-repo content (which would defeat the
+      // tool's documented scope and bypass docs:get_adr's registry flow).
+      const repoDocsAbs = join(config.ecosystemRoot, repo, REPO_DOCS_DIRNAME);
+      let repoDocsRoot: string;
+      try {
+        repoDocsRoot = resolveInside(config.ecosystemRoot, repoDocsAbs);
+      } catch (err) {
+        if (err instanceof SandboxEscapeError) {
+          process.stderr.write(formatSandboxStderrLine(err));
+          return errorResult(
+            `Repo '${repo}' has no docs/ directory or is not present in the ecosystem checkout.`,
+          );
+        }
+        throw err;
+      }
+
+      // Step 2: sandbox the user-supplied path INSIDE repoDocsRoot.
+      const joined = join(repoDocsRoot, trimmedPath);
+      let resolved: string;
+      try {
+        resolved = resolveInside(repoDocsRoot, joined);
+      } catch (err) {
+        if (err instanceof SandboxEscapeError) {
+          process.stderr.write(formatSandboxStderrLine(err));
+          return errorResult(
+            err.resolved === null
+              ? `'${trimmedPath}' was not found under ${repo}/${REPO_DOCS_DIRNAME}/`
+              : `'${trimmedPath}' resolves outside of ${repo}/${REPO_DOCS_DIRNAME}/ (sandbox escape).`,
+          );
+        }
+        throw err;
+      }
+
+      // ADR-guard runs AFTER resolution so it catches:
+      //   ./adr/X.md, foo/../adr/X.md  → normalise to adr/X.md → caught
+      //   ADR/x.md on case-insensitive FS → realpath lands at adr/x.md → caught
+      //   adr\X.md on Windows           → join normalises → caught
+      // The check is on the lowercased relative-from-repoDocsRoot path with
+      // platform-aware separator. `adr.md` (a meta-doc about ADRs, NOT an
+      // ADR record) is NOT excluded — it's not in the registry.
+      const relFromRepoDocs = relative(repoDocsRoot, resolved);
+      const lowerRel = relFromRepoDocs.toLowerCase();
+      if (lowerRel === REPO_DOCS_ADR_SUBDIR || lowerRel.startsWith(REPO_DOCS_ADR_SUBDIR + sep)) {
+        return errorResult(
+          `'${relFromRepoDocs}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+        );
+      }
+
+      try {
+        return ok(readFileSync(resolved, "utf8"));
+      } catch (err) {
+        const reason = redactEcosystemPaths(
+          err instanceof Error ? err.message : String(err),
+          config,
+        );
+        return errorResult(
+          `Failed to read ${repo}/${REPO_DOCS_DIRNAME}/${trimmedPath}: ${reason}`,
+        );
+      }
     },
   };
 }
@@ -586,7 +717,13 @@ function walkMarkdownFiles(rootAbs: string, maxFiles: number): string[] {
 
 /**
  * Walk ecosystemRoot one level deep and return repo names that match the
- * exeris-* convention AND have a `docs/` subdirectory. Deterministic order.
+ * exeris-* convention AND have a `docs/` subdirectory. Excludes:
+ *   - `exeris-docs` itself (covered by registry-tier tools)
+ *   - symlinked repo directories (silently re-attribute another location's
+ *     files under the queried name; reject conservatively in v0.2.0; if
+ *     operators need symlinked checkouts, that's a later design)
+ *   - symlinked `docs/` subdirectories (same reasoning)
+ * Deterministic order.
  */
 function discoverReposWithDocs(config: BridgeConfig): string[] {
   let entries;
@@ -597,18 +734,34 @@ function discoverReposWithDocs(config: BridgeConfig): string[] {
   }
   const repos: string[] = [];
   for (const entry of entries) {
+    // Use lstat (entry.isDirectory() is lstat-based per Node docs) — a
+    // symlink to a directory reports isDirectory() === false here, so
+    // symlinked repo dirs are skipped by the existing check.
     if (!entry.isDirectory()) continue;
     if (!REPO_NAME_RE.test(entry.name)) continue;
+    if (entry.name === REPO_NAME_DOCS_SELF) continue;
+
     const docsDir = join(config.ecosystemRoot, entry.name, REPO_DOCS_DIRNAME);
-    try {
-      if (statSync(docsDir).isDirectory()) {
-        repos.push(entry.name);
-      }
-    } catch {
-      // No docs/ subdirectory — skip.
-    }
+    if (!isRealDirectory(docsDir) || isSymlink(docsDir)) continue;
+    repos.push(entry.name);
   }
   return repos.sort((a, b) => a.localeCompare(b));
+}
+
+function isRealDirectory(absPath: string): boolean {
+  try {
+    return lstatSync(absPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isSymlink(absPath: string): boolean {
+  try {
+    return lstatSync(absPath).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 /**
