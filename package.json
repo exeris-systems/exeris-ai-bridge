@@ -1,0 +1,45 @@
+{
+  "name": "@exeris/ai-bridge",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Model Context Protocol server exposing Exeris ecosystem surfaces (Studio/LSP, docs/ADR registry, kernel introspection) to AI agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "dist/server.js",
+  "bin": {
+    "exeris-ai-bridge": "dist/server.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/exeris-systems/exeris-ai-bridge.git"
+  },
+  "keywords": [
+    "exeris",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "lsp"
+  ]
+}

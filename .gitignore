@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.log
+*.tsbuildinfo
+
+# Environment files — never commit secrets. Keep .env.example tracked.
+.env
+.env.*
+!.env.example
+
+# OS noise
+.DS_Store
+
+# Editor noise
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+
+# Per-user Claude Code settings — shared agents/commands/skills stay tracked
+.claude/settings.local.json
