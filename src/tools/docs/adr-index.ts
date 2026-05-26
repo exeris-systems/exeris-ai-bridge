@@ -104,14 +104,23 @@ function splitRow(line: string): string[] {
 }
 
 function parseLink(cell: string): AdrLink | null {
-  // Match the FIRST markdown link in the cell. Cells like the cross-repo-stub
-  // table contain multiple comma-separated links — that's a different table
-  // and shouldn't reach this parser, but we stay defensive.
-  const match = /\[([^\]]+)\]\(([^)]+)\)/.exec(cell);
-  if (!match) return null;
+  // Locate the FIRST markdown link `[display](target)` via indexOf rather
+  // than a regex — guarantees O(n) traversal and side-steps Sonar's S5852
+  // false-positive on `[^\]]+...[^)]+` (negated classes don't actually
+  // backtrack catastrophically, but the static analyser flags them).
+  // Cells like the cross-repo-stub table contain multiple links — that
+  // table is filtered out at the heading boundary, but we stay defensive.
+  const openBracket = cell.indexOf("[");
+  if (openBracket < 0) return null;
+  const closeBracket = cell.indexOf("]", openBracket + 1);
+  if (closeBracket < 0) return null;
+  if (cell.charAt(closeBracket + 1) !== "(") return null;
+  const closeParen = cell.indexOf(")", closeBracket + 2);
+  if (closeParen < 0) return null;
+
   return {
-    display: decodeMaybe(match[1].trim()),
-    target: decodeMaybe(match[2].trim()),
+    display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()),
+    target: decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim()),
   };
 }
 
