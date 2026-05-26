@@ -1,6 +1,6 @@
 {
   "name": "@exeris/ai-bridge",
-  "version": "0.1.0-SNAPSHOT",
+  "version": "0.2.0-SNAPSHOT",
   "description": "Model Context Protocol server exposing Exeris ecosystem surfaces (Studio/LSP, docs/ADR registry, kernel introspection) to AI agents.",
   "license": "Apache-2.0",
   "type": "module",
@@ -13,15 +13,28 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/**/*.spec.js",
+    "!dist/**/*.spec.d.ts",
+    "!dist/**/*.spec.js.map",
+    "!dist/**/*.spec.d.ts.map",
+    "!dist/**/__tests__/**",
+    "!dist/**/__mocks__/**",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test dist/**/*.test.js"
+    "pretest": "npm run build",
+    "test": "cd dist && node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

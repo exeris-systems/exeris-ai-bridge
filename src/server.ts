@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -9,9 +10,9 @@ import { registerDocsTools } from "./tools/docs/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
 import type { ToolDefinition, ToolHandler } from "./tools/types.js";
+import { getServerVersion } from "./version.js";
 
 const SERVER_NAME = "exeris-ai-bridge";
-const SERVER_VERSION = "0.1.0";
 
 async function main(): Promise<void> {
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
   }
 
   const server = new Server(
-    { name: SERVER_NAME, version: SERVER_VERSION },
+    { name: SERVER_NAME, version: getServerVersion() },
     { capabilities: { tools: {} } },
   );
 
