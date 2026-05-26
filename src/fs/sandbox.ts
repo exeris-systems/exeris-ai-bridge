@@ -12,9 +12,14 @@ export class SandboxEscapeError extends Error {
   readonly resolved: string | null;
 
   constructor(root: string, candidate: string, resolved: string | null) {
+    // Deliberately keep absolute paths OUT of the message — callers may echo
+    // `.message` over the wire to AI agents (and later, over SSE to remote
+    // clients). The structured fields are available for handler-side
+    // composition that controls what gets surfaced and what gets logged.
     super(
-      `Path escapes sandbox (root=${root}, candidate=${candidate}` +
-        (resolved !== null ? `, resolved=${resolved})` : ", unresolved)"),
+      resolved === null
+        ? "Path escapes sandbox (target did not resolve on disk)"
+        : "Path escapes sandbox (resolved path is outside the sandbox root)",
     );
     this.name = "SandboxEscapeError";
     this.root = root;

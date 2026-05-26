@@ -26,16 +26,16 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 
 > Goal: a running Claude Code session can call `docs:list_adrs` and `docs:get_adr 024` against this server and get correct answers from `../exeris-docs/`. Everything is filesystem-bound; zero external process dependencies.
 
-- [ ] **`git init` + first commit** in `exeris-ai-bridge/`; push to `github.com/exeris-systems/exeris-ai-bridge` (public repo creation)
-- [ ] **CI** — `.github/workflows/build.yml`: `npm ci` → `npm run typecheck` → `npm run build` → `npm test` on Node 20 and 22
-- [ ] **`docs:list_adrs`** — parses `../exeris-docs/adr-index.md` markdown table, returns `{ number, title, owningRepo, scope, visibility, status, link }[]`; supports optional `status` filter
-- [ ] **`docs:get_adr`** — resolves ADR-NNN by number against the index, reads the authoritative file (handles cross-repo paths), returns full markdown body
+- [x] **`git init` + first commit** in `exeris-ai-bridge/`; push to `github.com/exeris-systems/exeris-ai-bridge` (public repo creation)
+- [x] **CI** — `.github/workflows/build.yml`: `npm ci` → `npm run typecheck` → `npm run build` → `npm test` on Node 20 and 22
+- [x] **`docs:list_adrs`** — parses `../exeris-docs/adr-index.md` markdown table, returns `{ number, title, owningRepo, scope, visibility, status, link }[]`; supports optional `status` filter. `link.github` carries the public GitHub URL (null for enterprise-private)
+- [x] **`docs:get_adr`** — resolves ADR-NNN by number against the index, reads the authoritative file (handles cross-repo paths), returns full markdown body
 - [ ] **`docs:get_template`** — fetches `templates/{ADR,RFC,RESEARCH}-TEMPLATE.md` by name
 - [ ] **`docs:get_hla`** + **`docs:get_whitepaper`** — return canonical narrative docs
 - [ ] **`docs:search`** — ripgrep-equivalent over `../exeris-docs/` with bounded result count and path filters
-- [ ] **Path-sandbox guard** — every filesystem read resolves under a configured root and rejects paths that escape it (path-traversal hardening from day 1)
-- [ ] **`EXERIS_DOCS_ROOT` env var** — points at the `exeris-docs/` checkout; sensible default for the monorepo-neighbour layout (`../exeris-docs` relative to the bridge install)
-- [ ] **Unit tests** for every tool handler (parsing, filtering, sandbox enforcement) using `node --test`
+- [x] **Path-sandbox guard** — every filesystem read resolves under a configured root and rejects paths that escape it (path-traversal hardening from day 1)
+- [x] **`EXERIS_DOCS_ROOT` env var** — points at the `exeris-docs/` checkout; sensible default for the monorepo-neighbour layout (`../exeris-docs` relative to the bridge install)
+- [ ] **Unit tests** for every tool handler (parsing, filtering, sandbox enforcement) using `node --test` — partial: env, sandbox, adr-index parser, list_adrs, get_adr covered (68 tests). Remaining four `docs:*` tools land alongside their handlers in 2b.
 - [ ] **First end-to-end demo** — `.claude/settings.json` config snippet committed to README; manual smoke: open Claude Code, ask "list all ADR-024-related context" and confirm the server returns it
 - [ ] **npm publish dry-run** — `@exeris/ai-bridge@0.2.0` resolves, `npm pack` output reviewed
 

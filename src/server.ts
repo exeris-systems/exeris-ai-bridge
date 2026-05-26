@@ -6,6 +6,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { loadConfig } from "./config/env.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
@@ -15,9 +16,15 @@ import { getServerVersion } from "./version.js";
 const SERVER_NAME = "exeris-ai-bridge";
 
 async function main(): Promise<void> {
+  const config = loadConfig();
+
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
 
-  for (const tool of [...registerDocsTools(), ...registerLspTools(), ...registerKernelTools()]) {
+  for (const tool of [
+    ...registerDocsTools(config),
+    ...registerLspTools(),
+    ...registerKernelTools(),
+  ]) {
     tools.set(tool.definition.name, tool);
   }
 
