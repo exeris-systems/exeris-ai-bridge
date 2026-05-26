@@ -64,7 +64,7 @@ function tools() {
   return new Map(registerDocsTools(config).map((t) => [t.definition.name, t]));
 }
 
-test("registerDocsTools registers all six docs:* tools", () => {
+test("registerDocsTools registers all nine docs:* tools", () => {
   const t = tools();
   assert.ok(t.has("docs:list_adrs"));
   assert.ok(t.has("docs:get_adr"));
@@ -72,6 +72,9 @@ test("registerDocsTools registers all six docs:* tools", () => {
   assert.ok(t.has("docs:get_hla"));
   assert.ok(t.has("docs:get_whitepaper"));
   assert.ok(t.has("docs:search"));
+  assert.ok(t.has("docs:list_repos"));
+  assert.ok(t.has("docs:list_repo_docs"));
+  assert.ok(t.has("docs:get_repo_doc"));
 });
 
 test("docs:list_adrs returns every entry from the registry as JSON text", async () => {
@@ -577,6 +580,133 @@ test("docs:search includes line number and snippet for each hit", async () => {
   assert.ok(typeof hit.line === "number" && hit.line >= 1);
   assert.ok(typeof hit.snippet === "string" && hit.snippet.length > 0);
   assert.ok(hit.snippet.toLowerCase().includes("the wall"));
+});
+
+// ---------------------------------------------------------------------------
+// docs:list_repos / docs:list_repo_docs / docs:get_repo_doc
+
+function seedSiblingRepoFixture(name: string, files: Record<string, string>): string {
+  const repoDocs = join(config.ecosystemRoot, name, "docs");
+  mkdirSync(repoDocs, { recursive: true });
+  for (const [relPath, body] of Object.entries(files)) {
+    const full = join(repoDocs, relPath);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, body, "utf8");
+  }
+  return repoDocs;
+}
+
+test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory", async () => {
+  // The existing fixture only creates exeris-docs and exeris-kernel/docs/adr.
+  // Add two more siblings to make the discovery non-trivial.
+  seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK guide" });
+  mkdirSync(join(config.ecosystemRoot, "exeris-tooling"), { recursive: true }); // no docs/
+  seedSiblingRepoFixture("exeris-spring-runtime", { "overview.md": "# Spring" });
+
+  const tool = tools().get("docs:list_repos")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  // exeris-kernel already has docs/ (from the base fixture's adr/ subdir).
+  // exeris-tooling has no docs/ so it should NOT appear.
+  assert.ok(payload.repos.includes("exeris-kernel"));
+  assert.ok(payload.repos.includes("exeris-sdk"));
+  assert.ok(payload.repos.includes("exeris-spring-runtime"));
+  assert.ok(!payload.repos.includes("exeris-tooling"));
+  // exeris-docs is the docsRoot itself; it shows up if it has docs/ (which
+  // it doesn't here) — assert only that the discovery is deterministic.
+  assert.deepEqual([...payload.repos].sort(), payload.repos);
+});
+
+test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
+  // Synthesise an empty-but-valid config to drive the empty branch.
+  const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), "exeris-empty-")));
+  const altConfig: BridgeConfig = { docsRoot: emptyRoot, ecosystemRoot: emptyRoot };
+  try {
+    const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
+    const res = await altTool.handler({});
+    const payload = JSON.parse((res.content[0] as { text: string }).text);
+    assert.equal(payload.count, 0);
+    assert.deepEqual(payload.repos, []);
+  } finally {
+    rmSync(emptyRoot, { recursive: true, force: true });
+  }
+});
+
+test("docs:list_repo_docs lists *.md files excluding the adr/ subtree", async () => {
+  seedSiblingRepoFixture("exeris-sdk", {
+    "guide.md": "# Guide",
+    "subsystems/persistence.md": "# Persistence",
+    "subsystems/transport.md": "# Transport",
+    "adr/ADR-100-fake.md": "# Should be excluded",
+  });
+  const tool = tools().get("docs:list_repo_docs")!;
+  const res = await tool.handler({ repo: "exeris-sdk" });
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  const paths = payload.docs.map((d: { path: string }) => d.path);
+  assert.ok(paths.includes("guide.md"));
+  assert.ok(paths.some((p: string) => p.startsWith("subsystems/")));
+  // ADR subdir excluded by design.
+  assert.ok(!paths.some((p: string) => p.startsWith("adr/")));
+});
+
+test("docs:list_repo_docs returns isError for a non-existent repo without leaking ecosystemRoot", async () => {
+  const tool = tools().get("docs:list_repo_docs")!;
+  const res = await tool.handler({ repo: "exeris-nonexistent" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /has no docs\/ directory|not present in the ecosystem/);
+  assert.ok(!text.includes(config.ecosystemRoot));
+});
+
+test("docs:list_repo_docs rejects repo names that don't match the exeris-* convention (path-traversal guard)", async () => {
+  const tool = tools().get("docs:list_repo_docs")!;
+  const cases = ["", "../etc", "/abs/path", "Exeris-Kernel", "node_modules", "exeris-", "exeris-_underscore"];
+  for (const repo of cases) {
+    const res = await tool.handler({ repo });
+    assert.equal(res.isError, true, `should reject repo=${JSON.stringify(repo)}`);
+    assert.match((res.content[0] as { text: string }).text, /must match \/\^exeris-/);
+  }
+});
+
+test("docs:get_repo_doc returns the body of a doc under <repo>/docs/<path>", async () => {
+  seedSiblingRepoFixture("exeris-sdk", {
+    "subsystems/persistence.md": "# Persistence subsystem\n\nDetails here.",
+  });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-sdk", path: "subsystems/persistence.md" });
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# Persistence subsystem/);
+});
+
+test("docs:get_repo_doc rejects an ADR path with a redirection hint to docs:get_adr", async () => {
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-kernel", path: "adr/ADR-007.md" });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+});
+
+test("docs:get_repo_doc rejects path traversal in the 'path' argument", async () => {
+  seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# Guide" });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-sdk", path: "../../../etc/passwd" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  // Either sandbox rejects, or file not found — never a successful read.
+  assert.ok(!text.includes("/etc/passwd") || text.match(/sandbox|not found/));
+});
+
+test("docs:get_repo_doc rejects malformed inputs", async () => {
+  const tool = tools().get("docs:get_repo_doc")!;
+  const r1 = await tool.handler({ repo: "exeris-sdk" });
+  const r2 = await tool.handler({ repo: "exeris-sdk", path: "" });
+  const r3 = await tool.handler({ repo: "exeris-sdk", path: "   " });
+  const r4 = await tool.handler({ repo: "../etc", path: "passwd" });
+  assert.equal(r1.isError, true);
+  assert.equal(r2.isError, true);
+  assert.equal(r3.isError, true);
+  assert.equal(r4.isError, true);
 });
 
 test("docs:search skips symlinks that escape the ecosystem (no content served)", async (t) => {

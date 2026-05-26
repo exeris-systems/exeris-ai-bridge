@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { BridgeConfig } from "../../config/env.js";
@@ -16,6 +16,13 @@ import { parseAdrIndex, type AdrEntry } from "./adr-index.js";
 const ADR_INDEX_FILENAME = "adr-index.md";
 const HLA_FILENAME = "high-level-architecture.md";
 const WHITEPAPER_FILENAME = "b2b-technical-whitepaper.md";
+
+// Per-repo docs live in `<ecosystemRoot>/<repo>/docs/**`. The repo regex
+// matches the ecosystem's naming convention and prevents agent input from
+// smuggling path traversal via repo name (e.g. repo="../etc").
+const REPO_NAME_RE = /^exeris-[a-z0-9][a-z0-9-]*$/;
+const REPO_DOCS_DIRNAME = "docs";
+const REPO_DOCS_ADR_SUBDIR = "adr"; // excluded — get_adr / list_adrs is the registry's territory
 
 const TEMPLATE_FILES: Record<TemplateKind, string> = {
   ADR: "templates/ADR-TEMPLATE.md",
@@ -43,6 +50,9 @@ export function registerDocsTools(config: BridgeConfig): RegisteredTool[] {
     getHlaTool(config),
     getWhitepaperTool(config),
     searchTool(config),
+    listReposTool(config),
+    listRepoDocsTool(config),
+    getRepoDocTool(config),
   ];
 }
 
@@ -404,13 +414,155 @@ function searchTool(config: BridgeConfig): RegisteredTool {
 
 /**
  * Walk docsRoot recursively, returning absolute paths of `*.md` files.
- * Skips hidden dirs (starting with `.`) and `node_modules`. Bounded by
- * SEARCH_MAX_FILES_VISITED to keep worst-case work O(constant).
+ * Thin wrapper over walkMarkdownFiles bound to docsRoot.
  */
 function walkDocsRoot(config: BridgeConfig): string[] {
+  return walkMarkdownFiles(config.docsRoot, SEARCH_MAX_FILES_VISITED);
+}
+
+// ---------------------------------------------------------------------------
+// docs:list_repos
+
+function listReposTool(config: BridgeConfig): RegisteredTool {
+  return {
+    definition: {
+      name: "docs:list_repos",
+      description:
+        "List sibling Exeris repos under the ecosystem root that publish a " +
+        "`docs/` directory. Returned names are usable as `repo` input to " +
+        "`docs:list_repo_docs` and `docs:get_repo_doc`.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      const repos = discoverReposWithDocs(config);
+      return ok(JSON.stringify({ count: repos.length, repos }, null, 2));
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// docs:list_repo_docs
+
+function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
+  return {
+    definition: {
+      name: "docs:list_repo_docs",
+      description:
+        "List markdown documents under `<repo>/docs/**` for an Exeris " +
+        "sibling repo. The `adr/` subdirectory is excluded — those are " +
+        "the registry's territory and reachable via `docs:list_adrs` / " +
+        "`docs:get_adr`. Use `docs:list_repos` to discover valid repo names.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repo: {
+            type: "string",
+            description: "Repo name (e.g. 'exeris-kernel'). Must match /^exeris-[a-z0-9][a-z0-9-]*$/.",
+          },
+        },
+        required: ["repo"],
+      },
+    },
+    handler: async (args) => {
+      const repoOrErr = validateRepoName(args.repo);
+      if (typeof repoOrErr !== "string") return repoOrErr;
+      const repo = repoOrErr;
+
+      const repoDocsAbs = join(config.ecosystemRoot, repo, REPO_DOCS_DIRNAME);
+      let resolved: string;
+      try {
+        resolved = resolveInside(config.ecosystemRoot, repoDocsAbs);
+      } catch (err) {
+        if (err instanceof SandboxEscapeError) {
+          process.stderr.write(formatSandboxStderrLine(err));
+          return errorResult(
+            `Repo '${repo}' has no docs/ directory or is not present in the ecosystem checkout.`,
+          );
+        }
+        throw err;
+      }
+
+      const docs = walkMarkdownFiles(resolved, SEARCH_MAX_FILES_VISITED)
+        .map((abs) => relative(resolved, abs))
+        // Exclude the per-repo ADR directory — those flow through the
+        // registry tools, not the per-repo doc tools.
+        .filter((rel) => !rel.startsWith(`${REPO_DOCS_ADR_SUBDIR}${sep}`) && rel !== `${REPO_DOCS_ADR_SUBDIR}.md`)
+        .sort((a, b) => a.localeCompare(b))
+        .map((path) => ({ path }));
+
+      return ok(JSON.stringify({ repo, count: docs.length, docs }, null, 2));
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// docs:get_repo_doc
+
+function getRepoDocTool(config: BridgeConfig): RegisteredTool {
+  return {
+    definition: {
+      name: "docs:get_repo_doc",
+      description:
+        "Fetch a specific markdown document from `<repo>/docs/<path>`. " +
+        "Use `docs:list_repo_docs` to discover valid paths.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repo: {
+            type: "string",
+            description: "Repo name (e.g. 'exeris-kernel'). Must match /^exeris-[a-z0-9][a-z0-9-]*$/.",
+          },
+          path: {
+            type: "string",
+            description: "Path relative to `<repo>/docs/`, e.g. 'subsystems/bootstrap.md'.",
+          },
+        },
+        required: ["repo", "path"],
+      },
+    },
+    handler: async (args) => {
+      const repoOrErr = validateRepoName(args.repo);
+      if (typeof repoOrErr !== "string") return repoOrErr;
+      const repo = repoOrErr;
+
+      if (typeof args.path !== "string" || args.path.trim().length === 0) {
+        return errorResult("Invalid input: 'path' must be a non-empty string");
+      }
+      const trimmedPath = args.path.trim();
+      // ADR paths under the per-repo docs surface are intentionally
+      // unreachable here — agents must use docs:get_adr so the registry's
+      // visibility / sandbox / cross-repo resolution flows uniformly.
+      if (trimmedPath.startsWith(`${REPO_DOCS_ADR_SUBDIR}/`) || trimmedPath === `${REPO_DOCS_ADR_SUBDIR}.md`) {
+        return errorResult(
+          `'${trimmedPath}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+        );
+      }
+
+      const relPath = join(repo, REPO_DOCS_DIRNAME, trimmedPath);
+      const displayName = `${repo}/${REPO_DOCS_DIRNAME}/${trimmedPath}`;
+      return readSandboxedFile(config, config.ecosystemRoot, relPath, displayName);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared internals
+
+function readAdrIndex(config: BridgeConfig): AdrEntry[] {
+  const indexPath = resolveInside(config.ecosystemRoot, join(config.docsRoot, ADR_INDEX_FILENAME));
+  const raw = readFileSync(indexPath, "utf8");
+  return parseAdrIndex(raw);
+}
+
+/**
+ * Walk a directory recursively, returning absolute paths of `*.md` files
+ * under it. Skips hidden dirs and `node_modules`. Bounded by maxFiles to
+ * keep worst-case work O(constant).
+ */
+function walkMarkdownFiles(rootAbs: string, maxFiles: number): string[] {
   const out: string[] = [];
-  const stack: string[] = [config.docsRoot];
-  while (stack.length > 0 && out.length < SEARCH_MAX_FILES_VISITED) {
+  const stack: string[] = [rootAbs];
+  while (stack.length > 0 && out.length < maxFiles) {
     const current = stack.pop()!;
     let entries;
     try {
@@ -419,7 +571,7 @@ function walkDocsRoot(config: BridgeConfig): string[] {
       continue;
     }
     for (const entry of entries) {
-      if (out.length >= SEARCH_MAX_FILES_VISITED) break;
+      if (out.length >= maxFiles) break;
       if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
       const full = join(current, entry.name);
       if (entry.isDirectory()) {
@@ -432,13 +584,48 @@ function walkDocsRoot(config: BridgeConfig): string[] {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Shared internals
+/**
+ * Walk ecosystemRoot one level deep and return repo names that match the
+ * exeris-* convention AND have a `docs/` subdirectory. Deterministic order.
+ */
+function discoverReposWithDocs(config: BridgeConfig): string[] {
+  let entries;
+  try {
+    entries = readdirSync(config.ecosystemRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const repos: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!REPO_NAME_RE.test(entry.name)) continue;
+    const docsDir = join(config.ecosystemRoot, entry.name, REPO_DOCS_DIRNAME);
+    try {
+      if (statSync(docsDir).isDirectory()) {
+        repos.push(entry.name);
+      }
+    } catch {
+      // No docs/ subdirectory — skip.
+    }
+  }
+  return repos.sort((a, b) => a.localeCompare(b));
+}
 
-function readAdrIndex(config: BridgeConfig): AdrEntry[] {
-  const indexPath = resolveInside(config.ecosystemRoot, join(config.docsRoot, ADR_INDEX_FILENAME));
-  const raw = readFileSync(indexPath, "utf8");
-  return parseAdrIndex(raw);
+/**
+ * Validate an agent-supplied repo name against the exeris-* convention.
+ * Returns the validated string on success, or an errorResult to short-circuit
+ * the handler. Rejecting non-matching names also blocks path traversal
+ * attempts via the repo segment (e.g. repo="../etc").
+ */
+function validateRepoName(value: unknown):
+  | string
+  | ReturnType<typeof errorResult> {
+  if (typeof value !== "string" || !REPO_NAME_RE.test(value)) {
+    return errorResult(
+      `Invalid input: 'repo' must match /^exeris-[a-z0-9][a-z0-9-]*$/, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value;
 }
 
 /**
@@ -452,7 +639,23 @@ function readDocsFileResult(
   relativePath: string,
   displayName: string,
 ) {
-  const joined = join(config.docsRoot, relativePath);
+  return readSandboxedFile(config, config.docsRoot, relativePath, displayName);
+}
+
+/**
+ * Generalised sandbox-check + read. `anchorRoot` is the trusted base path
+ * the `relativePath` is joined under; both end up sandbox-checked against
+ * `config.ecosystemRoot` before any read. Used by docs:* tools that read
+ * either from docsRoot (templates, hla, whitepaper) or from a sibling
+ * repo's docs/ tree (get_repo_doc).
+ */
+function readSandboxedFile(
+  config: BridgeConfig,
+  anchorRoot: string,
+  relativePath: string,
+  displayName: string,
+) {
+  const joined = join(anchorRoot, relativePath);
   let resolved: string;
   try {
     resolved = resolveInside(config.ecosystemRoot, joined);
