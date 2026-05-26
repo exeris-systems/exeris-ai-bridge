@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { parseAdrIndex } from "./adr-index.js";
+import { deriveGithubUrl, parseAdrIndex } from "./adr-index.js";
 
 const MINIMAL = `# ADR Index
 
@@ -99,6 +99,57 @@ test("parseAdrIndex throws when the file is missing the '## Index' heading", () 
     () => parseAdrIndex("# Some Other Doc\n\nnot an ADR index"),
     /missing the '## Index' heading/,
   );
+});
+
+test("deriveGithubUrl maps own-repo target to exeris-docs blob URL", () => {
+  assert.equal(
+    deriveGithubUrl("adr/ADR-001-foo.md", "public"),
+    "https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-001-foo.md",
+  );
+});
+
+test("deriveGithubUrl maps cross-repo target via the first ../ segment", () => {
+  assert.equal(
+    deriveGithubUrl("../exeris-kernel/docs/adr/ADR-007-runtime.md", "public"),
+    "https://github.com/exeris-systems/exeris-kernel/blob/main/docs/adr/ADR-007-runtime.md",
+  );
+});
+
+test("deriveGithubUrl URL-encodes path segments containing spaces", () => {
+  assert.equal(
+    deriveGithubUrl("../exeris-sdk/docs/adr/ADR-003 Entity First.md", "public"),
+    "https://github.com/exeris-systems/exeris-sdk/blob/main/docs/adr/ADR-003%20Entity%20First.md",
+  );
+});
+
+test("deriveGithubUrl returns null for enterprise-private visibility", () => {
+  assert.equal(
+    deriveGithubUrl("../exeris-kernel-enterprise/docs/adr/ADR-018.md", "enterprise-private"),
+    null,
+  );
+});
+
+test("deriveGithubUrl returns null for malformed or escape-shaped targets", () => {
+  assert.equal(deriveGithubUrl("", "public"), null);
+  assert.equal(deriveGithubUrl("/etc/passwd", "public"), null);
+  assert.equal(deriveGithubUrl("../", "public"), null);
+  assert.equal(deriveGithubUrl("../../something", "public"), null);
+});
+
+test("parseAdrIndex populates link.github on each entry", () => {
+  const entries = parseAdrIndex(MINIMAL);
+  // entries: [0]=001 own-repo public, [1]=007 cross-repo public,
+  //          [2]=016 cross-repo enterprise-private, [3]=031 reserved/no-link
+  assert.equal(
+    entries[0].link!.github,
+    "https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-001-first.md",
+  );
+  assert.equal(
+    entries[1].link!.github,
+    "https://github.com/exeris-systems/exeris-kernel/blob/main/x.md",
+  );
+  assert.equal(entries[2].link!.github, null);
+  assert.equal(entries[3].link, null);
 });
 
 test("parseAdrIndex parses against the real exeris-docs/adr-index.md shape", () => {
