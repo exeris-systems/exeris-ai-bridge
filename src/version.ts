@@ -27,11 +27,15 @@ export function getServerVersion(): string {
     typeof parsed !== "object" ||
     parsed === null ||
     !("version" in parsed) ||
-    typeof (parsed as { version: unknown }).version !== "string" ||
-    (parsed as { version: string }).version.length === 0
+    typeof (parsed as { version: unknown }).version !== "string"
   ) {
-    throw new Error(`package.json at ${pkgPath} is missing a non-empty "version" string`);
+    throw new Error(`package.json at ${pkgPath} is missing a "version" string`);
   }
 
-  return (parsed as { version: string }).version;
+  const version = (parsed as { version: string }).version.trim();
+  if (version.length === 0) {
+    throw new Error(`package.json at ${pkgPath} has a blank "version" field`);
+  }
+
+  return version;
 }
