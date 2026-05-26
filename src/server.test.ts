@@ -6,9 +6,12 @@ import { registerDocsTools } from "./tools/docs/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
 
+// Sanity tests only exercise registry composition (counts, names, prefixes).
+// Handlers are never invoked, so paths need only be syntactically valid —
+// `/var/empty` avoids Sonar's S5443 publicly-writable-directory flag on /tmp.
 const stubConfig: BridgeConfig = {
-  docsRoot: "/tmp/exeris-docs-stub",
-  ecosystemRoot: "/tmp",
+  docsRoot: "/var/empty/exeris-docs-stub",
+  ecosystemRoot: "/var/empty",
 };
 
 test("docs registry exposes at least one tool", () => {

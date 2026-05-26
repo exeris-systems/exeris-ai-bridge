@@ -39,7 +39,22 @@ const NEXT_HEADING = /^#{1,6}\s+/;
 
 export function parseAdrIndex(markdown: string): AdrEntry[] {
   const lines = markdown.split(/\r?\n/);
+  let i = findFirstRowIndex(lines);
 
+  const entries: AdrEntry[] = [];
+  for (; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (NEXT_HEADING.test(line)) break;
+    if (line.trim() === "") continue;
+    if (!TABLE_ROW.test(line)) break;
+
+    const entry = parseRow(line);
+    if (entry) entries.push(entry);
+  }
+  return entries;
+}
+
+function findFirstRowIndex(lines: string[]): number {
   const headingIdx = lines.findIndex((line) => INDEX_HEADING.test(line));
   if (headingIdx < 0) {
     throw new Error("adr-index.md is missing the '## Index' heading");
@@ -59,40 +74,31 @@ export function parseAdrIndex(markdown: string): AdrEntry[] {
   if (i < lines.length && SEPARATOR_ROW.test(lines[i] ?? "")) {
     i += 1;
   }
+  return i;
+}
 
-  const entries: AdrEntry[] = [];
-  for (; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    if (NEXT_HEADING.test(line)) break;
-    if (line.trim() === "") continue;
-    if (!TABLE_ROW.test(line)) break;
+function parseRow(line: string): AdrEntry | null {
+  const cells = splitRow(line);
+  if (cells.length < 7) return null;
 
-    const cells = splitRow(line);
-    if (cells.length < 7) continue;
+  const numberPadded = cells[0];
+  const numberInt = Number.parseInt(numberPadded, 10);
+  if (!Number.isFinite(numberInt)) return null;
 
-    const numberPadded = cells[0];
-    const numberInt = Number.parseInt(numberPadded, 10);
-    if (!Number.isFinite(numberInt)) continue;
-
-    const statusRaw = cells[5];
-    const linkCell = cells[6];
-
-    entries.push({
-      number: numberInt,
-      numberPadded,
-      title: cells[1],
-      owningRepo: cells[2],
-      scope: cells[3],
-      visibility: cells[4],
-      status: {
-        state: statusRaw.split(/\s+/)[0] ?? "",
-        raw: statusRaw,
-      },
-      link: parseLink(linkCell),
-    });
-  }
-
-  return entries;
+  const statusRaw = cells[5];
+  return {
+    number: numberInt,
+    numberPadded,
+    title: cells[1],
+    owningRepo: cells[2],
+    scope: cells[3],
+    visibility: cells[4],
+    status: {
+      state: statusRaw.split(/\s+/)[0] ?? "",
+      raw: statusRaw,
+    },
+    link: parseLink(cells[6]),
+  };
 }
 
 function splitRow(line: string): string[] {
