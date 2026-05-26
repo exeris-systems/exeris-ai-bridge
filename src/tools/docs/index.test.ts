@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
@@ -80,11 +80,30 @@ test("docs:list_adrs filters by status (case-insensitive)", async () => {
   assert.ok(payload.every((e: { status: { state: string } }) => e.status.state === "accepted"));
 });
 
-test("docs:list_adrs returns an empty list for an unknown status", async () => {
+test("docs:list_adrs returns isError when status filter matches no entries in a non-empty registry", async () => {
   const tool = tools().get("docs:list_adrs")!;
   const res = await tool.handler({ status: "withdrawn" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /No ADRs in the registry have status='withdrawn'/);
+  // Surfaces the actually-present states so the agent can recover from a typo.
+  assert.match(text, /Known states/);
+});
+
+test("docs:list_adrs trims whitespace in the status filter before comparing", async () => {
+  const tool = tools().get("docs:list_adrs")!;
+  const res = await tool.handler({ status: "  accepted  " });
+  assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
-  assert.equal(payload.length, 0);
+  assert.equal(payload.length, 3);
+});
+
+test("docs:list_adrs treats whitespace-only status as no-filter", async () => {
+  const tool = tools().get("docs:list_adrs")!;
+  const res = await tool.handler({ status: "   " });
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.equal(payload.length, 5);
 });
 
 test("docs:list_adrs returns isError when the registry file is missing", async () => {
@@ -136,6 +155,88 @@ test("docs:get_adr rejects non-integer input", async () => {
   const res2 = await tool.handler({ number: 1.5 });
   assert.equal(res1.isError, true);
   assert.equal(res2.isError, true);
+});
+
+test("docs:get_adr rejects zero and negative numbers with a clean error (not 'ADR-0-1')", async () => {
+  const tool = tools().get("docs:get_adr")!;
+  const res0 = await tool.handler({ number: 0 });
+  const resNeg = await tool.handler({ number: -1 });
+  assert.equal(res0.isError, true);
+  assert.equal(resNeg.isError, true);
+  assert.match((res0.content[0] as { text: string }).text, /must be ≥ 1/);
+  assert.match((resNeg.content[0] as { text: string }).text, /must be ≥ 1/);
+  // Verify no malformed 'ADR-0-1' / 'ADR-000' leaked.
+  assert.doesNotMatch((resNeg.content[0] as { text: string }).text, /ADR-/);
+});
+
+test("docs:get_adr rejects an empty link target without leaking docsRoot", async () => {
+  writeFileSync(
+    join(config.docsRoot, "adr-index.md"),
+    `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 050 | Empty | exeris-docs | platform | public | accepted (2026-01-01) | [empty]() |
+`,
+    "utf8",
+  );
+  const tool = tools().get("docs:get_adr")!;
+  const res = await tool.handler({ number: 50 });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /empty link target/);
+  // The docsRoot absolute path must NOT appear in the error message.
+  assert.ok(!text.includes(config.docsRoot));
+});
+
+test("docs:get_adr error messages render paths relative to ecosystemRoot, not absolute", async () => {
+  const tool = tools().get("docs:get_adr")!;
+  const res = await tool.handler({ number: 16 }); // enterprise-private, file missing
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  // ecosystemRoot prefix must NOT appear in the message — paths are relativized.
+  assert.ok(!text.includes(config.ecosystemRoot));
+  // But the relative segment SHOULD still be informative.
+  assert.match(text, /exeris-enterprise/);
+});
+
+test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'missing content')", async () => {
+  // Plant a symlink in docs/adr that points to a file outside the ecosystem.
+  const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-outside-")));
+  const outsideFile = join(outsideBase, "trojan.md");
+  writeFileSync(outsideFile, "stolen content");
+  const linkPath = join(config.docsRoot, "adr", "ADR-099-trojan.md");
+  try {
+    symlinkSync(outsideFile, linkPath);
+  } catch {
+    rmSync(outsideBase, { recursive: true, force: true });
+    return;
+  }
+  // Plant a registry entry whose link is lexically inside docsRoot but the
+  // realpath escapes via the symlink.
+  writeFileSync(
+    join(config.docsRoot, "adr-index.md"),
+    `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 099 | Trojan | exeris-docs | platform | public | accepted (2026-01-01) | [trojan](adr/ADR-099-trojan.md) |
+`,
+    "utf8",
+  );
+
+  try {
+    const tool = tools().get("docs:get_adr")!;
+    const res = await tool.handler({ number: 99 });
+    assert.equal(res.isError, true);
+    const text = (res.content[0] as { text: string }).text;
+    // Must classify as escape, not as benign missing-content/enterprise-private.
+    assert.match(text, /escapes the ecosystem sandbox/);
+    assert.doesNotMatch(text, /enterprise-private/);
+    assert.doesNotMatch(text, /could not be resolved on disk/);
+  } finally {
+    rmSync(outsideBase, { recursive: true, force: true });
+  }
 });
 
 test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () => {

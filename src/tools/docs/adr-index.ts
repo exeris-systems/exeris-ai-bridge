@@ -1,7 +1,9 @@
 // Pure parser for `exeris-docs/adr-index.md`. Reads the canonical pipe-table
 // under the `## Index` heading and returns one entry per row. Stops at the
-// next heading (e.g. `## Cross-repo stubs`) — the second table in that file
-// has a different shape and is intentionally not surfaced through docs:*.
+// next H2 heading (e.g. `## Cross-repo stubs`) — sub-headings (`### …`) and
+// non-row lines (HTML comments, reference-link definitions, blank lines) are
+// skipped, never used as a stop signal. The second table in the file has a
+// different shape and is intentionally not surfaced through docs:*.
 
 export interface AdrStatus {
   /** First whitespace-delimited token of the status cell. */
@@ -41,30 +43,47 @@ export interface AdrEntry {
 const INDEX_HEADING = /^##\s+Index\s*$/;
 const TABLE_ROW = /^\|(.*)\|\s*$/;
 const SEPARATOR_ROW = /^\|\s*-/;
-const NEXT_HEADING = /^#{1,6}\s+/;
+// Only H2 ends the index table — sub-headings like `### Notes` mid-block must
+// not silently truncate the registry.
+const NEXT_H2_HEADING = /^##\s+/;
+const PADDED_NUMBER = /^\d+$/;
 
 const ECOSYSTEM_ORG = "exeris-systems";
 const DEFAULT_BRANCH = "main";
 const OWN_REPO = "exeris-docs";
 
+const EXPECTED_COLUMN_COUNT = 7;
+
+interface ColumnIndex {
+  readonly number: number;
+  readonly title: number;
+  readonly owningRepo: number;
+  readonly scope: number;
+  readonly visibility: number;
+  readonly status: number;
+  readonly link: number;
+}
+
 export function parseAdrIndex(markdown: string): AdrEntry[] {
   const lines = markdown.split(/\r?\n/);
-  let i = findFirstRowIndex(lines);
+  const { columns, firstRowIndex } = findTableHeader(lines);
 
   const entries: AdrEntry[] = [];
-  for (; i < lines.length; i += 1) {
+  for (let i = firstRowIndex; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
-    if (NEXT_HEADING.test(line)) break;
-    if (line.trim() === "") continue;
-    if (!TABLE_ROW.test(line)) break;
+    // Only H2 terminates the table. H3+ and non-row lines are skipped, never
+    // used as a stop signal — protects against in-table maintainer annotations
+    // (HTML comments, ref-link definitions, sub-headings) silently truncating.
+    if (NEXT_H2_HEADING.test(line)) break;
+    if (!TABLE_ROW.test(line)) continue;
 
-    const entry = parseRow(line);
+    const entry = parseRow(line, columns);
     if (entry) entries.push(entry);
   }
   return entries;
 }
 
-function findFirstRowIndex(lines: string[]): number {
+function findTableHeader(lines: string[]): { columns: ColumnIndex; firstRowIndex: number } {
   const headingIdx = lines.findIndex((line) => INDEX_HEADING.test(line));
   if (headingIdx < 0) {
     throw new Error("adr-index.md is missing the '## Index' heading");
@@ -78,37 +97,69 @@ function findFirstRowIndex(lines: string[]): number {
     throw new Error("adr-index.md '## Index' section contains no table");
   }
 
-  // Skip header row.
+  // First TABLE_ROW under the heading is the header row — parse it to
+  // discover column positions by name (defends against a future column
+  // reorder corrupting the entries silently).
+  const columns = parseHeaderColumns(lines[i] ?? "");
   i += 1;
-  // Skip separator row (defensive — also tolerate index files without one).
+
+  // Skip separator row if present (defensive — also tolerate index files
+  // without one).
   if (i < lines.length && SEPARATOR_ROW.test(lines[i] ?? "")) {
     i += 1;
   }
-  return i;
+  return { columns, firstRowIndex: i };
 }
 
-function parseRow(line: string): AdrEntry | null {
+function parseHeaderColumns(headerLine: string): ColumnIndex {
+  const cells = splitRowAny(headerLine).map((c) => c.toLowerCase());
+  const find = (label: string, ...aliases: string[]): number => {
+    for (const name of [label, ...aliases]) {
+      const idx = cells.indexOf(name);
+      if (idx >= 0) return idx;
+    }
+    throw new Error(`adr-index.md header is missing the '${label}' column`);
+  };
+  return {
+    number: find("#", "number", "adr"),
+    title: find("title"),
+    owningRepo: find("owning repo", "owning_repo", "repo"),
+    scope: find("scope"),
+    visibility: find("visibility"),
+    status: find("status"),
+    link: find("link"),
+  };
+}
+
+function parseRow(line: string, columns: ColumnIndex): AdrEntry | null {
   const cells = splitRow(line);
-  if (cells.length < 7) return null;
+  // Require EXACTLY the expected column count. An over-wide row signals a
+  // pipe character leaked into a cell (no escape support in this parser)
+  // and would silently shift every subsequent column — refusing the row
+  // is safer than emitting confidently-wrong data.
+  if (cells.length !== EXPECTED_COLUMN_COUNT) return null;
 
-  const numberPadded = cells[0];
+  const numberPadded = cells[columns.number];
+  // Validate before parseInt — `parseInt('034 (legacy)', 10)` returns 34
+  // and would otherwise emit an entry where number and numberPadded
+  // disagree silently.
+  if (!PADDED_NUMBER.test(numberPadded)) return null;
   const numberInt = Number.parseInt(numberPadded, 10);
-  if (!Number.isFinite(numberInt)) return null;
 
-  const statusRaw = cells[5];
-  const visibility = cells[4];
+  const statusRaw = cells[columns.status];
+  const visibility = cells[columns.visibility];
   return {
     number: numberInt,
     numberPadded,
-    title: cells[1],
-    owningRepo: cells[2],
-    scope: cells[3],
+    title: cells[columns.title],
+    owningRepo: cells[columns.owningRepo],
+    scope: cells[columns.scope],
     visibility,
     status: {
       state: statusRaw.split(/\s+/)[0] ?? "",
       raw: statusRaw,
     },
-    link: parseLink(cells[6], visibility),
+    link: parseLink(cells[columns.link], visibility),
   };
 }
 
@@ -116,31 +167,39 @@ function splitRow(line: string): string[] {
   // Strip outer pipes, split on remaining ones. Pipe-escaping (`\|`) is not
   // used in the real adr-index.md; if a future row ever needs it, this is
   // where to extend the splitter.
+  return splitRowAny(line);
+}
+
+function splitRowAny(line: string): string[] {
   const inner = line.replace(/^\|/, "").replace(/\|\s*$/, "");
   return inner.split("|").map((cell) => cell.trim());
 }
 
 function parseLink(cell: string, visibility: string): AdrLink | null {
-  // Locate the FIRST markdown link `[display](target)` via indexOf rather
-  // than a regex — guarantees O(n) traversal and side-steps Sonar's S5852
-  // false-positive on `[^\]]+...[^)]+` (negated classes don't actually
-  // backtrack catastrophically, but the static analyser flags them).
-  // Cells like the cross-repo-stub table contain multiple links — that
-  // table is filtered out at the heading boundary, but we stay defensive.
-  const openBracket = cell.indexOf("[");
-  if (openBracket < 0) return null;
-  const closeBracket = cell.indexOf("]", openBracket + 1);
-  if (closeBracket < 0) return null;
-  if (cell.charAt(closeBracket + 1) !== "(") return null;
-  const closeParen = cell.indexOf(")", closeBracket + 2);
-  if (closeParen < 0) return null;
+  // Scan the cell for the FIRST well-formed `[display](target)` pair.
+  // Bailing on a single `[note]` (no matching `(...)`) would miss a real
+  // link further along in cells like `[note] see [ADR-042](adr/X.md)`.
+  let cursor = 0;
+  while (cursor < cell.length) {
+    const openBracket = cell.indexOf("[", cursor);
+    if (openBracket < 0) return null;
+    const closeBracket = cell.indexOf("]", openBracket + 1);
+    if (closeBracket < 0) return null;
+    if (cell.charAt(closeBracket + 1) !== "(") {
+      cursor = closeBracket + 1;
+      continue;
+    }
+    const closeParen = cell.indexOf(")", closeBracket + 2);
+    if (closeParen < 0) return null;
 
-  const target = decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim());
-  return {
-    display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()),
-    target,
-    github: deriveGithubUrl(target, visibility),
-  };
+    const target = decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim());
+    return {
+      display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()),
+      target,
+      github: deriveGithubUrl(target, visibility),
+    };
+  }
+  return null;
 }
 
 /**

@@ -64,7 +64,7 @@ test("parseAdrIndex returns link=null when the link cell has no markdown link", 
   assert.equal(reserved.link, null);
 });
 
-test("parseAdrIndex stops at the next heading (cross-repo stubs table)", () => {
+test("parseAdrIndex stops at the next H2 heading (cross-repo stubs table)", () => {
   const withSecondTable = MINIMAL + `
 ## Cross-repo stubs
 
@@ -76,6 +76,110 @@ test("parseAdrIndex stops at the next heading (cross-repo stubs table)", () => {
   // Still 4 — the 020 row from the second table must not leak through.
   assert.equal(entries.length, 4);
   assert.ok(!entries.some((e) => e.number === 20));
+});
+
+test("parseAdrIndex does NOT stop on H3/H4 sub-headings inside the table block", () => {
+  // Maintainer annotation mid-block must not silently truncate the registry.
+  const withSubHeading = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 001 | A | r | s | public | accepted (2026-01-01) | [x](adr/A.md) |
+
+### Reserved block (annotation, not a section break)
+
+| 002 | B | r | s | public | proposed (2026-02-01) | [y](adr/B.md) |
+`;
+  const entries = parseAdrIndex(withSubHeading);
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries.map((e) => e.number), [1, 2]);
+});
+
+test("parseAdrIndex skips HTML comments and non-row lines without truncating", () => {
+  // HTML comments / reference-link defs / random text between rows must not
+  // act as a stop signal — only H2 terminates the table.
+  const withComment = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 001 | A | r | s | public | accepted (2026-01-01) | [x](adr/A.md) |
+<!-- TODO: backfill tags column in 0.3 -->
+[ref]: https://example.com
+| 002 | B | r | s | public | proposed (2026-02-01) | [y](adr/B.md) |
+`;
+  const entries = parseAdrIndex(withComment);
+  assert.equal(entries.length, 2);
+});
+
+test("parseAdrIndex keys cells by header name (column reorder does not corrupt entries)", () => {
+  // Swap Scope and Visibility columns — entries must still report the correct
+  // scope and visibility because the parser reads by header name.
+  const shuffled = `## Index
+
+| # | Title | Owning repo | Visibility | Scope | Status | Link |
+|---|-------|-------------|------------|-------|--------|------|
+| 001 | A | r | enterprise-private | platform | accepted (2026-01-01) | [x](adr/A.md) |
+`;
+  const [entry] = parseAdrIndex(shuffled);
+  assert.equal(entry.visibility, "enterprise-private");
+  assert.equal(entry.scope, "platform");
+  // link.github respects the (correctly-read) visibility.
+  assert.equal(entry.link!.github, null);
+});
+
+test("parseAdrIndex throws when the header is missing a required column", () => {
+  const missingColumn = `## Index
+
+| # | Title | Owning repo | Scope | Status | Link |
+|---|-------|-------------|-------|--------|------|
+| 001 | A | r | s | accepted (2026-01-01) | [x](adr/A.md) |
+`;
+  // No 'visibility' column at all — refuse to guess.
+  assert.throws(() => parseAdrIndex(missingColumn), /missing the 'visibility' column/);
+});
+
+test("parseAdrIndex rejects a row with too many cells (defends against pipe in title)", () => {
+  // A title containing '|' shifts every subsequent column; without escape
+  // support we must refuse the row rather than emit confidently-wrong data.
+  const overWide = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 040 | Sync | Async option | exeris-docs | platform | public | accepted (2026-01-01) | [x](adr/X.md) |
+| 041 | Clean | exeris-docs | platform | public | accepted (2026-01-02) | [y](adr/Y.md) |
+`;
+  const entries = parseAdrIndex(overWide);
+  // ADR-040 (8 cells) refused; ADR-041 (7 cells) accepted.
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].number, 41);
+});
+
+test("parseAdrIndex rejects a numberPadded that is not pure digits", () => {
+  const noisy = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 034 (legacy) | A | r | s | public | accepted (2026-01-01) | [x](adr/A.md) |
+| 035 | B | r | s | public | accepted (2026-01-02) | [y](adr/B.md) |
+`;
+  // Noisy '#' cell silently produced number=34 with mismatched numberPadded
+  // before the validation guard — must now be rejected outright.
+  const entries = parseAdrIndex(noisy);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].numberPadded, "035");
+});
+
+test("parseLink finds a real link past a leading [note] label", () => {
+  const richCell = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 042 | T | r | s | public | accepted (2026-01-01) | [note] see [ADR-042](adr/ADR-042-foo.md) |
+`;
+  const [entry] = parseAdrIndex(richCell);
+  assert.ok(entry.link);
+  assert.equal(entry.link!.display, "ADR-042");
+  assert.equal(entry.link!.target, "adr/ADR-042-foo.md");
 });
 
 test("parseAdrIndex tolerates blank lines inside the table block by skipping them", () => {
