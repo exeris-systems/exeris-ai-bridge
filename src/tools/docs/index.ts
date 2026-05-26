@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import type { BridgeConfig } from "../../config/env.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
@@ -59,9 +59,12 @@ function listAdrsTool(config: BridgeConfig): RegisteredTool {
       // [] silently would let an agent conclude "no <status> ADRs exist" on a
       // misspelling. Surface what states ARE present so the agent can correct.
       if (filtered.length === 0 && entries.length > 0) {
-        const present = [...new Set(entries.map((e) => e.status.state))].sort(
-          (a, b) => a.localeCompare(b),
-        );
+        // Filter out empty-string states (parseRow accepts empty status cells);
+        // an entry with state='' would otherwise produce ", accepted, proposed"
+        // with a leading comma, leaking that incomplete rows exist.
+        const present = [
+          ...new Set(entries.map((e) => e.status.state).filter((s) => s.length > 0)),
+        ].sort((a, b) => a.localeCompare(b));
         return errorResult(
           `No ADRs in the registry have status='${status}'. ` +
             `Known states in the current registry: ${present.join(", ")}.`,
@@ -165,10 +168,18 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
       try {
         body = readFileSync(resolved, "utf8");
       } catch (err) {
+        // err.message embeds the absolute file path (e.g.
+        // "EACCES: permission denied, open '/abs/path/file.md'") — sanitize
+        // before composing the user-facing message so the absolute path
+        // doesn't appear in the trailing reason after the relativized prefix.
+        const reason = sanitizePathsInMessage(
+          err instanceof Error ? err.message : String(err),
+          config,
+        );
         return errorResult(
           `ADR-${entry.numberPadded} ("${entry.title}") link resolves to ` +
             `${relativizeToEcosystem(config, resolved)}, ` +
-            `but the file could not be read: ${(err as Error).message}.`,
+            `but the file could not be read: ${reason}.`,
         );
       }
 
@@ -199,38 +210,56 @@ function pad(n: number): string {
 }
 
 /**
- * Render an absolute path relative to ecosystemRoot for user-facing
- * messages. Avoids leaking operator $HOME / install layout to the agent.
- * Absolute paths still flow through structured logs (when those land) for
- * operator debugging.
+ * Render an absolute path relative to ecosystemRoot for user-facing messages.
+ * Avoids leaking operator $HOME / install layout. Note: a `..`-prefixed
+ * result still reveals the climb depth (e.g. `../../something`) — that's
+ * structural information about how deep ecosystemRoot sits in the operator's
+ * filesystem. Accepted trade-off: post-sandbox paths shouldn't reach this
+ * function with `..` prefixes, so the depth-leak is a degraded-state hint
+ * for an unexpected code path, not the primary surface.
  */
 function relativizeToEcosystem(config: BridgeConfig, absPath: string): string {
   const rel = relative(config.ecosystemRoot, absPath);
   // Empty rel = absPath IS ecosystemRoot itself — return "." rather than the
-  // absolute root path. A `..`-prefixed rel means absPath is outside the
-  // ecosystem (shouldn't happen post-sandbox, but render the `../` form
-  // rather than leaking the full absolute path).
+  // absolute root path.
   if (rel === "") return ".";
   return rel;
+}
+
+/**
+ * Strip the absolute ecosystemRoot prefix from a free-form error message,
+ * substituting `<ecosystem>`. Anchored on a trailing path separator so a
+ * non-boundary prefix doesn't over-replace — e.g. ecosystemRoot=/home/u/dev
+ * must not substitute inside /home/u/development/foo.
+ */
+function sanitizePathsInMessage(message: string, config: BridgeConfig): string {
+  const anchor = config.ecosystemRoot + sep;
+  return message.split(anchor).join("<ecosystem>" + sep);
 }
 
 /**
  * Compose a user-facing message for a registry-read failure without leaking
  * absolute paths. SandboxEscapeError's .message is intentionally path-free;
  * other errors (ENOENT from readFileSync, parser throws) may carry paths in
- * their message string, so those branches relativize-by-substitution.
+ * their message string, so those branches go through sanitizePathsInMessage.
+ *
+ * Side effect: writes a structured stderr line carrying the absolute paths
+ * for operator debugging. Wire-facing message stays sanitized. This is a
+ * placeholder for 0.7.0 observability; until then it gives operators
+ * SOMETHING actionable when a sandbox error happens.
  */
 function describeReadError(err: unknown, config: BridgeConfig): string {
   if (err instanceof SandboxEscapeError) {
+    process.stderr.write(
+      `[exeris-ai-bridge] SandboxEscapeError: root=${err.root} ` +
+        `candidate=${err.candidate} resolved=${err.resolved ?? "<null>"}\n`,
+    );
     return err.resolved === null
       ? "Failed to read adr-index.md: file not found in the configured docs root"
       : "Failed to read adr-index.md: resolved path is outside the ecosystem sandbox";
   }
   const raw = err instanceof Error ? err.message : String(err);
-  // Strip the operator's absolute ecosystem prefix from any path the
-  // underlying error embeds. Bounded substitution; we never widen.
-  const sanitized = raw.split(config.ecosystemRoot).join("<ecosystem>");
-  return `Failed to read adr-index.md: ${sanitized}`;
+  return `Failed to read adr-index.md: ${sanitizePathsInMessage(raw, config)}`;
 }
 
 function missingContentMessage(entry: AdrEntry, config: BridgeConfig, joined: string): string {

@@ -209,14 +209,18 @@ function parseLink(cell: string, visibility: string): AdrLink | null {
     const closeParen = cell.indexOf(")", closeBracket + 2);
     if (closeParen < 0) return null;
 
-    const target = decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim());
-    // `[label]()` and `[label]( )` parse as a structural link but with no
-    // actual target. The AdrLink contract is "null when no link" — return
-    // null here too rather than emit AdrLink with target='' that downstream
-    // would have to special-case.
+    // Trim AFTER decode — otherwise `[label](%20)` decodes to ' ' AFTER the
+    // pre-trim emptiness check passes, smuggling a whitespace target past the
+    // null contract. The double trim is cheap; the second one is the
+    // load-bearing guard.
+    const target = decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim()).trim();
+    // `[label]()`, `[label]( )`, `[label](%20)` all reduce to empty here.
+    // The AdrLink contract is "null when no link" — honour it at the parser
+    // layer rather than emit AdrLink with target='' that downstream would
+    // have to special-case.
     if (target.length === 0) return null;
     return {
-      display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()),
+      display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()).trim(),
       target,
       github: deriveGithubUrl(target, visibility),
     };

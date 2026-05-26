@@ -187,6 +187,22 @@ test("parseAdrIndex returns link=null for [label]() empty-target cells", () => {
   assert.equal(entries[1].link, null);
 });
 
+test("parseAdrIndex returns link=null when the encoded target decodes to whitespace", () => {
+  // `[label](%20)` decodes to ' '. Pre-decode trim leaves '%20' (non-empty);
+  // post-decode trim must re-check to honour the null contract.
+  const encodedSpace = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 060 | EncodedSpace | r | s | public | accepted (2026-01-01) | [label](%20) |
+| 061 | EncodedTab   | r | s | public | accepted (2026-01-02) | [label](%09) |
+`;
+  const entries = parseAdrIndex(encodedSpace);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].link, null);
+  assert.equal(entries[1].link, null);
+});
+
 test("parseAdrIndex rejects a row with too many cells (defends against pipe in title)", () => {
   // A title containing '|' shifts every subsequent column; without escape
   // support we must refuse the row rather than emit confidently-wrong data.
