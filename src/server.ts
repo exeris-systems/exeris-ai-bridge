@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -11,7 +15,13 @@ import { registerKernelTools } from "./tools/kernel/index.js";
 import type { ToolDefinition, ToolHandler } from "./tools/types.js";
 
 const SERVER_NAME = "exeris-ai-bridge";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION: string = (() => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as {
+    version: string;
+  };
+  return pkg.version;
+})();
 
 async function main(): Promise<void> {
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
