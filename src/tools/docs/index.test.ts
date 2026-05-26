@@ -15,8 +15,10 @@ beforeEach(() => {
   base = realpathSync(mkdtempSync(join(tmpdir(), "exeris-docs-h-")));
   const docs = join(base, "exeris-docs");
   const adr = join(docs, "adr");
+  const templates = join(docs, "templates");
   const sibling = join(base, "exeris-kernel", "docs", "adr");
   mkdirSync(adr, { recursive: true });
+  mkdirSync(templates, { recursive: true });
   mkdirSync(sibling, { recursive: true });
 
   writeFileSync(
@@ -36,13 +38,20 @@ beforeEach(() => {
     "utf8",
   );
 
-  writeFileSync(join(adr, "ADR-001-local-a.md"), "# ADR-001 Local A\n\nBody for A.\n", "utf8");
+  writeFileSync(join(adr, "ADR-001-local-a.md"), "# ADR-001 Local A\n\nBody for A.\nThe Wall is mentioned here.\n", "utf8");
   writeFileSync(join(adr, "ADR-002-local-b.md"), "# ADR-002 Local B\n\nBody for B.\n", "utf8");
   writeFileSync(
     join(sibling, "ADR-007-cross.md"),
     "# ADR-007 Cross-repo\n\nBody for cross-repo entry.\n",
     "utf8",
   );
+
+  writeFileSync(join(templates, "ADR-TEMPLATE.md"), "# ADR-NNN TEMPLATE\n\nFill me in.\n", "utf8");
+  writeFileSync(join(templates, "RFC-TEMPLATE.md"), "# RFC TEMPLATE\n\nFill me in.\n", "utf8");
+  writeFileSync(join(templates, "RESEARCH-TEMPLATE.md"), "# RESEARCH TEMPLATE\n\nFill me in.\n", "utf8");
+
+  writeFileSync(join(docs, "high-level-architecture.md"), "# HLA\n\nThree-tier model.\n", "utf8");
+  writeFileSync(join(docs, "b2b-technical-whitepaper.md"), "# Whitepaper\n\nB2B story.\n", "utf8");
 
   config = { docsRoot: docs, ecosystemRoot: base };
 });
@@ -55,10 +64,14 @@ function tools() {
   return new Map(registerDocsTools(config).map((t) => [t.definition.name, t]));
 }
 
-test("registerDocsTools registers docs:list_adrs and docs:get_adr", () => {
+test("registerDocsTools registers all six docs:* tools", () => {
   const t = tools();
   assert.ok(t.has("docs:list_adrs"));
   assert.ok(t.has("docs:get_adr"));
+  assert.ok(t.has("docs:get_template"));
+  assert.ok(t.has("docs:get_hla"));
+  assert.ok(t.has("docs:get_whitepaper"));
+  assert.ok(t.has("docs:search"));
 });
 
 test("docs:list_adrs returns every entry from the registry as JSON text", async () => {
@@ -418,4 +431,172 @@ test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () 
     (res.content[0] as { text: string }).text,
     /escapes the ecosystem sandbox/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// docs:get_template
+
+test("docs:get_template returns the ADR template body", async () => {
+  const tool = tools().get("docs:get_template")!;
+  const res = await tool.handler({ kind: "ADR" });
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# ADR-NNN TEMPLATE/);
+});
+
+test("docs:get_template returns the RFC and RESEARCH templates", async () => {
+  const tool = tools().get("docs:get_template")!;
+  const rfc = await tool.handler({ kind: "RFC" });
+  const research = await tool.handler({ kind: "RESEARCH" });
+  assert.match((rfc.content[0] as { text: string }).text, /^# RFC TEMPLATE/);
+  assert.match((research.content[0] as { text: string }).text, /^# RESEARCH TEMPLATE/);
+});
+
+test("docs:get_template rejects an unknown kind with a clean message", async () => {
+  const tool = tools().get("docs:get_template")!;
+  const res = await tool.handler({ kind: "PRD" });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /'kind' must be one of ADR, RFC, RESEARCH/);
+});
+
+test("docs:get_template rejects a missing or non-string kind", async () => {
+  const tool = tools().get("docs:get_template")!;
+  const res1 = await tool.handler({});
+  const res2 = await tool.handler({ kind: 42 });
+  assert.equal(res1.isError, true);
+  assert.equal(res2.isError, true);
+});
+
+test("docs:get_template returns isError without leaking docsRoot when the template file is missing", async () => {
+  rmSync(join(config.docsRoot, "templates", "ADR-TEMPLATE.md"));
+  const tool = tools().get("docs:get_template")!;
+  const res = await tool.handler({ kind: "ADR" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.ok(!text.includes(config.ecosystemRoot), `leaked ecosystemRoot: ${text}`);
+  assert.match(text, /ADR-TEMPLATE.md/);
+});
+
+// ---------------------------------------------------------------------------
+// docs:get_hla + docs:get_whitepaper
+
+test("docs:get_hla returns the high-level-architecture body", async () => {
+  const tool = tools().get("docs:get_hla")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# HLA/);
+});
+
+test("docs:get_whitepaper returns the whitepaper body", async () => {
+  const tool = tools().get("docs:get_whitepaper")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# Whitepaper/);
+});
+
+test("docs:get_hla returns isError without leaking ecosystemRoot when the file is missing", async () => {
+  rmSync(join(config.docsRoot, "high-level-architecture.md"));
+  const tool = tools().get("docs:get_hla")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.ok(!text.includes(config.ecosystemRoot));
+});
+
+// ---------------------------------------------------------------------------
+// docs:search
+
+test("docs:search finds a literal substring across the docs tree", async () => {
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "The Wall" });
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.ok(payload.hitCount >= 1);
+  assert.ok(payload.hits.some((h: { path: string }) => h.path.endsWith("ADR-001-local-a.md")));
+});
+
+test("docs:search is case-insensitive", async () => {
+  const tool = tools().get("docs:search")!;
+  const upper = await tool.handler({ query: "THE WALL" });
+  const lower = await tool.handler({ query: "the wall" });
+  const upperHits = JSON.parse((upper.content[0] as { text: string }).text).hitCount;
+  const lowerHits = JSON.parse((lower.content[0] as { text: string }).text).hitCount;
+  assert.equal(upperHits, lowerHits);
+  assert.ok(upperHits >= 1);
+});
+
+test("docs:search pathFilter narrows the file set", async () => {
+  const tool = tools().get("docs:search")!;
+  // 'Body' appears in both ADR-001 and ADR-002 in the fixture.
+  const allRes = await tool.handler({ query: "Body" });
+  const allHits = JSON.parse((allRes.content[0] as { text: string }).text);
+  const filteredRes = await tool.handler({ query: "Body", pathFilter: "ADR-001" });
+  const filteredHits = JSON.parse((filteredRes.content[0] as { text: string }).text);
+  assert.ok(allHits.hitCount > filteredHits.hitCount);
+  assert.ok(filteredHits.hits.every((h: { path: string }) => h.path.includes("ADR-001")));
+});
+
+test("docs:search respects maxResults and reports truncated=true when capped", async () => {
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "Body", maxResults: 1 });
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.equal(payload.hitCount, 1);
+  assert.equal(payload.truncated, true);
+});
+
+test("docs:search clamps maxResults above the hard cap", async () => {
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "Body", maxResults: 999_999 });
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  // 200 is the cap; the query won't produce 200 hits but maxResults in the
+  // payload should be clamped.
+  assert.equal(payload.maxResults, 200);
+});
+
+test("docs:search rejects an empty or whitespace-only query", async () => {
+  const tool = tools().get("docs:search")!;
+  const empty = await tool.handler({ query: "" });
+  const blank = await tool.handler({ query: "   " });
+  assert.equal(empty.isError, true);
+  assert.equal(blank.isError, true);
+});
+
+test("docs:search returns hits=[] when nothing matches but request was valid", async () => {
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "x-x-x-no-such-token-x-x-x" });
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.equal(payload.hitCount, 0);
+  assert.deepEqual(payload.hits, []);
+});
+
+test("docs:search includes line number and snippet for each hit", async () => {
+  const tool = tools().get("docs:search")!;
+  const res = await tool.handler({ query: "The Wall" });
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  const hit = payload.hits[0];
+  assert.ok(typeof hit.line === "number" && hit.line >= 1);
+  assert.ok(typeof hit.snippet === "string" && hit.snippet.length > 0);
+  assert.ok(hit.snippet.toLowerCase().includes("the wall"));
+});
+
+test("docs:search skips symlinks that escape the ecosystem (no content served)", async (t) => {
+  const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-outside-search-")));
+  try {
+    const secret = join(outsideBase, "secret.md");
+    writeFileSync(secret, "this is super-secret content with The Wall in it");
+    const linkPath = join(config.docsRoot, "trojan.md");
+    try {
+      symlinkSync(secret, linkPath);
+    } catch {
+      t.skip("symlinkSync not permitted on this platform");
+      return;
+    }
+    const tool = tools().get("docs:search")!;
+    const res = await tool.handler({ query: "super-secret" });
+    const payload = JSON.parse((res.content[0] as { text: string }).text);
+    assert.equal(payload.hitCount, 0);
+    assert.ok(!payload.hits.some((h: { path: string }) => h.path.includes("trojan")));
+  } finally {
+    rmSync(outsideBase, { recursive: true, force: true });
+  }
 });
