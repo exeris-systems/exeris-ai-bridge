@@ -43,15 +43,15 @@ function listAdrsTool(config: BridgeConfig): RegisteredTool {
       },
     },
     handler: async (args) => {
-      const rawStatus = typeof args.status === "string" ? args.status : null;
-      const status = rawStatus !== null ? rawStatus.trim().toLowerCase() : null;
+      const status =
+        typeof args.status === "string" ? args.status.trim().toLowerCase() : "";
       let entries: AdrEntry[];
       try {
         entries = readAdrIndex(config);
       } catch (err) {
-        return errorResult(`Failed to read adr-index.md: ${(err as Error).message}`);
+        return errorResult(describeReadError(err, config));
       }
-      if (status === null || status.length === 0) {
+      if (status.length === 0) {
         return ok(JSON.stringify(entries, null, 2));
       }
       const filtered = entries.filter((e) => e.status.state.toLowerCase() === status);
@@ -59,7 +59,9 @@ function listAdrsTool(config: BridgeConfig): RegisteredTool {
       // [] silently would let an agent conclude "no <status> ADRs exist" on a
       // misspelling. Surface what states ARE present so the agent can correct.
       if (filtered.length === 0 && entries.length > 0) {
-        const present = [...new Set(entries.map((e) => e.status.state))].sort();
+        const present = [...new Set(entries.map((e) => e.status.state))].sort(
+          (a, b) => a.localeCompare(b),
+        );
         return errorResult(
           `No ADRs in the registry have status='${status}'. ` +
             `Known states in the current registry: ${present.join(", ")}.`,
@@ -111,7 +113,7 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
       try {
         entries = readAdrIndex(config);
       } catch (err) {
-        return errorResult(`Failed to read adr-index.md: ${(err as Error).message}`);
+        return errorResult(describeReadError(err, config));
       }
 
       const entry = entries.find((e) => e.number === number);
@@ -204,8 +206,31 @@ function pad(n: number): string {
  */
 function relativizeToEcosystem(config: BridgeConfig, absPath: string): string {
   const rel = relative(config.ecosystemRoot, absPath);
-  if (rel === "" || rel.startsWith("..")) return absPath;
+  // Empty rel = absPath IS ecosystemRoot itself — return "." rather than the
+  // absolute root path. A `..`-prefixed rel means absPath is outside the
+  // ecosystem (shouldn't happen post-sandbox, but render the `../` form
+  // rather than leaking the full absolute path).
+  if (rel === "") return ".";
   return rel;
+}
+
+/**
+ * Compose a user-facing message for a registry-read failure without leaking
+ * absolute paths. SandboxEscapeError's .message is intentionally path-free;
+ * other errors (ENOENT from readFileSync, parser throws) may carry paths in
+ * their message string, so those branches relativize-by-substitution.
+ */
+function describeReadError(err: unknown, config: BridgeConfig): string {
+  if (err instanceof SandboxEscapeError) {
+    return err.resolved === null
+      ? "Failed to read adr-index.md: file not found in the configured docs root"
+      : "Failed to read adr-index.md: resolved path is outside the ecosystem sandbox";
+  }
+  const raw = err instanceof Error ? err.message : String(err);
+  // Strip the operator's absolute ecosystem prefix from any path the
+  // underlying error embeds. Bounded substitution; we never widen.
+  const sanitized = raw.split(config.ecosystemRoot).join("<ecosystem>");
+  return `Failed to read adr-index.md: ${sanitized}`;
 }
 
 function missingContentMessage(entry: AdrEntry, config: BridgeConfig, joined: string): string {

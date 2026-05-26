@@ -52,8 +52,6 @@ const ECOSYSTEM_ORG = "exeris-systems";
 const DEFAULT_BRANCH = "main";
 const OWN_REPO = "exeris-docs";
 
-const EXPECTED_COLUMN_COUNT = 7;
-
 interface ColumnIndex {
   readonly number: number;
   readonly title: number;
@@ -64,9 +62,21 @@ interface ColumnIndex {
   readonly link: number;
 }
 
+interface ParsedHeader {
+  readonly columns: ColumnIndex;
+  /**
+   * Cell count of the header row. Used to validate row width: a row with
+   * a different count signals either a pipe character leaked into a cell
+   * (over-wide, no escape support) or a truncated row (under-wide). This
+   * is computed from the header rather than hardcoded so a legitimate
+   * future column addition (e.g. 'Notes') works without a code change.
+   */
+  readonly expectedCellCount: number;
+}
+
 export function parseAdrIndex(markdown: string): AdrEntry[] {
   const lines = markdown.split(/\r?\n/);
-  const { columns, firstRowIndex } = findTableHeader(lines);
+  const { columns, expectedCellCount, firstRowIndex } = findTableHeader(lines);
 
   const entries: AdrEntry[] = [];
   for (let i = firstRowIndex; i < lines.length; i += 1) {
@@ -77,20 +87,28 @@ export function parseAdrIndex(markdown: string): AdrEntry[] {
     if (NEXT_H2_HEADING.test(line)) break;
     if (!TABLE_ROW.test(line)) continue;
 
-    const entry = parseRow(line, columns);
+    const entry = parseRow(line, columns, expectedCellCount);
     if (entry) entries.push(entry);
   }
   return entries;
 }
 
-function findTableHeader(lines: string[]): { columns: ColumnIndex; firstRowIndex: number } {
+function findTableHeader(
+  lines: string[],
+): { columns: ColumnIndex; expectedCellCount: number; firstRowIndex: number } {
   const headingIdx = lines.findIndex((line) => INDEX_HEADING.test(line));
   if (headingIdx < 0) {
     throw new Error("adr-index.md is missing the '## Index' heading");
   }
 
   let i = headingIdx + 1;
+  // Same H2 boundary discipline as the row-loop — refuse to walk past the
+  // next H2 looking for a table, otherwise an empty '## Index' section would
+  // silently pick up a later section's table.
   while (i < lines.length && !TABLE_ROW.test(lines[i] ?? "")) {
+    if (NEXT_H2_HEADING.test(lines[i] ?? "")) {
+      throw new Error("adr-index.md '## Index' section contains no table before the next H2");
+    }
     i += 1;
   }
   if (i >= lines.length) {
@@ -100,7 +118,7 @@ function findTableHeader(lines: string[]): { columns: ColumnIndex; firstRowIndex
   // First TABLE_ROW under the heading is the header row — parse it to
   // discover column positions by name (defends against a future column
   // reorder corrupting the entries silently).
-  const columns = parseHeaderColumns(lines[i] ?? "");
+  const { columns, expectedCellCount } = parseHeaderColumns(lines[i] ?? "");
   i += 1;
 
   // Skip separator row if present (defensive — also tolerate index files
@@ -108,36 +126,39 @@ function findTableHeader(lines: string[]): { columns: ColumnIndex; firstRowIndex
   if (i < lines.length && SEPARATOR_ROW.test(lines[i] ?? "")) {
     i += 1;
   }
-  return { columns, firstRowIndex: i };
+  return { columns, expectedCellCount, firstRowIndex: i };
 }
 
-function parseHeaderColumns(headerLine: string): ColumnIndex {
-  const cells = splitRowAny(headerLine).map((c) => c.toLowerCase());
+function parseHeaderColumns(headerLine: string): ParsedHeader {
+  const cells = splitRow(headerLine);
+  const lowered = cells.map((c) => c.toLowerCase());
   const find = (label: string, ...aliases: string[]): number => {
     for (const name of [label, ...aliases]) {
-      const idx = cells.indexOf(name);
+      const idx = lowered.indexOf(name);
       if (idx >= 0) return idx;
     }
     throw new Error(`adr-index.md header is missing the '${label}' column`);
   };
   return {
-    number: find("#", "number", "adr"),
-    title: find("title"),
-    owningRepo: find("owning repo", "owning_repo", "repo"),
-    scope: find("scope"),
-    visibility: find("visibility"),
-    status: find("status"),
-    link: find("link"),
+    columns: {
+      number: find("#", "number", "adr"),
+      title: find("title"),
+      owningRepo: find("owning repo", "owning_repo", "repo"),
+      scope: find("scope"),
+      visibility: find("visibility"),
+      status: find("status"),
+      link: find("link"),
+    },
+    expectedCellCount: cells.length,
   };
 }
 
-function parseRow(line: string, columns: ColumnIndex): AdrEntry | null {
+function parseRow(line: string, columns: ColumnIndex, expectedCellCount: number): AdrEntry | null {
   const cells = splitRow(line);
-  // Require EXACTLY the expected column count. An over-wide row signals a
-  // pipe character leaked into a cell (no escape support in this parser)
-  // and would silently shift every subsequent column — refusing the row
-  // is safer than emitting confidently-wrong data.
-  if (cells.length !== EXPECTED_COLUMN_COUNT) return null;
+  // Row must have the same cell count as the header. A mismatch signals
+  // either a pipe character leaked into a cell (over-wide) or a truncated
+  // row (under-wide) — refuse rather than emit confidently-wrong data.
+  if (cells.length !== expectedCellCount) return null;
 
   const numberPadded = cells[columns.number];
   // Validate before parseInt — `parseInt('034 (legacy)', 10)` returns 34
@@ -167,10 +188,6 @@ function splitRow(line: string): string[] {
   // Strip outer pipes, split on remaining ones. Pipe-escaping (`\|`) is not
   // used in the real adr-index.md; if a future row ever needs it, this is
   // where to extend the splitter.
-  return splitRowAny(line);
-}
-
-function splitRowAny(line: string): string[] {
   const inner = line.replace(/^\|/, "").replace(/\|\s*$/, "");
   return inner.split("|").map((cell) => cell.trim());
 }
@@ -193,6 +210,11 @@ function parseLink(cell: string, visibility: string): AdrLink | null {
     if (closeParen < 0) return null;
 
     const target = decodeMaybe(cell.slice(closeBracket + 2, closeParen).trim());
+    // `[label]()` and `[label]( )` parse as a structural link but with no
+    // actual target. The AdrLink contract is "null when no link" — return
+    // null here too rather than emit AdrLink with target='' that downstream
+    // would have to special-case.
+    if (target.length === 0) return null;
     return {
       display: decodeMaybe(cell.slice(openBracket + 1, closeBracket).trim()),
       target,

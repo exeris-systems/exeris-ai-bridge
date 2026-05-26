@@ -170,6 +170,9 @@ test("docs:get_adr rejects zero and negative numbers with a clean error (not 'AD
 });
 
 test("docs:get_adr rejects an empty link target without leaking docsRoot", async () => {
+  // `[empty]()` parses to link=null at the parser layer (empty target is not
+  // a valid link contract), so the handler reaches the "no link in registry"
+  // branch — same protection: docsRoot must not leak in the error message.
   writeFileSync(
     join(config.docsRoot, "adr-index.md"),
     `## Index
@@ -184,8 +187,9 @@ test("docs:get_adr rejects an empty link target without leaking docsRoot", async
   const res = await tool.handler({ number: 50 });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.match(text, /empty link target/);
-  // The docsRoot absolute path must NOT appear in the error message.
+  // Either the parser-side "no link" path or a handler-side "empty target"
+  // message is acceptable; what's NOT acceptable is leaking docsRoot.
+  assert.match(text, /(no link in the registry|empty link target)/);
   assert.ok(!text.includes(config.docsRoot));
 });
 
@@ -200,32 +204,38 @@ test("docs:get_adr error messages render paths relative to ecosystemRoot, not ab
   assert.match(text, /exeris-enterprise/);
 });
 
-test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'missing content')", async () => {
-  // Plant a symlink in docs/adr that points to a file outside the ecosystem.
+test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'missing content')", async (t) => {
+  // Whole setup runs inside try/finally so a partial failure (mkdtemp
+  // succeeds, writeFileSync fails) still cleans up outsideBase.
   const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-outside-")));
-  const outsideFile = join(outsideBase, "trojan.md");
-  writeFileSync(outsideFile, "stolen content");
-  const linkPath = join(config.docsRoot, "adr", "ADR-099-trojan.md");
   try {
-    symlinkSync(outsideFile, linkPath);
-  } catch {
-    rmSync(outsideBase, { recursive: true, force: true });
-    return;
-  }
-  // Plant a registry entry whose link is lexically inside docsRoot but the
-  // realpath escapes via the symlink.
-  writeFileSync(
-    join(config.docsRoot, "adr-index.md"),
-    `## Index
+    const outsideFile = join(outsideBase, "trojan.md");
+    writeFileSync(outsideFile, "stolen content");
+    const linkPath = join(config.docsRoot, "adr", "ADR-099-trojan.md");
+
+    try {
+      symlinkSync(outsideFile, linkPath);
+    } catch {
+      // Loud skip — silently no-op'ing on a platform where symlinkSync isn't
+      // permitted would let the F5 fix get credited as 'tested' in CI runs
+      // where it isn't.
+      t.skip("symlinkSync not permitted on this platform (Windows / sandboxed CI)");
+      return;
+    }
+
+    // Plant a registry entry whose link is lexically inside docsRoot but the
+    // realpath escapes via the symlink.
+    writeFileSync(
+      join(config.docsRoot, "adr-index.md"),
+      `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
 |---|-------|-------------|-------|------------|--------|------|
 | 099 | Trojan | exeris-docs | platform | public | accepted (2026-01-01) | [trojan](adr/ADR-099-trojan.md) |
 `,
-    "utf8",
-  );
+      "utf8",
+    );
 
-  try {
     const tool = tools().get("docs:get_adr")!;
     const res = await tool.handler({ number: 99 });
     assert.equal(res.isError, true);
@@ -237,6 +247,19 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
   } finally {
     rmSync(outsideBase, { recursive: true, force: true });
   }
+});
+
+test("docs:list_adrs registry-read error does not leak ecosystemRoot in the message", async () => {
+  // Force a SandboxEscape on the index path itself (delete the file so
+  // resolveInside fails with SandboxEscapeError(resolved=null)).
+  rmSync(join(config.docsRoot, "adr-index.md"));
+  const tool = tools().get("docs:list_adrs")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.ok(!text.includes(config.ecosystemRoot), `leaked ecosystemRoot: ${text}`);
+  assert.ok(!text.includes(config.docsRoot), `leaked docsRoot: ${text}`);
+  assert.match(text, /Failed to read adr-index.md/);
 });
 
 test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () => {

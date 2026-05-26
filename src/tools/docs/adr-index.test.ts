@@ -138,6 +138,55 @@ test("parseAdrIndex throws when the header is missing a required column", () => 
   assert.throws(() => parseAdrIndex(missingColumn), /missing the 'visibility' column/);
 });
 
+test("parseAdrIndex accepts a legitimate column addition when header AND rows match width", () => {
+  // Adding a 'Notes' column to BOTH the header and every row is a benign
+  // schema extension — parser keys cells by name, the unknown column is
+  // ignored, and rows are accepted because their width matches the header.
+  const wider = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link | Notes |
+|---|-------|-------------|-------|------------|--------|------|-------|
+| 001 | A | r | s | public | accepted (2026-01-01) | [x](adr/A.md) | TBD |
+| 002 | B | r | s | public | proposed (2026-02-01) | [y](adr/B.md) |       |
+`;
+  const entries = parseAdrIndex(wider);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].title, "A");
+});
+
+test("parseAdrIndex throws when '## Index' section is empty (next H2 reached before any table)", () => {
+  // The header-search loop must enforce the same H2 boundary as the row-loop:
+  // a bare '## Index' followed by another H2 should not silently pick up a
+  // later section's table.
+  const empty = `## Index
+
+(no table here yet, just notes)
+
+## Some Other Section
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 001 | A | r | s | public | accepted | [x](adr/A.md) |
+`;
+  assert.throws(() => parseAdrIndex(empty), /'## Index' section contains no table before the next H2/);
+});
+
+test("parseAdrIndex returns link=null for [label]() empty-target cells", () => {
+  // Contract: AdrLink is null when there is no actual link target. An
+  // empty parenthesised body is not a valid link.
+  const emptyTarget = `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 050 | Empty | r | s | public | accepted (2026-01-01) | [label]() |
+| 051 | Spaces | r | s | public | accepted (2026-01-02) | [label](   ) |
+`;
+  const entries = parseAdrIndex(emptyTarget);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].link, null);
+  assert.equal(entries[1].link, null);
+});
+
 test("parseAdrIndex rejects a row with too many cells (defends against pipe in title)", () => {
   // A title containing '|' shifts every subsequent column; without escape
   // support we must refuse the row rather than emit confidently-wrong data.

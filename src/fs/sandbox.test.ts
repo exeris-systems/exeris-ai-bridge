@@ -114,3 +114,17 @@ test("SandboxEscapeError for a missing file has resolved=null", () => {
     assert.equal(err.resolved, null);
   }
 });
+
+test("SandboxEscapeError.message does not embed absolute root/candidate paths", () => {
+  // Callers may echo .message over the MCP wire; absolute paths would leak
+  // operator $HOME and install layout. The structured fields (.root,
+  // .candidate, .resolved) are the only path-bearing surface.
+  try {
+    resolveInside(root, join("..", "outside", "x"));
+    assert.fail("expected SandboxEscapeError");
+  } catch (err) {
+    assert.ok(err instanceof SandboxEscapeError);
+    assert.ok(!err.message.includes(root), `message leaked root: ${err.message}`);
+    assert.ok(!err.message.includes("outside"), `message leaked candidate: ${err.message}`);
+  }
+});
