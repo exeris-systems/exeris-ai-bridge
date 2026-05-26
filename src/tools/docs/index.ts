@@ -169,10 +169,10 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
         body = readFileSync(resolved, "utf8");
       } catch (err) {
         // err.message embeds the absolute file path (e.g.
-        // "EACCES: permission denied, open '/abs/path/file.md'") — sanitize
+        // "EACCES: permission denied, open '/abs/path/file.md'") — redact
         // before composing the user-facing message so the absolute path
         // doesn't appear in the trailing reason after the relativized prefix.
-        const reason = sanitizePathsInMessage(
+        const reason = redactEcosystemPaths(
           err instanceof Error ? err.message : String(err),
           config,
         );
@@ -227,39 +227,62 @@ function relativizeToEcosystem(config: BridgeConfig, absPath: string): string {
 }
 
 /**
- * Strip the absolute ecosystemRoot prefix from a free-form error message,
- * substituting `<ecosystem>`. Anchored on a trailing path separator so a
+ * Strip the ecosystemRoot absolute prefix from a free-form message and
+ * substitute `<ecosystem>`. Anchored on a trailing path separator so a
  * non-boundary prefix doesn't over-replace — e.g. ecosystemRoot=/home/u/dev
  * must not substitute inside /home/u/development/foo.
+ *
+ * SCOPE: this helper only redacts ecosystem-rooted paths. Errors that embed
+ * absolute paths from OUTSIDE the ecosystem (currently unreachable in this
+ * codebase — every read goes through resolveInside) are not stripped.
+ * Defence-in-depth (regex-redact any `/path/to/file.md`) is deliberately
+ * not added here; it would have false positives and a wider blast radius.
  */
-function sanitizePathsInMessage(message: string, config: BridgeConfig): string {
+export function redactEcosystemPaths(message: string, config: BridgeConfig): string {
   const anchor = config.ecosystemRoot + sep;
   return message.split(anchor).join("<ecosystem>" + sep);
+}
+
+/**
+ * Format the operator-debug stderr line carrying SandboxEscape structured
+ * fields. JSON-serialized so control characters in agent-reachable fields
+ * (decoded `%0A` newline, `%1B` ESC, `%07` BEL from a poisoned registry
+ * link target) can't forge log lines or inject ANSI escapes. The output
+ * is a single-line JSON object suitable for log scrapers.
+ */
+export function formatSandboxStderrLine(err: SandboxEscapeError): string {
+  return (
+    JSON.stringify({
+      level: "error",
+      component: "exeris-ai-bridge",
+      event: "SandboxEscape",
+      root: err.root,
+      candidate: err.candidate,
+      resolved: err.resolved,
+    }) + "\n"
+  );
 }
 
 /**
  * Compose a user-facing message for a registry-read failure without leaking
  * absolute paths. SandboxEscapeError's .message is intentionally path-free;
  * other errors (ENOENT from readFileSync, parser throws) may carry paths in
- * their message string, so those branches go through sanitizePathsInMessage.
+ * their message string, so those branches go through redactEcosystemPaths.
  *
- * Side effect: writes a structured stderr line carrying the absolute paths
- * for operator debugging. Wire-facing message stays sanitized. This is a
- * placeholder for 0.7.0 observability; until then it gives operators
+ * Side effect: writes a JSON-serialised stderr line carrying the absolute
+ * paths for operator debugging. Wire-facing message stays sanitized. This
+ * is a placeholder for 0.7.0 observability; until then it gives operators
  * SOMETHING actionable when a sandbox error happens.
  */
 function describeReadError(err: unknown, config: BridgeConfig): string {
   if (err instanceof SandboxEscapeError) {
-    process.stderr.write(
-      `[exeris-ai-bridge] SandboxEscapeError: root=${err.root} ` +
-        `candidate=${err.candidate} resolved=${err.resolved ?? "<null>"}\n`,
-    );
+    process.stderr.write(formatSandboxStderrLine(err));
     return err.resolved === null
       ? "Failed to read adr-index.md: file not found in the configured docs root"
       : "Failed to read adr-index.md: resolved path is outside the ecosystem sandbox";
   }
   const raw = err instanceof Error ? err.message : String(err);
-  return `Failed to read adr-index.md: ${sanitizePathsInMessage(raw, config)}`;
+  return `Failed to read adr-index.md: ${redactEcosystemPaths(raw, config)}`;
 }
 
 function missingContentMessage(entry: AdrEntry, config: BridgeConfig, joined: string): string {

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
 
+import { SandboxEscapeError } from "../../fs/sandbox.js";
 import type { BridgeConfig } from "../../config/env.js";
-import { registerDocsTools } from "./index.js";
+import { formatSandboxStderrLine, redactEcosystemPaths, registerDocsTools } from "./index.js";
 
 let base: string;
 let config: BridgeConfig;
@@ -262,15 +263,13 @@ test("docs:list_adrs registry-read error does not leak ecosystemRoot in the mess
   assert.match(text, /Failed to read adr-index.md/);
 });
 
-test("docs:get_adr readFileSync error sanitizes the embedded absolute path", async () => {
-  // Plant an ADR row whose target points at an existing file we'll then
-  // make unreadable to trigger EACCES (or unlink between resolveInside and
-  // readFileSync to trigger ENOENT). Simpler: write an ADR file then chmod 000.
-  // Cross-platform: skip chmod if it can't actually deny read (root in CI).
-  // Even without EACCES we can simulate by pointing at a directory — readFileSync
-  // on a directory raises EISDIR with the absolute path in the message.
+test("docs:get_adr readFileSync error (EISDIR via directory target) does not leak ecosystemRoot", async () => {
+  // Outcome-level audit: regardless of which error type Node raises (EISDIR
+  // here carries no path in the message; EACCES would carry one), the
+  // wire-facing string never contains ecosystemRoot. Direct
+  // redactEcosystemPaths unit tests above cover the substitution mechanism
+  // itself; this is a defence-in-depth smoke.
   const target = join(config.docsRoot, "adr"); // a directory, not a file
-  // Verify our setup will actually trigger an EISDIR-style failure.
   writeFileSync(
     join(config.docsRoot, "adr-index.md"),
     `## Index
@@ -294,34 +293,80 @@ test("docs:get_adr readFileSync error sanitizes the embedded absolute path", asy
   void target; // silence unused if branch above changes
 });
 
-test("describeReadError substitution is anchored on the path separator (no over-replace)", async () => {
-  // Synthesise a config whose ecosystemRoot is a strict prefix of an unrelated
-  // path. /tmp/exeris-X is the real config root; we craft an adjacent
-  // /tmp/exeris-X-development/ path and confirm the sanitizer DOES NOT replace
-  // inside it.
-  const adjacent = `${config.ecosystemRoot}-development/some/file.md`;
-  // Wire a custom read error by deleting the index AND replacing it with a
-  // file whose parseAdrIndex error message... actually easier: directly call
-  // a fresh handler with a synthetic ecosystemRoot mismatch isn't worth it
-  // for unit purposes. Instead, exercise the SUT directly: import sanitize
-  // helper isn't exported, so we exercise via integration.
+test("redactEcosystemPaths replaces the ecosystemRoot+sep prefix with <ecosystem>", () => {
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  assert.equal(
+    redactEcosystemPaths("ENOENT: open '/x/dev/exeris-docs/foo.md'", c),
+    "ENOENT: open '<ecosystem>/exeris-docs/foo.md'",
+  );
+});
 
-  // Plant adr-index.md whose internal error doesn't mention the path, but
-  // construct a synthetic err to verify via a separate codepath.
-  // Simpler test: directly use the public observable — when adr-index.md
-  // is missing, the SandboxEscapeError-driven message must not contain ANY
-  // adjacent-path substring. (Adjacent isn't constructed; just assert the
-  // safe path remains safe.)
+test("redactEcosystemPaths does NOT over-replace when ecosystemRoot is a non-boundary prefix of another path", () => {
+  // The whole point of anchoring on `ecosystemRoot + sep`: /x/dev must not
+  // match inside /x/development/foo. Pre-anchor substitution produced
+  // "<ecosystem>elopment/foo" — both malformed AND leaked the adjacent
+  // path's existence.
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  const message = "ENOENT: no such file, open '/x/development/foo.md'";
+  assert.equal(redactEcosystemPaths(message, c), message);
+});
+
+test("redactEcosystemPaths leaves messages with no ecosystemRoot prefix unchanged", () => {
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  assert.equal(redactEcosystemPaths("EISDIR: illegal operation", c), "EISDIR: illegal operation");
+  assert.equal(redactEcosystemPaths("adr-index.md missing", c), "adr-index.md missing");
+});
+
+test("formatSandboxStderrLine produces a single-line JSON object with structured fields", () => {
+  const err = new SandboxEscapeError("/r", "candidate.md", "/r/candidate.md");
+  const line = formatSandboxStderrLine(err);
+  // Exactly one trailing newline, nothing in the middle.
+  assert.ok(line.endsWith("\n"));
+  assert.equal(line.match(/\n/g)?.length, 1);
+  const parsed = JSON.parse(line.slice(0, -1));
+  assert.equal(parsed.level, "error");
+  assert.equal(parsed.component, "exeris-ai-bridge");
+  assert.equal(parsed.event, "SandboxEscape");
+  assert.equal(parsed.root, "/r");
+  assert.equal(parsed.candidate, "candidate.md");
+  assert.equal(parsed.resolved, "/r/candidate.md");
+});
+
+test("formatSandboxStderrLine neutralises control chars in agent-reachable fields (no log forging / ANSI injection)", () => {
+  // Threat model: a poisoned exeris-docs entry like `[label](trojan%0A[exeris-ai-bridge] fake.md)`
+  // decodes to a candidate containing a real newline. Without JSON-escaping,
+  // the stderr write would emit two lines: the real one + a forged
+  // "[exeris-ai-bridge] fake.md" that a log scraper would parse as another
+  // bridge log line. Same vector for ANSI escapes (clear-screen etc).
+  const malicious = new SandboxEscapeError(
+    "/root",
+    "trojan.md\n[exeris-ai-bridge] forged log line\x1b[2J",
+    null,
+  );
+  const line = formatSandboxStderrLine(malicious);
+  // Only the trailing newline survives.
+  assert.equal(line.match(/\n/g)?.length, 1);
+  // ESC byte is encoded; no raw \x1b leaks through.
+  assert.ok(!line.includes("\x1b"));
+  // The forged-line text appears in the JSON string-encoded form, NOT as a
+  // separate bare log line.
+  const parsed = JSON.parse(line.slice(0, -1));
+  assert.match(parsed.candidate, /forged log line/);
+});
+
+test("docs:list_adrs missing-index error never contains the ecosystem path or an over-replace artefact", async () => {
+  // Outcome smoke: the SandboxError branch is path-free by design; the
+  // non-Sandbox redaction branch is exercised by redactEcosystemPaths unit
+  // tests above. This test catches regressions where future error wrapping
+  // accidentally interpolates a raw path through some other code path.
   rmSync(join(config.docsRoot, "adr-index.md"));
   const tool = tools().get("docs:list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  // The fundamental guarantee: ecosystemRoot string is absent.
   assert.ok(!text.includes(config.ecosystemRoot));
-  // And specifically, no '<ecosystem>elopment' or similar over-replace artefact.
+  // No '<ecosystem>elopment' or similar over-replace artefact.
   assert.doesNotMatch(text, /<ecosystem>[a-zA-Z0-9]/);
-  void adjacent;
 });
 
 test("docs:list_adrs 'Known states' message filters out empty status strings", async () => {

@@ -13,9 +13,16 @@ export interface AdrStatus {
 }
 
 export interface AdrLink {
-  /** URL-decoded display text from `[display](target)`. */
+  /**
+   * URL-decoded display text from `[display](target)`, trimmed of outer
+   * whitespace. Internal whitespace is preserved.
+   */
   readonly display: string;
-  /** URL-decoded link target, as-written (may be relative or absolute). */
+  /**
+   * URL-decoded link target, trimmed of outer whitespace. The double-trim
+   * (before and after decode) ensures `[label](%20)` reduces to empty and
+   * triggers the `null` contract below rather than emitting target=' '.
+   */
   readonly target: string;
   /**
    * Public GitHub URL pointing at the ADR on `main`. `null` for
