@@ -925,3 +925,51 @@ test("docs:search skips symlinks that escape the ecosystem (no content served)",
     rmSync(outsideBase, { recursive: true, force: true });
   }
 });
+
+test("docs:get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_docs — no misattributed content)", async (t) => {
+  // Reviewer's re-review finding #1: list_repo_docs explicitly rejects
+  // symlinked repo dirs, but get_repo_doc previously served their content
+  // under the symlinked name. Closed in 8511bb0 via the shared
+  // resolveRepoDocsRoot helper. This test pins down the behaviour so a
+  // future refactor that bypasses the helper would break loudly.
+  seedSiblingRepoFixture("exeris-kernel", {
+    "subsystems/persistence.md": "# Persistence — real-target content",
+  });
+  const aliasPath = join(config.ecosystemRoot, "exeris-alias");
+  try {
+    symlinkSync(join(config.ecosystemRoot, "exeris-kernel"), aliasPath);
+  } catch {
+    t.skip("symlinkSync not permitted on this platform");
+    return;
+  }
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-alias", path: "subsystems/persistence.md" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /not present as a real directory/);
+  // Negative assertion — the symlinked alias must NOT surface the
+  // underlying kernel doc body.
+  assert.ok(!text.includes("real-target content"));
+});
+
+test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_repo_docs)", async (t) => {
+  // Same scenario as above but the symlink is at the docs/ level
+  // (e.g. exeris-cousin exists as a real dir but its docs/ points to a
+  // sibling's docs tree). resolveRepoDocsRoot rejects this too.
+  const cousinDir = join(config.ecosystemRoot, "exeris-cousin");
+  mkdirSync(cousinDir, { recursive: true });
+  seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK real-target guide" });
+  const cousinDocsLink = join(cousinDir, "docs");
+  try {
+    symlinkSync(join(config.ecosystemRoot, "exeris-sdk", "docs"), cousinDocsLink);
+  } catch {
+    t.skip("symlinkSync not permitted on this platform");
+    return;
+  }
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-cousin", path: "guide.md" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /no real docs\/ directory/);
+  assert.ok(!text.includes("real-target guide"));
+});
