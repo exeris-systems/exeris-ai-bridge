@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -833,9 +834,11 @@ test("docs:get_repo_doc rejects repo='exeris-docs' with a hint to use registry t
 test("docs:list_repos with a non-existent ecosystemRoot actually exercises the readdirSync catch", async () => {
   // Reviewer's #15: the previous test used a real-but-empty tmpdir, which
   // doesn't throw — it returns []. To genuinely exercise the try/catch we
-  // need readdirSync to fail. A long unique random path that definitely
-  // doesn't exist does it.
-  const fakeRoot = "/__exeris-bridge-does-not-exist-" + Math.random().toString(36).slice(2) + "__";
+  // need readdirSync to fail. A long unique path that definitely doesn't
+  // exist does it. randomUUID (not Math.random) silences SonarCloud's
+  // PRNG hotspot — collision resistance is irrelevant here, but the cost
+  // of swapping is zero and security-scanner noise is real.
+  const fakeRoot = "/__exeris-bridge-does-not-exist-" + randomUUID() + "__";
   const altConfig: BridgeConfig = { docsRoot: fakeRoot, ecosystemRoot: fakeRoot };
   const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
   const res = await altTool.handler({});
