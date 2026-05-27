@@ -615,7 +615,7 @@ test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory
   assert.ok(!payload.repos.includes("exeris-tooling"));
   // exeris-docs is the docsRoot itself; it shows up if it has docs/ (which
   // it doesn't here) — assert only that the discovery is deterministic.
-  assert.deepEqual([...payload.repos].sort(), payload.repos);
+  assert.deepEqual([...payload.repos].sort((a: string, b: string) => a.localeCompare(b)), payload.repos);
 });
 
 test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
@@ -694,7 +694,7 @@ test("docs:get_repo_doc rejects path traversal in the 'path' argument", async ()
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
   // Either sandbox rejects, or file not found — never a successful read.
-  assert.ok(!text.includes("/etc/passwd") || text.match(/sandbox|not found/));
+  assert.ok(!text.includes("/etc/passwd") || /sandbox|not found/.test(text));
 });
 
 test("docs:get_repo_doc rejects malformed inputs", async () => {

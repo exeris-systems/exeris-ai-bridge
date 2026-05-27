@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { BridgeConfig } from "../../config/env.js";
@@ -335,20 +335,8 @@ function searchTool(config: BridgeConfig): RegisteredTool {
       },
     },
     handler: async (args) => {
-      const queryRaw = typeof args.query === "string" ? args.query : "";
-      const query = queryRaw.trim();
-      if (query.length === 0) {
-        return errorResult("Invalid input: 'query' must be a non-empty string");
-      }
-      const queryLower = query.toLowerCase();
-
-      const pathFilter =
-        typeof args.pathFilter === "string" ? args.pathFilter.trim() : "";
-
-      let maxResults: number = SEARCH_MAX_RESULTS_DEFAULT;
-      if (typeof args.maxResults === "number" && Number.isInteger(args.maxResults)) {
-        maxResults = Math.max(1, Math.min(args.maxResults, SEARCH_MAX_RESULTS_CAP));
-      }
+      const parsed = parseSearchArgs(args);
+      if ("error" in parsed) return parsed.error;
 
       // Explicit docsRoot readability check — walkMarkdownFiles silently
       // swallows readdirSync errors per-directory; without this, a missing
@@ -360,85 +348,28 @@ function searchTool(config: BridgeConfig): RegisteredTool {
         );
       }
 
-      const files = walkDocsRoot(config);
-
-      const hits: SearchHit[] = [];
-      let totalBytes = 0;
+      const state: SearchScanState = { hits: [], totalBytes: 0, skippedOversize: false };
       let truncated = false;
-      let skippedOversize = false;
-
-      for (const absPath of files) {
-        if (hits.length >= maxResults) break;
-        if (totalBytes >= SEARCH_MAX_TOTAL_BYTES) {
+      for (const absPath of walkDocsRoot(config)) {
+        if (state.hits.length >= parsed.maxResults) break;
+        if (state.totalBytes >= SEARCH_MAX_TOTAL_BYTES) {
           truncated = true;
           break;
         }
-
         const rel = relative(config.docsRoot, absPath);
-        if (pathFilter.length > 0 && !rel.includes(pathFilter)) continue;
-
-        // Defence-in-depth: re-route through sandbox before reading.
-        // Sandbox is docsRoot (not ecosystemRoot) — search is scoped to the
-        // docs tree per the tool description; a symlink under docsRoot
-        // pointing to a sibling repo would silently broaden the surface.
-        let resolved: string;
-        try {
-          resolved = resolveInside(config.docsRoot, absPath);
-        } catch {
-          continue;
-        }
-
-        // statSync BEFORE readFileSync — the per-file size cap must protect
-        // memory, not just filter post-hoc. A multi-GB .md (legit growth
-        // or planted) would OOM the Node process if read first.
-        let size: number;
-        try {
-          size = statSync(resolved).size;
-        } catch {
-          continue;
-        }
-        if (size > SEARCH_MAX_BYTES_PER_FILE) {
-          // Track oversize-skips so `truncated` honestly reflects "some
-          // content was not scanned"; a clean `truncated:false` payload
-          // promised "all matches returned" and would be a false negative.
-          skippedOversize = true;
-          continue;
-        }
-
-        let body: string;
-        try {
-          body = readFileSync(resolved, "utf8");
-        } catch {
-          continue;
-        }
-        totalBytes += body.length;
-
-        const lines = body.split(/\r?\n/);
-        for (let i = 0; i < lines.length; i += 1) {
-          if (hits.length >= maxResults) break;
-          const line = lines[i];
-          if (line.toLowerCase().includes(queryLower)) {
-            hits.push({
-              path: rel,
-              line: i + 1,
-              snippet:
-                line.length > SEARCH_MAX_SNIPPET_LEN
-                  ? line.slice(0, SEARCH_MAX_SNIPPET_LEN) + "…"
-                  : line,
-            });
-          }
-        }
+        if (parsed.pathFilter.length > 0 && !rel.includes(parsed.pathFilter)) continue;
+        scanSearchCandidate(config, absPath, rel, parsed, state);
       }
 
       return ok(
         JSON.stringify(
           {
-            query,
-            pathFilter: pathFilter.length > 0 ? pathFilter : null,
-            maxResults,
-            hitCount: hits.length,
-            truncated: truncated || skippedOversize || hits.length >= maxResults,
-            hits,
+            query: parsed.query,
+            pathFilter: parsed.pathFilter.length > 0 ? parsed.pathFilter : null,
+            maxResults: parsed.maxResults,
+            hitCount: state.hits.length,
+            truncated: truncated || state.skippedOversize || state.hits.length >= parsed.maxResults,
+            hits: state.hits,
           },
           null,
           2,
@@ -446,6 +377,102 @@ function searchTool(config: BridgeConfig): RegisteredTool {
       );
     },
   };
+}
+
+interface SearchParams {
+  query: string;
+  queryLower: string;
+  pathFilter: string;
+  maxResults: number;
+}
+
+interface SearchScanState {
+  hits: SearchHit[];
+  totalBytes: number;
+  skippedOversize: boolean;
+}
+
+function parseSearchArgs(
+  args: Record<string, unknown>,
+): SearchParams | { error: ReturnType<typeof errorResult> } {
+  const queryRaw = typeof args.query === "string" ? args.query : "";
+  const query = queryRaw.trim();
+  if (query.length === 0) {
+    return { error: errorResult("Invalid input: 'query' must be a non-empty string") };
+  }
+  const pathFilter = typeof args.pathFilter === "string" ? args.pathFilter.trim() : "";
+  let maxResults: number = SEARCH_MAX_RESULTS_DEFAULT;
+  if (typeof args.maxResults === "number" && Number.isInteger(args.maxResults)) {
+    maxResults = Math.max(1, Math.min(args.maxResults, SEARCH_MAX_RESULTS_CAP));
+  }
+  return { query, queryLower: query.toLowerCase(), pathFilter, maxResults };
+}
+
+/**
+ * Resolve, size-check, and scan one candidate file, pushing matches into
+ * `state.hits` up to `params.maxResults`. Sandbox check is on docsRoot
+ * (not ecosystemRoot) — search is scoped to the docs tree per the tool
+ * description; a symlink under docsRoot pointing to a sibling repo would
+ * silently broaden the surface. statSync runs BEFORE readFileSync so a
+ * multi-GB .md (legit growth or planted) cannot OOM the Node process.
+ */
+function scanSearchCandidate(
+  config: BridgeConfig,
+  absPath: string,
+  rel: string,
+  params: SearchParams,
+  state: SearchScanState,
+): void {
+  let resolved: string;
+  try {
+    resolved = resolveInside(config.docsRoot, absPath);
+  } catch {
+    return;
+  }
+  let size: number;
+  try {
+    size = statSync(resolved).size;
+  } catch {
+    return;
+  }
+  if (size > SEARCH_MAX_BYTES_PER_FILE) {
+    // Track oversize-skips so `truncated` honestly reflects "some content
+    // was not scanned"; a clean `truncated:false` payload would otherwise
+    // promise "all matches returned" and be a false negative.
+    state.skippedOversize = true;
+    return;
+  }
+  let body: string;
+  try {
+    body = readFileSync(resolved, "utf8");
+  } catch {
+    return;
+  }
+  state.totalBytes += body.length;
+  appendMatchingLines(body, rel, params, state);
+}
+
+function appendMatchingLines(
+  body: string,
+  rel: string,
+  params: SearchParams,
+  state: SearchScanState,
+): void {
+  const lines = body.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (state.hits.length >= params.maxResults) break;
+    const line = lines[i];
+    if (line.toLowerCase().includes(params.queryLower)) {
+      state.hits.push({
+        path: rel,
+        line: i + 1,
+        snippet:
+          line.length > SEARCH_MAX_SNIPPET_LEN
+            ? line.slice(0, SEARCH_MAX_SNIPPET_LEN) + "…"
+            : line,
+      });
+    }
+  }
 }
 
 /**
@@ -503,41 +530,15 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
-      if (repo === REPO_NAME_DOCS_SELF) {
-        return errorResult(
-          `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools, not the per-repo surface. ` +
-            `Use docs:list_adrs / docs:get_hla / docs:search etc. instead.`,
-        );
-      }
+      const selfErr = rejectDocsSelfRepo(repo, "list_repo_docs");
+      if (selfErr) return selfErr;
 
-      // Conservative symlink posture (matches discoverReposWithDocs):
-      // a symlinked repo dir or symlinked docs/ would silently re-attribute
-      // another location's files under the queried repo name. Reject up-front
-      // rather than walk the resolved realpath.
-      const repoDirAbs = join(config.ecosystemRoot, repo);
-      if (!isRealDirectory(repoDirAbs) || isSymlink(repoDirAbs)) {
-        return errorResult(`Repo '${repo}' is not present as a real directory in the ecosystem checkout.`);
-      }
-      const repoDocsAbs = join(repoDirAbs, REPO_DOCS_DIRNAME);
-      if (!isRealDirectory(repoDocsAbs) || isSymlink(repoDocsAbs)) {
-        return errorResult(`Repo '${repo}' has no real docs/ directory (missing or symlinked).`);
-      }
+      const rootRes = resolveRepoDocsRoot(config, repo);
+      if (rootRes.kind === "err") return rootRes.error;
+      const root = rootRes.root;
 
-      let resolved: string;
-      try {
-        resolved = resolveInside(config.ecosystemRoot, repoDocsAbs);
-      } catch (err) {
-        if (err instanceof SandboxEscapeError) {
-          process.stderr.write(formatSandboxStderrLine(err));
-          return errorResult(
-            `Repo '${repo}' has no docs/ directory or is not present in the ecosystem checkout.`,
-          );
-        }
-        throw err;
-      }
-
-      const docs = walkMarkdownFiles(resolved, SEARCH_MAX_FILES_VISITED)
-        .map((abs) => relative(resolved, abs))
+      const docs = walkMarkdownFiles(root, SEARCH_MAX_FILES_VISITED)
+        .map((abs) => relative(root, abs))
         // Exclude exactly the `adr/` subtree — its entries are registry
         // content flowing through docs:get_adr. ADR-adjacent dirs
         // (adr-drafts/, adr-extras/, adr-archive/) and `adr.md` (meta-doc
@@ -580,56 +581,22 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
-      if (repo === REPO_NAME_DOCS_SELF) {
-        return errorResult(
-          `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
-            `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
-            `Use those instead of docs:get_repo_doc.`,
-        );
-      }
+      const selfErr = rejectDocsSelfRepo(repo, "get_repo_doc");
+      if (selfErr) return selfErr;
 
       if (typeof args.path !== "string" || args.path.trim().length === 0) {
         return errorResult("Invalid input: 'path' must be a non-empty string");
       }
       const trimmedPath = args.path.trim();
+      const fastAdr = adrFastPathError(trimmedPath);
+      if (fastAdr) return fastAdr;
 
-      // Fast-path ADR redirect: covers the common case (literal `adr/`-prefixed
-      // input) so an agent typing a non-existent ADR path still gets the
-      // helpful "use docs:get_adr" hint instead of "not found". The
-      // post-resolution guard below is the load-bearing security check —
-      // it catches normalised (./adr/...), traversal (foo/../adr/...),
-      // case-insensitive (ADR/... on macOS/Windows FS), and backslash
-      // (adr\... on Windows after join normalisation) bypasses.
-      const lowerLiteral = trimmedPath.toLowerCase();
-      if (
-        lowerLiteral === REPO_DOCS_ADR_SUBDIR ||
-        lowerLiteral.startsWith(REPO_DOCS_ADR_SUBDIR + "/") ||
-        lowerLiteral.startsWith(REPO_DOCS_ADR_SUBDIR + sep)
-      ) {
-        return errorResult(
-          `'${trimmedPath}' is an ADR path; use docs:get_adr with the ADR number instead.`,
-        );
-      }
+      const rootRes = resolveRepoDocsRoot(config, repo);
+      if (rootRes.kind === "err") return rootRes.error;
+      const repoDocsRoot = rootRes.root;
 
-      // Step 1: sandbox repoDocsRoot inside ecosystemRoot. After this the
-      // per-path sandbox uses repoDocsRoot — NOT ecosystemRoot — so `..` in
-      // `path` cannot reach cross-repo content (which would defeat the
-      // tool's documented scope and bypass docs:get_adr's registry flow).
-      const repoDocsAbs = join(config.ecosystemRoot, repo, REPO_DOCS_DIRNAME);
-      let repoDocsRoot: string;
-      try {
-        repoDocsRoot = resolveInside(config.ecosystemRoot, repoDocsAbs);
-      } catch (err) {
-        if (err instanceof SandboxEscapeError) {
-          process.stderr.write(formatSandboxStderrLine(err));
-          return errorResult(
-            `Repo '${repo}' has no docs/ directory or is not present in the ecosystem checkout.`,
-          );
-        }
-        throw err;
-      }
-
-      // Step 2: sandbox the user-supplied path INSIDE repoDocsRoot.
+      // Sandbox the user-supplied path INSIDE repoDocsRoot — NOT
+      // ecosystemRoot — so `..` in `path` cannot reach cross-repo content.
       const joined = join(repoDocsRoot, trimmedPath);
       let resolved: string;
       try {
@@ -646,20 +613,8 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
         throw err;
       }
 
-      // ADR-guard runs AFTER resolution so it catches:
-      //   ./adr/X.md, foo/../adr/X.md  → normalise to adr/X.md → caught
-      //   ADR/x.md on case-insensitive FS → realpath lands at adr/x.md → caught
-      //   adr\X.md on Windows           → join normalises → caught
-      // The check is on the lowercased relative-from-repoDocsRoot path with
-      // platform-aware separator. `adr.md` (a meta-doc about ADRs, NOT an
-      // ADR record) is NOT excluded — it's not in the registry.
-      const relFromRepoDocs = relative(repoDocsRoot, resolved);
-      const lowerRel = relFromRepoDocs.toLowerCase();
-      if (lowerRel === REPO_DOCS_ADR_SUBDIR || lowerRel.startsWith(REPO_DOCS_ADR_SUBDIR + sep)) {
-        return errorResult(
-          `'${relFromRepoDocs}' is an ADR path; use docs:get_adr with the ADR number instead.`,
-        );
-      }
+      const adrGuardErr = adrPostResolveGuard(repoDocsRoot, resolved);
+      if (adrGuardErr) return adrGuardErr;
 
       try {
         return ok(readFileSync(resolved, "utf8"));
@@ -674,6 +629,94 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
       }
     },
   };
+}
+
+type RepoDocsRootResult =
+  | { kind: "ok"; root: string }
+  | { kind: "err"; error: ReturnType<typeof errorResult> };
+
+/**
+ * Validate that `<ecosystemRoot>/<repo>/docs` exists as a real directory
+ * (not a symlink at either level) and sandbox-resolve it inside the
+ * ecosystem. Shared by `docs:list_repo_docs` and `docs:get_repo_doc` so
+ * discovery and fetch agree on what counts as a real repo — preventing
+ * the agent from getting symlinked content under a misattributed name.
+ */
+function resolveRepoDocsRoot(config: BridgeConfig, repo: string): RepoDocsRootResult {
+  const repoDirAbs = join(config.ecosystemRoot, repo);
+  if (!isRealDirectory(repoDirAbs) || isSymlink(repoDirAbs)) {
+    return {
+      kind: "err",
+      error: errorResult(`Repo '${repo}' is not present as a real directory in the ecosystem checkout.`),
+    };
+  }
+  const repoDocsAbs = join(repoDirAbs, REPO_DOCS_DIRNAME);
+  if (!isRealDirectory(repoDocsAbs) || isSymlink(repoDocsAbs)) {
+    return {
+      kind: "err",
+      error: errorResult(`Repo '${repo}' has no real docs/ directory (missing or symlinked).`),
+    };
+  }
+  try {
+    return { kind: "ok", root: resolveInside(config.ecosystemRoot, repoDocsAbs) };
+  } catch (err) {
+    if (err instanceof SandboxEscapeError) {
+      process.stderr.write(formatSandboxStderrLine(err));
+      return {
+        kind: "err",
+        error: errorResult(
+          `Repo '${repo}' has no docs/ directory or is not present in the ecosystem checkout.`,
+        ),
+      };
+    }
+    throw err;
+  }
+}
+
+function rejectDocsSelfRepo(repo: string, toolSuffix: string): ReturnType<typeof errorResult> | null {
+  if (repo !== REPO_NAME_DOCS_SELF) return null;
+  return errorResult(
+    `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
+      `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
+      `Use those instead of docs:${toolSuffix}.`,
+  );
+}
+
+/**
+ * Fast-path ADR redirect on raw input — covers the common case (literal
+ * `adr/`-prefixed input) so an agent typing a non-existent ADR path gets
+ * the helpful hint instead of "not found". The post-resolution guard is
+ * the load-bearing security check; this is UX.
+ */
+function adrFastPathError(trimmedPath: string): ReturnType<typeof errorResult> | null {
+  const lower = trimmedPath.toLowerCase();
+  if (
+    lower === REPO_DOCS_ADR_SUBDIR ||
+    lower.startsWith(REPO_DOCS_ADR_SUBDIR + "/") ||
+    lower.startsWith(REPO_DOCS_ADR_SUBDIR + sep)
+  ) {
+    return errorResult(
+      `'${trimmedPath}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+    );
+  }
+  return null;
+}
+
+/**
+ * Post-resolution ADR guard. Catches normalised (./adr/...), traversal
+ * (foo/../adr/...), case-insensitive (ADR/... on macOS/Windows FS), and
+ * backslash (adr\... on Windows) bypasses of the fast-path. `adr.md`
+ * (a meta-doc about ADRs, NOT an ADR record) is NOT excluded.
+ */
+function adrPostResolveGuard(repoDocsRoot: string, resolved: string): ReturnType<typeof errorResult> | null {
+  const relFromRepoDocs = relative(repoDocsRoot, resolved);
+  const lowerRel = relFromRepoDocs.toLowerCase();
+  if (lowerRel === REPO_DOCS_ADR_SUBDIR || lowerRel.startsWith(REPO_DOCS_ADR_SUBDIR + sep)) {
+    return errorResult(
+      `'${relFromRepoDocs}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+    );
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -695,24 +738,34 @@ function walkMarkdownFiles(rootAbs: string, maxFiles: number): string[] {
   const stack: string[] = [rootAbs];
   while (stack.length > 0 && out.length < maxFiles) {
     const current = stack.pop()!;
-    let entries;
+    let entries: Dirent[];
     try {
       entries = readdirSync(current, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const entry of entries) {
-      if (out.length >= maxFiles) break;
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      const full = join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        out.push(full);
-      }
-    }
+    collectWalkEntries(current, entries, out, stack, maxFiles);
   }
   return out;
+}
+
+function collectWalkEntries(
+  current: string,
+  entries: Dirent[],
+  out: string[],
+  stack: string[],
+  maxFiles: number,
+): void {
+  for (const entry of entries) {
+    if (out.length >= maxFiles) break;
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const full = join(current, entry.name);
+    if (entry.isDirectory()) {
+      stack.push(full);
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      out.push(full);
+    }
+  }
 }
 
 /**
