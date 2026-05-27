@@ -973,3 +973,84 @@ test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_re
   assert.match(text, /no real docs\/ directory/);
   assert.ok(!text.includes("real-target guide"));
 });
+
+// ---------------------------------------------------------------------------
+// ADR-025 §What is NOT in scope — enterprise + private registry exclusion.
+// Reviewer's 4th pass identified that REPO_NAME_RE happily admits
+// `exeris-*-enterprise`, `exeris-enterprise-*`, and `exeris-business`
+// despite ADR-025:66 declaring the bridge "fully public". These tests
+// pin the policy: such repos MUST be silently absent from list_repos and
+// MUST be rejected by both per-repo handlers with a hint pointing at the
+// future exeris-ai-bridge-enterprise repo (per ADR-020 / ADR-018 split).
+
+test("docs:list_repos silently excludes enterprise-tier siblings (ADR-025 fully-public scope)", async () => {
+  // Plant docs/ in each restricted shape so discovery cannot find them by
+  // accident of "no docs/ subdirectory". They must be excluded by NAME.
+  seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "# private" });
+  seedSiblingRepoFixture("exeris-benchmarks-enterprise", { "track.md": "# private" });
+  seedSiblingRepoFixture("exeris-enterprise-observability", { "decoder.md": "# private" });
+  seedSiblingRepoFixture("exeris-business", { "decisions.md": "# private" });
+  // Sanity baseline: a plain public sibling that SHOULD appear.
+  seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK" });
+
+  const tool = tools().get("docs:list_repos")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse((res.content[0] as { text: string }).text);
+  assert.ok(payload.repos.includes("exeris-sdk"), "public sibling must be listed");
+  for (const denied of [
+    "exeris-kernel-enterprise",
+    "exeris-benchmarks-enterprise",
+    "exeris-enterprise-observability",
+    "exeris-business",
+  ]) {
+    assert.ok(
+      !payload.repos.includes(denied),
+      `restricted repo '${denied}' must NOT appear in list_repos output`,
+    );
+  }
+});
+
+test("docs:get_repo_doc rejects *-enterprise siblings with ADR-025 hint (no content served)", async () => {
+  seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "private contents marker-A" });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-kernel-enterprise", path: "HTTP3-TEST-PLAN.md" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /enterprise-tier sibling/);
+  assert.match(text, /ADR-025/);
+  assert.match(text, /exeris-ai-bridge-enterprise/);
+  // Critical negative assertion: no contents leak in the error response.
+  assert.ok(!text.includes("marker-A"));
+});
+
+test("docs:get_repo_doc rejects enterprise-* siblings (interior segment match)", async () => {
+  seedSiblingRepoFixture("exeris-enterprise-observability", { "decoder.md": "private contents marker-B" });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-enterprise-observability", path: "decoder.md" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /enterprise-tier sibling/);
+  assert.ok(!text.includes("marker-B"));
+});
+
+test("docs:get_repo_doc rejects exeris-business (private decision registry)", async () => {
+  seedSiblingRepoFixture("exeris-business", { "decisions.md": "private contents marker-C" });
+  const tool = tools().get("docs:get_repo_doc")!;
+  const res = await tool.handler({ repo: "exeris-business", path: "decisions.md" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /private decision registry/);
+  assert.ok(!text.includes("marker-C"));
+});
+
+test("docs:list_repo_docs rejects enterprise-tier siblings parity with get_repo_doc", async () => {
+  seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "private contents marker-D" });
+  const tool = tools().get("docs:list_repo_docs")!;
+  const res = await tool.handler({ repo: "exeris-kernel-enterprise" });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /enterprise-tier sibling/);
+  // Negative: must not enumerate the docs/ contents in the error response.
+  assert.ok(!text.includes("HTTP3-TEST-PLAN.md"));
+});

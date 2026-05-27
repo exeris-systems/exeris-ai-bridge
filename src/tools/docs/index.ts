@@ -33,6 +33,23 @@ const REPO_DOCS_ADR_SUBDIR = "adr";
 // paths with different visibility semantics.
 const REPO_NAME_DOCS_SELF = "exeris-docs";
 
+// Per ADR-025 §What is NOT in scope (line 66): "This first cut is fully
+// public. An enterprise-private extension ... ships as a separate
+// exeris-ai-bridge-enterprise repo per the ADR-020 / ADR-018 split
+// pattern, NOT as a private overlay in this public repo."
+//
+// The base REPO_NAME_RE happily admits sibling repos whose name embeds
+// the "enterprise" segment (exeris-kernel-enterprise, exeris-benchmarks-
+// enterprise, exeris-enterprise-observability) and the private decision
+// registry (exeris-business). Without explicit denial, this bridge would
+// serve their docs/ contents — a founding-ADR violation.
+//
+// The pattern matches the literal "enterprise" word as a hyphen-segment
+// (suffix OR interior) so both `*-enterprise` and `enterprise-*` shapes
+// are caught. `exeris-business` is denied by exact name.
+const REPO_NAME_ENTERPRISE_RE = /(^|-)enterprise(-|$)/;
+const REPO_NAME_BUSINESS = "exeris-business";
+
 const TEMPLATE_FILES: Record<TemplateKind, string> = {
   ADR: "templates/ADR-TEMPLATE.md",
   RFC: "templates/RFC-TEMPLATE.md",
@@ -530,8 +547,8 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
-      const selfErr = rejectDocsSelfRepo(repo, "list_repo_docs");
-      if (selfErr) return selfErr;
+      const restrictedErr = rejectRestrictedRepo(repo, "list_repo_docs");
+      if (restrictedErr) return restrictedErr;
 
       const rootRes = resolveRepoDocsRoot(config, repo);
       if (rootRes.kind === "err") return rootRes.error;
@@ -581,8 +598,8 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
-      const selfErr = rejectDocsSelfRepo(repo, "get_repo_doc");
-      if (selfErr) return selfErr;
+      const restrictedErr = rejectRestrictedRepo(repo, "get_repo_doc");
+      if (restrictedErr) return restrictedErr;
 
       if (typeof args.path !== "string" || args.path.trim().length === 0) {
         return errorResult("Invalid input: 'path' must be a non-empty string");
@@ -673,13 +690,43 @@ function resolveRepoDocsRoot(config: BridgeConfig, repo: string): RepoDocsRootRe
   }
 }
 
-function rejectDocsSelfRepo(repo: string, toolSuffix: string): ReturnType<typeof errorResult> | null {
-  if (repo !== REPO_NAME_DOCS_SELF) return null;
-  return errorResult(
-    `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
-      `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
-      `Use those instead of docs:${toolSuffix}.`,
-  );
+type RepoRestriction = "docs-self" | "enterprise" | "business";
+
+/**
+ * Classify a repo name against the bridge's public-scope policy.
+ * Returns the restriction kind if the repo MUST NOT be exposed via the
+ * per-repo docs surface, or null if it's allowed.
+ *
+ * Per ADR-025 §What is NOT in scope: bridge is fully public; enterprise
+ * tier and the private decision registry must not leak through here.
+ */
+function classifyRestrictedRepo(repo: string): RepoRestriction | null {
+  if (repo === REPO_NAME_DOCS_SELF) return "docs-self";
+  if (REPO_NAME_ENTERPRISE_RE.test(repo)) return "enterprise";
+  if (repo === REPO_NAME_BUSINESS) return "business";
+  return null;
+}
+
+function rejectRestrictedRepo(repo: string, toolSuffix: string): ReturnType<typeof errorResult> | null {
+  const kind = classifyRestrictedRepo(repo);
+  if (kind === null) return null;
+  switch (kind) {
+    case "docs-self":
+      return errorResult(
+        `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
+          `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
+          `Use those instead of docs:${toolSuffix}.`,
+      );
+    case "enterprise":
+      return errorResult(
+        `'${repo}' is an enterprise-tier sibling repo. exeris-ai-bridge is fully public per ADR-025; ` +
+          `enterprise docs will ship via a separate exeris-ai-bridge-enterprise repo when needed.`,
+      );
+    case "business":
+      return errorResult(
+        `'${repo}' is the private decision registry and is not exposed by this bridge.`,
+      );
+  }
 }
 
 /**
@@ -772,11 +819,16 @@ function collectWalkEntries(
  * Walk ecosystemRoot one level deep and return repo names that match the
  * exeris-* convention AND have a `docs/` subdirectory. Excludes:
  *   - `exeris-docs` itself (covered by registry-tier tools)
+ *   - enterprise-tier siblings (per ADR-025 §What is NOT in scope —
+ *     enterprise surface ships as a separate exeris-ai-bridge-enterprise
+ *     repo). Matched by classifyRestrictedRepo: `*-enterprise`,
+ *     `enterprise-*`, and the literal `exeris-business` private registry.
  *   - symlinked repo directories (silently re-attribute another location's
  *     files under the queried name; reject conservatively in v0.2.0; if
  *     operators need symlinked checkouts, that's a later design)
  *   - symlinked `docs/` subdirectories (same reasoning)
- * Deterministic order.
+ * Deterministic order. Silent exclusion is the intent — agents should
+ * never learn the existence of restricted siblings via discovery.
  */
 function discoverReposWithDocs(config: BridgeConfig): string[] {
   let entries;
@@ -792,7 +844,7 @@ function discoverReposWithDocs(config: BridgeConfig): string[] {
     // symlinked repo dirs are skipped by the existing check.
     if (!entry.isDirectory()) continue;
     if (!REPO_NAME_RE.test(entry.name)) continue;
-    if (entry.name === REPO_NAME_DOCS_SELF) continue;
+    if (classifyRestrictedRepo(entry.name) !== null) continue;
 
     const docsDir = join(config.ecosystemRoot, entry.name, REPO_DOCS_DIRNAME);
     if (!isRealDirectory(docsDir) || isSymlink(docsDir)) continue;
