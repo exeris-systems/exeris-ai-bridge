@@ -9,6 +9,10 @@ import { SandboxEscapeError } from "../../fs/sandbox.js";
 import type { BridgeConfig } from "../../config/env.js";
 import { formatSandboxStderrLine, redactEcosystemPaths, registerDocsTools } from "./index.js";
 
+// docs:* handlers never touch config.lsp; a fixed stub keeps the literals
+// type-complete without coupling these tests to LSP transport details.
+const STUB_LSP = { command: "true", args: [] as string[], source: "default" as const };
+
 let base: string;
 let config: BridgeConfig;
 
@@ -54,7 +58,7 @@ beforeEach(() => {
   writeFileSync(join(docs, "high-level-architecture.md"), "# HLA\n\nThree-tier model.\n", "utf8");
   writeFileSync(join(docs, "b2b-technical-whitepaper.md"), "# Whitepaper\n\nB2B story.\n", "utf8");
 
-  config = { docsRoot: docs, ecosystemRoot: base };
+  config = { docsRoot: docs, ecosystemRoot: base, lsp: STUB_LSP };
 });
 
 afterEach(() => {
@@ -311,7 +315,7 @@ test("docs:get_adr readFileSync error (EISDIR via directory target) does not lea
 });
 
 test("redactEcosystemPaths replaces the ecosystemRoot+sep prefix with <ecosystem>", () => {
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP };
   assert.equal(
     redactEcosystemPaths("ENOENT: open '/x/dev/exeris-docs/foo.md'", c),
     "ENOENT: open '<ecosystem>/exeris-docs/foo.md'",
@@ -323,13 +327,13 @@ test("redactEcosystemPaths does NOT over-replace when ecosystemRoot is a non-bou
   // match inside /x/development/foo. Pre-anchor substitution produced
   // "<ecosystem>elopment/foo" — both malformed AND leaked the adjacent
   // path's existence.
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP };
   const message = "ENOENT: no such file, open '/x/development/foo.md'";
   assert.equal(redactEcosystemPaths(message, c), message);
 });
 
 test("redactEcosystemPaths leaves messages with no ecosystemRoot prefix unchanged", () => {
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
+  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP };
   assert.equal(redactEcosystemPaths("EISDIR: illegal operation", c), "EISDIR: illegal operation");
   assert.equal(redactEcosystemPaths("adr-index.md missing", c), "adr-index.md missing");
 });
@@ -622,7 +626,7 @@ test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory
 test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
   // Synthesise an empty-but-valid config to drive the empty branch.
   const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), "exeris-empty-")));
-  const altConfig: BridgeConfig = { docsRoot: emptyRoot, ecosystemRoot: emptyRoot };
+  const altConfig: BridgeConfig = { docsRoot: emptyRoot, ecosystemRoot: emptyRoot, lsp: STUB_LSP };
   try {
     const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
     const res = await altTool.handler({});
@@ -839,7 +843,7 @@ test("docs:list_repos with a non-existent ecosystemRoot actually exercises the r
   // PRNG hotspot — collision resistance is irrelevant here, but the cost
   // of swapping is zero and security-scanner noise is real.
   const fakeRoot = "/__exeris-bridge-does-not-exist-" + randomUUID() + "__";
-  const altConfig: BridgeConfig = { docsRoot: fakeRoot, ecosystemRoot: fakeRoot };
+  const altConfig: BridgeConfig = { docsRoot: fakeRoot, ecosystemRoot: fakeRoot, lsp: STUB_LSP };
   const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
   const res = await altTool.handler({});
   const payload = JSON.parse((res.content[0] as { text: string }).text);
