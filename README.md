@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**TRL-2 / Scaffold.** ADR-025 ACCEPTED (2026-05-15). Tool definitions exist; implementations land in follow-up PRs per the ADR's Engineering Protocol. The `kernel:*` tool family is additionally blocked on the `KernelDiagnostics` SPI RFC in `exeris-kernel`.
+**0.2.0 — `docs:*` family live.** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` and `kernel:*` families are still definition-only placeholders; `lsp:*` lands in 0.3.0, and `kernel:*` is additionally blocked on the `KernelDiagnostics` SPI RFC in `exeris-kernel`.
 
 Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
 
@@ -67,24 +67,57 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
   "mcpServers": {
     "exeris": {
       "command": "node",
-      "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"]
+      "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"],
+      "env": {
+        "EXERIS_DOCS_ROOT": "/abs/path/to/exeris-docs"
+      }
     }
   }
 }
 ```
 
+`EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it.
+
 For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
+
+## Try it (end-to-end)
+
+Once wired in, the bridge answers ecosystem-introspection questions directly from `exeris-docs`. A representative session — *"list all ADR-024-related context"*:
+
+| Agent intent | Tool call | Returns |
+|:---|:---|:---|
+| Enumerate the registry | `docs:list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
+| Read the decision in full | `docs:get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
+| Find every mention | `docs:search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
+
+You can drive the same handshake without an agent — pipe newline-delimited JSON-RPC straight at the stdio server:
+
+```sh
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.0.0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"docs:get_adr","arguments":{"number":24}}}' \
+  | node dist/server.js
+```
+
+`tools/list` advertises all 13 tool definitions (9 live `docs:*`, plus the `lsp:*` / `kernel:*` placeholders); `tools/call` on `docs:get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
+  config/env.ts              EXERIS_DOCS_ROOT resolution + ecosystem-root derivation
+  fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
   tools/
     types.ts                 Shared ToolDefinition / ToolHandler types
-    docs/index.ts            docs:list_adrs, docs:get_adr — filesystem-bound
-    lsp/index.ts             lsp:list_domains, lsp:describe_domain — LSP proxy
-    kernel/index.ts          kernel:list_providers, kernel:list_capabilities — diagnostic adapter
+    docs/
+      index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
+                             HLA, whitepaper, search, per-repo docs surface)
+      adr-index.ts           parser for exeris-docs/adr-index.md
+    lsp/index.ts             lsp:list_domains, lsp:describe_domain — LSP proxy (placeholder, 0.3.0)
+    kernel/index.ts          kernel:list_providers, kernel:list_capabilities — diagnostic adapter (placeholder, 0.4.0)
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)
