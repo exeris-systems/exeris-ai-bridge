@@ -22,7 +22,7 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 - [x] [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md) ACCEPTED; link stubs in `exeris-kernel/docs/adr/`, `exeris-platform/docs/adr/`
 - [x] Sub-repo map row added in top-level `~/exeris-systems/CLAUDE.md` + routing section
 
-## 0.2.0 — `docs:*` family + CI + first agent demo
+## 0.2.0 — `docs:*` family + CI + first agent demo (shipped 2026-06-05)
 
 > Goal: a running Claude Code session can call `docs:list_adrs` and `docs:get_adr 024` against this server and get correct answers from `../exeris-docs/`. Everything is filesystem-bound; zero external process dependencies.
 
@@ -36,9 +36,9 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 - [x] **`docs:list_repos`** + **`docs:list_repo_docs`** + **`docs:get_repo_doc`** — per-repo non-ADR docs surface (subsystem docs, RFCs, design notes under `<repo>/docs/**`). `adr/` subtree excluded; agents must use `docs:get_adr` for ADRs so the registry's visibility / sandbox / cross-repo flow stays uniform. Scope addition to the original §0.2.0 list — sibling repos publish non-ADR docs (`exeris-kernel/docs/subsystems/`, `exeris-spring-runtime/docs/architecture/`, etc.) that the agent should be able to reach without per-tool plumbing
 - [x] **Path-sandbox guard** — every filesystem read resolves under a configured root and rejects paths that escape it (path-traversal hardening from day 1)
 - [x] **`EXERIS_DOCS_ROOT` env var** — points at the `exeris-docs/` checkout; sensible default for the monorepo-neighbour layout (`../exeris-docs` relative to the bridge install)
-- [x] **Unit tests** for every tool handler (parsing, filtering, sandbox enforcement) using `node --test` — 99 tests covering env, sandbox, adr-index parser, all six `docs:*` handlers, redactEcosystemPaths, and formatSandboxStderrLine
-- [ ] **First end-to-end demo** — `.claude/settings.json` config snippet committed to README; manual smoke: open Claude Code, ask "list all ADR-024-related context" and confirm the server returns it
-- [ ] **npm publish dry-run** — `@exeris/ai-bridge@0.2.0` resolves, `npm pack` output reviewed
+- [x] **Unit tests** for every tool handler (parsing, filtering, sandbox enforcement) using `node --test` — 128 tests covering env, sandbox, adr-index parser, all nine `docs:*` handlers, redactEcosystemPaths, and formatSandboxStderrLine
+- [x] **First end-to-end demo** — `.claude/settings.json` config snippet (incl. `EXERIS_DOCS_ROOT` env) committed to README under [Try it](README.md#try-it-end-to-end); manual smoke confirmed: stdio JSON-RPC `initialize` → `tools/list` (13 defs) → `docs:get_adr {number:24}` returns the ADR-024 body, `docs:search "ADR-024"` returns hits, `docs:list_adrs` returns 37 structured rows
+- [x] **npm publish dry-run** — version bumped `0.2.0-SNAPSHOT` → `0.2.0`; `npm pack --dry-run` reviewed (39 files, ~35 kB, no test/spec artefacts, README + LICENSE included); `npm publish --dry-run` resolves `@exeris/ai-bridge@0.2.0` (tag `latest`, public access). Actual publish/tag is a separate deliberate release step
 
 ## 0.3.0 — `lsp:*` family
 
