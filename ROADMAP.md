@@ -44,12 +44,14 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 
 > Goal: the bridge proxies `exeris-platform-lsp` over JSON-RPC. Agents can ask the bridge about `@ExerisDomain` types and get answers grounded in the same semantic index Studio uses.
 
-- [ ] **LSP transport layer** — `src/transport/lsp-client.ts`: JSON-RPC client over stdio against a child `exeris-platform-lsp` process
-- [ ] **LSP server discovery** — `EXERIS_LSP_COMMAND` env var (default: `mvn -f ../exeris-platform/exeris-platform-lsp/pom.xml exec:java`); lazy spawn on first `lsp:*` call; cached handle
-- [ ] **`lsp:list_domains`** — `workspace/exerisDomains` custom request (to be added to `exeris-platform-lsp`); returns `{ qualifiedName, simpleName, packageName, sourcePath }[]`
-- [ ] **`lsp:describe_domain`** — `workspace/exerisDomainDescribe` custom request; returns field list, action signatures, generated artefact references
-- [ ] **`lsp:list_actions`** — list of all `@Action` methods across the workspace
-- [ ] **Resilience** — LSP not running / crashed / wrong version → tool returns structured error (not crash); `bridge:health` (added in 0.7) surfaces the failure mode
+> **Phase 3a (shipped 2026-06-05) — bridge-side scaffolding.** The transport, discovery, and resilient error model landed independently of the companion. `exeris-platform-lsp` is currently a skeleton (no language server yet), so the three custom requests do not exist; the handlers reach a live server and translate a JSON-RPC "method not found" into a clear "not yet supported" result. The tool surface (names + input schemas) is final. Remaining items are gated on the companion below.
+
+- [x] **LSP transport layer** — `src/transport/lsp-client.ts`: JSON-RPC client over the LSP base-protocol framing (`src/transport/lsp-framing.ts`) against a child `exeris-platform-lsp` process; lazy spawn, `initialize` handshake, id correlation, per-request timeout, typed `LspRequestError` / `LspTransportError`
+- [x] **LSP server discovery** — `EXERIS_LSP_COMMAND` env var (default: `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java`); lazy spawn on first `lsp:*` call; cached handle. *Note: the default `exec:java` shares Maven's JVM stdout with the framing channel; before the data path goes live it must move to a clean stdout (e.g. `exec:exec`) — see `src/config/env.ts`.*
+- [ ] **`lsp:list_domains`** — `workspace/exerisDomains` custom request (to be added to `exeris-platform-lsp`); returns `{ qualifiedName, simpleName, packageName, sourcePath }[]`. *Phase 3a: handler + schema wired; data path blocked on companion.*
+- [ ] **`lsp:describe_domain`** — `workspace/exerisDomainDescribe` custom request; returns field list, action signatures, generated artefact references. *Phase 3a: handler + schema + input validation wired; data path blocked on companion.*
+- [ ] **`lsp:list_actions`** — list of all `@Action` methods across the workspace (`workspace/exerisActions`). *Phase 3a: handler + schema wired; data path blocked on companion.*
+- [x] **Resilience** — LSP not running / crashed / framing-desync / request timeout → tool returns structured error (not crash); `bridge:health` (added in 0.7) will surface the failure mode
 - [ ] **Cross-repo coordination** — companion PR in `exeris-platform/exeris-platform-lsp/` adding the three custom LSP requests; cited in this milestone's release notes
 - [ ] **Integration test** — Testcontainers-equivalent fixture: spawn the LSP server against a tiny fixture workspace, exercise all three tools, assert payloads
 

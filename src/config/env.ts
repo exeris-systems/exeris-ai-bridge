@@ -13,9 +13,23 @@ export interface BridgeConfig {
   readonly docsRoot: string;
   /** Absolute, realpath-resolved path to the parent of docsRoot (= sibling-repo root). */
   readonly ecosystemRoot: string;
+  /** How to launch the exeris-platform-lsp child for the lsp:* family. */
+  readonly lsp: LspConfig;
+}
+
+/**
+ * Launch spec for the LSP child process. Structurally compatible with the
+ * transport layer's LspLaunchSpec (command + args); `source` is debug
+ * provenance for bridge:version (0.7.0) and is ignored by the spawner.
+ */
+export interface LspConfig {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly source: "env" | "default";
 }
 
 const DEFAULT_DOCS_DIRNAME = "exeris-docs";
+const LSP_POM_RELATIVE = "exeris-platform/exeris-platform-lsp/pom.xml";
 
 /**
  * Resolve the bridge runtime config from the process environment.
@@ -30,7 +44,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
   const candidate = env.EXERIS_DOCS_ROOT ?? defaultDocsRoot();
   const docsRoot = resolveExistingDir(candidate, "EXERIS_DOCS_ROOT");
   const ecosystemRoot = dirname(docsRoot);
-  return { docsRoot, ecosystemRoot };
+  const lsp = resolveLspConfig(env, ecosystemRoot);
+  return { docsRoot, ecosystemRoot, lsp };
+}
+
+/**
+ * Resolve the LSP launch spec from `EXERIS_LSP_COMMAND`, falling back to the
+ * monorepo-neighbour Maven invocation against the sibling exeris-platform.
+ *
+ * The env var is split on whitespace into command + args — it does NOT honour
+ * shell quoting or globbing (no shell is involved; the spawner exec's the
+ * command directly). A value whose first token would be empty is treated as
+ * unset. The path-sandbox does not apply here: this is an operator-supplied
+ * executable, not an agent-supplied path, and it is never derived from a
+ * tool argument.
+ */
+function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspConfig {
+  const raw = env.EXERIS_LSP_COMMAND?.trim();
+  if (raw !== undefined && raw.length > 0) {
+    const tokens = raw.split(/\s+/);
+    return { command: tokens[0], args: tokens.slice(1), source: "env" };
+  }
+  // `-q` silences Maven's own [INFO]/[WARNING] lines, which would otherwise
+  // land on the same stdout the framing decoder reads and desync it. NOTE for
+  // the data-path (ROADMAP 0.3.0 companion, currently blocked): `exec:java`
+  // runs the server in Maven's JVM, so the app's System.out still shares this
+  // stdout. Before the first live spawn this default must move to a clean
+  // channel (e.g. `exec:exec` with stdout reserved for JSON-RPC, or a
+  // dedicated launcher) — otherwise expect an immediate LspFramingError.
+  return {
+    command: "mvn",
+    args: ["-q", "-f", join(ecosystemRoot, LSP_POM_RELATIVE), "exec:java"],
+    source: "default",
+  };
 }
 
 /**

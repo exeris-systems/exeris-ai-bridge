@@ -92,3 +92,38 @@ test("loadConfig with no EXERIS_DOCS_ROOT falls back to the default install-neig
   // happens (no crash, no return-with-undefined).
   assert.ok(typeof succeeded === "boolean");
 });
+
+test("lsp config defaults to the sibling exeris-platform Maven invocation", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs });
+  assert.equal(cfg.lsp.command, "mvn");
+  assert.equal(cfg.lsp.source, "default");
+  assert.ok(cfg.lsp.args.includes("exec:java"));
+  // The -f pom path is anchored under ecosystemRoot (= dirname(docsRoot)).
+  assert.ok(
+    cfg.lsp.args.some((a) => a.endsWith("exeris-platform/exeris-platform-lsp/pom.xml")),
+    `expected a pom path in args, got ${JSON.stringify(cfg.lsp.args)}`,
+  );
+  assert.ok(cfg.lsp.args.some((a) => a.startsWith(cfg.ecosystemRoot)));
+});
+
+test("EXERIS_LSP_COMMAND overrides the default, split on whitespace", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({
+    EXERIS_DOCS_ROOT: docs,
+    EXERIS_LSP_COMMAND: "  node   /opt/lsp/server.js   --stdio  ",
+  });
+  assert.equal(cfg.lsp.command, "node");
+  assert.deepEqual(cfg.lsp.args, ["/opt/lsp/server.js", "--stdio"]);
+  assert.equal(cfg.lsp.source, "env");
+});
+
+test("a blank EXERIS_LSP_COMMAND falls back to the default", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_COMMAND: "   " });
+  assert.equal(cfg.lsp.command, "mvn");
+  assert.equal(cfg.lsp.source, "default");
+});

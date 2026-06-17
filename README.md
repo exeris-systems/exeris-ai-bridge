@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.2.0 — `docs:*` family live.** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` and `kernel:*` families are still definition-only placeholders; `lsp:*` lands in 0.3.0, and `kernel:*` is additionally blocked on the `KernelDiagnostics` SPI RFC in `exeris-kernel`.
+**0.2.0 — `docs:*` family live; `lsp:*` transport scaffolded (0.3.0 Phase 3a).** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` family (3 tools) has its transport, server discovery, and resilient error model in place; its custom LSP requests are blocked on a companion in `exeris-platform-lsp` (still a skeleton), so a live `lsp:*` call returns a clear "not yet supported" result until that lands. The `kernel:*` family remains a definition-only placeholder, additionally blocked on the `KernelDiagnostics` SPI RFC in `exeris-kernel`.
 
 Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
 
@@ -78,6 +78,8 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 
 `EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it.
 
+`EXERIS_LSP_COMMAND` (optional) is how the `lsp:*` family launches its `exeris-platform-lsp` child — a whitespace-separated command + args (no shell quoting; the process is exec'd directly). It defaults to `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java` (`-q` keeps Maven's own logging off the JSON-RPC stdout). The child is spawned lazily on the first `lsp:*` call and cached; its stderr is inherited into the bridge's logs. Until the companion LSP custom requests land, `lsp:*` calls return a structured "not yet supported" result rather than failing — so the `exec:java`-shares-stdout caveat (the app's `System.out` still rides Maven's stdout) does not bite until the data path goes live.
+
 For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
 
 ## Try it (end-to-end)
@@ -108,15 +110,19 @@ printf '%s\n' \
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
-  config/env.ts              EXERIS_DOCS_ROOT resolution + ecosystem-root derivation
+  config/env.ts              EXERIS_DOCS_ROOT + EXERIS_LSP_COMMAND resolution, ecosystem-root derivation
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
+  transport/
+    lsp-framing.ts           LSP base-protocol (Content-Length) message codec
+    lsp-client.ts            JSON-RPC client over a child exeris-platform-lsp process
   tools/
     types.ts                 Shared ToolDefinition / ToolHandler types
     docs/
       index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
                              HLA, whitepaper, search, per-repo docs surface)
       adr-index.ts           parser for exeris-docs/adr-index.md
-    lsp/index.ts             lsp:list_domains, lsp:describe_domain — LSP proxy (placeholder, 0.3.0)
+    lsp/index.ts             lsp:list_domains, lsp:describe_domain, lsp:list_actions — LSP proxy
+                             (transport ready 0.3.0 Phase 3a; data path blocked on companion)
     kernel/index.ts          kernel:list_providers, kernel:list_capabilities — diagnostic adapter (placeholder, 0.4.0)
 docs/
   adr/
