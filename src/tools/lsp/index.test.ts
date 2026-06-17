@@ -50,7 +50,10 @@ function text(res: CallToolResult): string {
 
 test("registerLspTools registers all three lsp:* tools", () => {
   const names = registerLspTools(CONFIG).map((t) => t.definition.name);
-  assert.deepEqual(names.sort(), ["lsp:describe_domain", "lsp:list_actions", "lsp:list_domains"]);
+  assert.deepEqual(
+    names.sort((a, b) => a.localeCompare(b)),
+    ["lsp:describe_domain", "lsp:list_actions", "lsp:list_domains"],
+  );
 });
 
 test("lsp:list_domains returns the server result as pretty JSON on success", async () => {

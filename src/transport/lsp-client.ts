@@ -119,7 +119,15 @@ export class LspClient {
       return Promise.reject(this.transportErrorForClose(this.closeReason));
     }
     if (this.startPromise === null) {
-      this.startPromise = this.start();
+      this.startPromise = this.start().catch((err: unknown) => {
+        // A handshake that fails WITHOUT a terminal close — e.g. `initialize`
+        // times out while the server hangs — would otherwise pin the client to
+        // a permanently rejected startPromise, so every later request replays
+        // the stale error with no re-spawn. Clear it so the next request can
+        // retry. Spawn-error / exit set closeReason and are intentionally sticky.
+        if (this.closeReason === null) this.startPromise = null;
+        throw err;
+      });
     }
     return this.startPromise;
   }
@@ -165,10 +173,23 @@ export class LspClient {
         this.pending.delete(id);
         reject(new LspTransportError(`LSP request '${method}' timed out after ${this.requestTimeoutMs}ms`));
       }, this.requestTimeoutMs);
-      // Do not keep the event loop alive solely for a pending LSP timeout.
-      timer.unref?.();
+      // NOTE: the timer is intentionally NOT unref'd. While a request is
+      // in-flight it is the one thing that must keep the process alive long
+      // enough to deliver the timeout rejection to the awaiting caller; an
+      // unref'd timer let Node's test child exit before firing (node 20/22),
+      // cancelling the timeout test. In production the stdio transport keeps
+      // the loop alive regardless, so this costs nothing there.
       this.pending.set(id, { resolve, reject, timer });
-      channel.write(encodeMessage({ jsonrpc: "2.0", id, method, params }));
+      try {
+        channel.write(encodeMessage({ jsonrpc: "2.0", id, method, params }));
+      } catch (cause) {
+        // A synchronous write failure (e.g. EPIPE on a dead stdin) must not
+        // strand the pending entry until the timeout — fail the request now.
+        clearTimeout(timer);
+        this.pending.delete(id);
+        const message = cause instanceof Error ? cause.message : String(cause);
+        reject(new LspTransportError(`Failed to write to LSP server: ${message}`));
+      }
     });
   }
 
@@ -245,7 +266,12 @@ export class LspClient {
 
 /** Production channel: spawn the LSP server and adapt its stdio streams. */
 function defaultChannelFactory(spec: LspLaunchSpec): LspChannel {
-  const child = spawn(spec.command, [...spec.args], { stdio: ["pipe", "pipe", "pipe"] });
+  // stdin/stdout are pipes we own (the JSON-RPC framing channel). stderr is
+  // INHERITED, not piped: the language server's diagnostics flow to the
+  // bridge's own stderr (visible in the host's MCP logs), and — crucially — an
+  // inherited fd cannot fill a pipe buffer. A piped-but-undrained stderr would
+  // block the child once it writes ~64 KB of logs and never gets read.
+  const child = spawn(spec.command, [...spec.args], { stdio: ["pipe", "pipe", "inherit"] });
   return {
     write: (chunk) => {
       child.stdin.write(chunk);
@@ -256,6 +282,15 @@ function defaultChannelFactory(spec: LspLaunchSpec): LspChannel {
     onClose: (handler) => {
       child.on("error", (err) => handler({ kind: "spawn-error", message: err.message }));
       child.on("exit", (code, signal) => handler({ kind: "exited", code, signal }));
+      // A write to a dead server surfaces as an async 'error' (EPIPE) on stdin,
+      // NOT as a throw from write(). Without this listener Node escalates it to
+      // an uncaught exception that takes down the whole bridge — the exact
+      // crash the resilient error model exists to prevent. Funnel it through
+      // the same close path; if 'exit' already fired, failPendingAndClose is a
+      // no-op on the second reason.
+      child.stdin.on("error", (err) =>
+        handler({ kind: "spawn-error", message: `LSP stdin error: ${err.message}` }),
+      );
     },
     close: () => {
       child.kill();

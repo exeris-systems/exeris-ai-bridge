@@ -65,9 +65,16 @@ function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspCon
     const tokens = raw.split(/\s+/);
     return { command: tokens[0], args: tokens.slice(1), source: "env" };
   }
+  // `-q` silences Maven's own [INFO]/[WARNING] lines, which would otherwise
+  // land on the same stdout the framing decoder reads and desync it. NOTE for
+  // the data-path (ROADMAP 0.3.0 companion, currently blocked): `exec:java`
+  // runs the server in Maven's JVM, so the app's System.out still shares this
+  // stdout. Before the first live spawn this default must move to a clean
+  // channel (e.g. `exec:exec` with stdout reserved for JSON-RPC, or a
+  // dedicated launcher) — otherwise expect an immediate LspFramingError.
   return {
     command: "mvn",
-    args: ["-f", join(ecosystemRoot, LSP_POM_RELATIVE), "exec:java"],
+    args: ["-q", "-f", join(ecosystemRoot, LSP_POM_RELATIVE), "exec:java"],
     source: "default",
   };
 }

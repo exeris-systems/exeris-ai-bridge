@@ -186,6 +186,45 @@ test("dispose rejects in-flight requests and closes the channel", async () => {
   assert.equal(channel.closed, true);
 });
 
+test("a synchronous write failure rejects the request instead of stranding it", async () => {
+  const channel = new FakeChannel();
+  channel.autoResponder = ackInitialize;
+  // Let the handshake (write #1 initialize, #2 initialized notify) through, then
+  // make the real request's write throw — mimicking a synchronous stdin EPIPE.
+  const originalWrite = channel.write.bind(channel);
+  let writes = 0;
+  channel.write = (chunk) => {
+    if (++writes === 3) throw new Error("EPIPE: stdin closed");
+    originalWrite(chunk);
+  };
+  const client = new LspClient(SPEC, { channelFactory: () => channel });
+
+  await assert.rejects(client.request("workspace/exerisDomains"), (err: unknown) => {
+    assert.ok(err instanceof LspTransportError);
+    assert.match(err.message, /Failed to write to LSP server.*EPIPE/);
+    return true;
+  });
+});
+
+test("a hung handshake does not pin the client — a later request re-spawns", async () => {
+  let spawns = 0;
+  const client = new LspClient(SPEC, {
+    channelFactory: () => {
+      spawns++;
+      const channel = new FakeChannel();
+      // First spawn never acks initialize (handshake hangs → times out). Second
+      // spawn acks everything so the retry succeeds.
+      channel.autoResponder = spawns === 1 ? () => undefined : (msg) => ({ jsonrpc: "2.0", id: msg.id, result: "ok" });
+      return channel;
+    },
+    requestTimeoutMs: 20,
+  });
+
+  await assert.rejects(client.request("workspace/exerisDomains"), LspTransportError);
+  assert.equal(await client.request("workspace/exerisDomains"), "ok");
+  assert.equal(spawns, 2);
+});
+
 test("correlates interleaved responses to the right request", async () => {
   const channel = new FakeChannel();
   const client = new LspClient(SPEC, { channelFactory: () => channel });
