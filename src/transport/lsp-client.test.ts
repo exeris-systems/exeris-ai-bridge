@@ -67,20 +67,20 @@ test("request performs the initialize handshake before the first call", async ()
   const channel = new FakeChannel();
   channel.autoResponder = (msg) => {
     if (msg.method === "initialize") return { jsonrpc: "2.0", id: msg.id, result: { capabilities: {} } };
-    if (msg.method === "workspace/exerisDomains")
+    if (msg.method === "exeris/domains")
       return { jsonrpc: "2.0", id: msg.id, result: ["A", "B"] };
     return undefined;
   };
   const client = new LspClient(SPEC, { channelFactory: () => channel });
 
-  const result = await client.request("workspace/exerisDomains");
+  const result = await client.request("exeris/domains");
   assert.deepEqual(result, ["A", "B"]);
 
   // initialize request + initialized notification precede the real request.
   assert.equal(channel.sent[0].method, "initialize");
   assert.equal(channel.sent[1].method, "initialized");
   assert.equal(channel.sent[1].id, undefined); // notification carries no id
-  assert.equal(channel.sent[2].method, "workspace/exerisDomains");
+  assert.equal(channel.sent[2].method, "exeris/domains");
 });
 
 test("the handshake runs once across concurrent requests", async () => {
@@ -105,7 +105,7 @@ test("a JSON-RPC error response rejects with LspRequestError carrying the code",
   };
   const client = new LspClient(SPEC, { channelFactory: () => channel });
 
-  await assert.rejects(client.request("workspace/exerisDomains"), (err: unknown) => {
+  await assert.rejects(client.request("exeris/domains"), (err: unknown) => {
     assert.ok(err instanceof LspRequestError);
     assert.equal(err.code, JSONRPC_METHOD_NOT_FOUND);
     return true;
@@ -119,7 +119,7 @@ test("a spawn failure rejects with LspTransportError naming the command", async 
     },
   });
 
-  await assert.rejects(client.request("workspace/exerisDomains"), (err: unknown) => {
+  await assert.rejects(client.request("exeris/domains"), (err: unknown) => {
     assert.ok(err instanceof LspTransportError);
     assert.match(err.message, /lsp-stub --demo/);
     assert.match(err.message, /ENOENT/);
@@ -133,7 +133,7 @@ test("a premature exit rejects in-flight requests with LspTransportError", async
   channel.autoResponder = ackInitialize;
   const client = new LspClient(SPEC, { channelFactory: () => channel });
 
-  const inflight = client.request("workspace/exerisDomains");
+  const inflight = client.request("exeris/domains");
   await flush(); // let the handshake settle so the request is truly pending
   channel.emitClose({ kind: "exited", code: 1, signal: null });
 
@@ -158,7 +158,7 @@ test("after a crash, further requests fail fast without re-spawning", async () =
 
   await client.request("warmup"); // force start + handshake
   channel.emitClose({ kind: "exited", code: 2, signal: null });
-  await assert.rejects(client.request("workspace/exerisDomains"), LspTransportError);
+  await assert.rejects(client.request("exeris/domains"), LspTransportError);
   assert.equal(spawns, 1);
 });
 
@@ -167,7 +167,7 @@ test("a request times out when the server never answers", async () => {
   channel.autoResponder = ackInitialize; // handshake ok, real call hangs
   const client = new LspClient(SPEC, { channelFactory: () => channel, requestTimeoutMs: 20 });
 
-  await assert.rejects(client.request("workspace/exerisDomains"), (err: unknown) => {
+  await assert.rejects(client.request("exeris/domains"), (err: unknown) => {
     assert.ok(err instanceof LspTransportError);
     assert.match(err.message, /timed out after 20ms/);
     return true;
@@ -179,7 +179,7 @@ test("dispose rejects in-flight requests and closes the channel", async () => {
   channel.autoResponder = ackInitialize;
   const client = new LspClient(SPEC, { channelFactory: () => channel });
 
-  const inflight = client.request("workspace/exerisDomains");
+  const inflight = client.request("exeris/domains");
   client.dispose();
 
   await assert.rejects(inflight, LspTransportError);
@@ -199,7 +199,7 @@ test("a synchronous write failure rejects the request instead of stranding it", 
   };
   const client = new LspClient(SPEC, { channelFactory: () => channel });
 
-  await assert.rejects(client.request("workspace/exerisDomains"), (err: unknown) => {
+  await assert.rejects(client.request("exeris/domains"), (err: unknown) => {
     assert.ok(err instanceof LspTransportError);
     assert.match(err.message, /Failed to write to LSP server.*EPIPE/);
     return true;
@@ -220,8 +220,8 @@ test("a hung handshake does not pin the client — a later request re-spawns", a
     requestTimeoutMs: 20,
   });
 
-  await assert.rejects(client.request("workspace/exerisDomains"), LspTransportError);
-  assert.equal(await client.request("workspace/exerisDomains"), "ok");
+  await assert.rejects(client.request("exeris/domains"), LspTransportError);
+  assert.equal(await client.request("exeris/domains"), "ok");
   assert.equal(spawns, 2);
 });
 

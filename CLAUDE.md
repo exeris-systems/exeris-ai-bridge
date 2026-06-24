@@ -42,7 +42,7 @@ Each tool family is documented in its own folder. Keep the scope tight; if a too
 |:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
 | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
-| `kernel:*` | Provider registry, subsystem DAG, capability composition — read-only                  | Running kernel via `KernelDiagnostics` |
+| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail — read-only (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
 
 New families require an ADR-025 amendment (or a successor ADR). Do not invent a `caps:*` or `sku:*` family unilaterally.
 
@@ -51,7 +51,7 @@ New families require an ADR-025 amendment (or a successor ADR). Do not invent a 
 - **ADR-006** — every PR that adds a dependency or extends `kernel:*` tooling.
 - **ADR-020** — every PR that adds or changes documentation cross-references.
 - **ADR-023** — when someone proposes changing the license or wrapping this in commercial terms.
-- **ADR-024** — when implementing `kernel:list_capabilities` or any tool that surfaces composition state.
+- **ADR-024** — its 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel **cap-blind**. `kernel:*` MUST NOT surface capability composition (there is no `kernel:list_capabilities`). Any future composition surface sources from `exeris-tooling` build-time artefacts (`cap-manifest.json` + composition manifest) and/or the `exeris-platform` composition runtime, and needs its own ADR-025 amendment first. See ADR-025 §"`kernel:*` Is Cap-Blind".
 - **ADR-025** — every architectural change. This is the founding ADR; treat amendments to it like amendments to a constitution.
 
 ## Documentation precedence

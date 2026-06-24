@@ -9,7 +9,7 @@ Family rules:
 - The three tool families are deliberate (per ADR-025):
   - `docs:*` — ADR registry, HLA, whitepaper, templates; read from `../exeris-docs/` filesystem
   - `lsp:*` — `@ExerisDomain` source model, action signatures, codegen artefacts; proxy `exeris-platform-lsp` via JSON-RPC
-  - `kernel:*` — provider registry, subsystem DAG, capability composition; running kernel via `KernelDiagnostics`
+  - `kernel:*` — provider registry, bootstrap/subsystem DAG, per-subsystem detail; running kernel via `KernelDiagnostics`. **Cap-blind** — NO capability composition (no `kernel:list_capabilities`); composition is a tooling/platform surface (ADR-024 2026-06-17 amendment; ADR-025 §"`kernel:*` Is Cap-Blind")
 - Every tool name is `<family>:<name>` with family ∈ {`docs`, `lsp`, `kernel`}.
 - A tool whose scope would cross families is a refactor signal — split into two well-scoped tools.
 - New families (`caps:*`, `sku:*`, etc.) require an ADR-025 amendment or a successor ADR.

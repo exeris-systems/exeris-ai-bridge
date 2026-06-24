@@ -21,7 +21,7 @@ Architect/reviewer for the MCP server. Prioritize ADR-025 hard constraints and r
 
 ## Preflight
 - Always read `docs/adr/ADR-025-ai-agent-bridge.md` for any architectural change.
-- Read cross-repo ADRs when their surface is touched: ADR-006 (every dependency change / `kernel:*` extension), ADR-020 (doc cross-references), ADR-023 (license / commercial wrapping), ADR-024 (capability composition surfacing in `kernel:list_capabilities`).
+- Read cross-repo ADRs when their surface is touched: ADR-006 (every dependency change / `kernel:*` extension), ADR-020 (doc cross-references), ADR-023 (license / commercial wrapping), ADR-024 (capability composition — its 2026-06-17 amendment makes the kernel **cap-blind**; `kernel:*` MUST NOT surface composition, and there is no `kernel:list_capabilities`).
 - Read `README.md` architecture diagram (separate process / separate language).
 - Read `ROADMAP.md` for milestone scope (currently TRL-2 / scaffold).
 - If docs are missing/stale, rely on `CLAUDE.md` hard constraints and state assumptions explicitly.

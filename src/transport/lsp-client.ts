@@ -10,12 +10,12 @@ import { encodeMessage, LspMessageDecoder } from "./lsp-framing.js";
 //   - resilient failure: spawn errors, premature exit, and JSON-RPC errors
 //     surface as typed rejections instead of crashing the bridge
 //
-// Phase 3a (ROADMAP 0.3.0) ships this transport WITHOUT the three custom
-// requests it will eventually carry (`workspace/exerisDomains`, …Describe,
-// …Actions) — those depend on a companion exeris-platform-lsp that does not
-// yet implement them. Until it does, `request()` against an unknown method
-// resolves to a JSON-RPC "method not found" error, which the lsp:* handlers
-// translate into a structured "not yet supported" tool result.
+// Phase 3a (ROADMAP 0.3.0) shipped this transport ahead of the companion
+// read-only `exeris/*` slice (`exeris/domains`, `exeris/domainDescribe`,
+// `exeris/actions`), which now exists in exeris-platform-lsp. Against a server
+// build that predates the slice, `request()` resolves to a JSON-RPC "method
+// not found" error, which the lsp:* handlers translate into a structured
+// "update the LSP server" tool result.
 
 /** Standard JSON-RPC error code for an unimplemented method. */
 export const JSONRPC_METHOD_NOT_FOUND = -32601;
