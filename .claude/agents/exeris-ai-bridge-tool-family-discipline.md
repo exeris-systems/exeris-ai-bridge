@@ -15,7 +15,7 @@ The three families are deliberate (per ADR-025 + repo `CLAUDE.md`):
 |:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
 | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
-| `kernel:*` | Provider registry, subsystem DAG, capability composition — read-only                  | Running kernel via `KernelDiagnostics` |
+| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail — read-only (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
 
 ## Primary Responsibilities
 - Validate tool names are namespaced under one of the three families.

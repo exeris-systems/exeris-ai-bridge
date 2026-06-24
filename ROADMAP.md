@@ -55,19 +55,19 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 - [ ] **Cross-repo coordination** — companion PR in `exeris-platform/exeris-platform-lsp/` adding the three custom LSP requests; cited in this milestone's release notes
 - [ ] **Integration test** — Testcontainers-equivalent fixture: spawn the LSP server against a tiny fixture workspace, exercise all three tools, assert payloads
 
-## 0.4.0 — `kernel:*` family (blocked on `KernelDiagnostics` RFC)
+## 0.4.0 — `kernel:*` family (upstream shipped; blocked on the bridge-side adapter)
 
-> Goal: the bridge introspects a running kernel through a process-boundary adapter. Read-only. Preserves The Wall by construction.
+> Goal: the bridge introspects a running kernel through a process-boundary adapter. Read-only. Preserves The Wall by construction. **Cap-blind** — the kernel exposes runtime state only; capability composition is a tooling/platform surface, not a kernel one (ADR-024 2026-06-17 "Validation Stamp Lifecycle" amendment; ADR-025 §"`kernel:*` Is Cap-Blind").
 
-- [ ] **`KernelDiagnostics` SPI RFC lands in `exeris-kernel/docs/rfc/`** — defines read-only surface, stability contract, JSON-over-stdio adapter shape
-- [ ] **`KernelDiagnostics` SPI implementation in `exeris-kernel-spi`** — interface + records
-- [ ] **Community provider in `exeris-kernel-community`** — implements the SPI against the in-process `KernelBootstrap` state
-- [ ] **`exeris-kernel-diagnostics-cli`** — tiny Java executable shipped from `exeris-kernel-community`; reads JSON requests on stdin, writes responses on stdout; the bridge spawns this as a child process
-- [ ] **`src/transport/kernel-adapter.ts`** — Node-side wrapper: spawn, framed JSON-over-stdio, lifecycle (start lazy, kill on exit)
+- [x] **`KernelDiagnostics` SPI RFC** — `exeris-kernel/docs/rfc/RFC-2026-05-18-kernel-diagnostics-spi.md` ACCEPTED; ADR-033 ACCEPTED (read-only surface, stability contract, NDJSON adapter shape)
+- [x] **`KernelDiagnostics` SPI implementation in `exeris-kernel-spi`** — interface + snapshot records (shipped exeris-kernel v0.9.0)
+- [x] **Community provider in `exeris-kernel-community`** — implements the SPI against the `KernelProviders.SUBSYSTEMS` bootstrap state (inspect mode)
+- [x] **`exeris-kernel-diagnostics-cli`** — Java executable; reads NDJSON requests on stdin, writes responses on stdout; the bridge spawns this as a child process
+- [ ] **`src/transport/kernel-adapter.ts`** — Node-side wrapper: spawn, framed JSON-over-stdio (NDJSON), lifecycle (start lazy, kill on exit). *This is now the gating item — the upstream contract is done.*
 - [ ] **`kernel:list_providers`** — provider class names + driver origin (community / enterprise) + which SPI each one provides
-- [ ] **`kernel:list_capabilities`** — composed capability graph per [ADR-024](../exeris-docs/adr/ADR-024-capability-composition-model.md): nodes (`name`, `@Provides`, `@Requires`), edges (resolution arrows), phase state (`initialize` / `ready` / `drain` / `terminate`)
 - [ ] **`kernel:get_bootstrap_dag`** — current state of the FOUNDATION / SERVICES / RUNTIME DAG (per `exeris-kernel/docs/subsystems/bootstrap.md`)
-- [ ] **`kernel:describe_subsystem`** — drill into a specific subsystem (`memory`, `crypto`, `persistence`, `graph`, `transport`, `events`, `flow`, `http`)
+- [ ] **`kernel:describe_subsystem`** — drill into a specific subsystem (`memory`, `crypto`, `persistence`, `graph`, `transport`, `events`, `flow`, `http`, `security`)
+- [ ] ~~`kernel:list_capabilities`~~ — **removed.** Capability composition is NOT a kernel surface: the open kernel is cap-blind (ADR-024 revised obligation 9). If the bridge ever surfaces composition it reads the build-time `cap-manifest.json` + composition manifest (`exeris-tooling`) and/or the `exeris-platform` composition runtime — never the kernel — and requires its own ADR-025 amendment first. Deferred: no `exeris-caps-*` repo exists yet (first targeted H1 2027).
 - [ ] **Auth-free local mode** — the kernel adapter trusts the spawning process by default; if/when remote introspection lands, auth is layered in 0.6 (SSE + transport auth)
 - [ ] **Integration test** — bridge → kernel adapter → minimal kernel instance, exercising every `kernel:*` tool
 
@@ -130,7 +130,7 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 
 > Goal: any 1.x release is source-compatible. Tool names, input schemas, output shapes don't change without a deprecation cycle.
 
-- [ ] **Tool surface frozen** — names + input JSON Schemas + output shapes for `docs:*` (9 tools), `lsp:*` (3 tools), `kernel:*` (4 tools), `bridge:*` (2 tools) locked
+- [ ] **Tool surface frozen** — names + input JSON Schemas + output shapes for `docs:*` (9 tools), `lsp:*` (3 tools), `kernel:*` (3 tools), `bridge:*` (2 tools) locked
 - [ ] **MCP protocol version pinned** — declare the minimum MCP spec version supported; document the upgrade path when MCP itself bumps
 - [ ] **Resource URI scheme frozen** — `exeris://` URI shape is part of the contract
 - [ ] **npm release** — `@exeris/ai-bridge@1.0.0` published to npm; signing + provenance attached
@@ -151,7 +151,7 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 | Milestone | Dependency repo            | What it needs                                                                                                  |
 |:----------|:----------------------------|:---------------------------------------------------------------------------------------------------------------|
 | 0.3.0     | `exeris-platform`          | Three custom LSP requests in `exeris-platform-lsp` (`workspace/exerisDomains`, `…Describe`, `…Actions`)         |
-| 0.4.0     | `exeris-kernel`            | `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli` Java executable; RFC must land first |
+| 0.4.0     | `exeris-kernel`            | `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli` — **shipped** (v0.9.0, ADR-033). Cap-blind: no capability-composition surface. Gating item is now the bridge-side adapter |
 | 0.5.0     | `exeris-docs`              | Stable file layout for ADRs, HLA, whitepaper, templates (no new requirement; just don't restructure the tree)   |
 | 0.6.0     | none                       | (self-contained — SSE + Docker + k8s are local concerns)                                                       |
 
