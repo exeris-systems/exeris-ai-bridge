@@ -56,18 +56,37 @@ test("registerLspTools registers all three lsp:* tools", () => {
   );
 });
 
-test("lsp:list_domains returns the server result as pretty JSON on success", async () => {
+const DOMAIN_SUMMARY = {
+  qualifiedName: "com.acme.Order",
+  simpleName: "Order",
+  packageName: "com.acme",
+  sourcePath: "/ws/com/acme/Order.java",
+};
+
+test("lsp:list_domains returns the validated DomainSummary[] as pretty JSON on success", async () => {
   const tools = toolsWith((msg) =>
-    msg.method === "workspace/exerisDomains"
-      ? { jsonrpc: "2.0", id: msg.id, result: [{ qualifiedName: "com.acme.Order" }] }
+    msg.method === "exeris/domains"
+      ? { jsonrpc: "2.0", id: msg.id, result: [DOMAIN_SUMMARY] }
       : undefined,
   );
   const res = await tools.get("lsp:list_domains")!.handler({});
   assert.ok(!res.isError);
-  assert.deepEqual(JSON.parse(text(res)), [{ qualifiedName: "com.acme.Order" }]);
+  assert.deepEqual(JSON.parse(text(res)), [DOMAIN_SUMMARY]);
 });
 
-test("a method-not-found maps to a clear 'not yet supported' result, not a crash", async () => {
+test("lsp:list_domains surfaces a shape mismatch as a clear error, not a crash", async () => {
+  const tools = toolsWith((msg) =>
+    msg.method === "exeris/domains"
+      ? { jsonrpc: "2.0", id: msg.id, result: [{ qualifiedName: "com.acme.Order" }] }
+      : undefined,
+  );
+  const res = await tools.get("lsp:list_domains")!.handler({});
+  assert.equal(res.isError, true);
+  assert.match(text(res), /did not match the expected read-only wire shape/);
+  assert.match(text(res), /domains\[0\]\.simpleName must be a string/);
+});
+
+test("a method-not-found maps to a clear 'update the LSP server' result, not a crash", async () => {
   const tools = toolsWith((msg) => ({
     jsonrpc: "2.0",
     id: msg.id,
@@ -75,8 +94,8 @@ test("a method-not-found maps to a clear 'not yet supported' result, not a crash
   }));
   const res = await tools.get("lsp:list_domains")!.handler({});
   assert.equal(res.isError, true);
-  assert.match(text(res), /does not implement 'workspace\/exerisDomains' yet/);
-  assert.match(text(res), /companion PR in exeris-platform-lsp/);
+  assert.match(text(res), /does not implement 'exeris\/domains'/);
+  assert.match(text(res), /update or rebuild/);
 });
 
 test("a non-method-not-found JSON-RPC error surfaces code and message", async () => {
@@ -115,16 +134,30 @@ test("lsp:describe_domain rejects a missing/blank qualifiedName before any LSP c
   assert.equal(called, false);
 });
 
-test("lsp:describe_domain forwards qualifiedName as the request params", async () => {
+test("lsp:describe_domain forwards qualifiedName and validates the DomainDescription", async () => {
   let seenParams: unknown;
+  const description = {
+    ...DOMAIN_SUMMARY,
+    fields: [{ name: "total", type: "BigDecimal", required: true }],
+    actions: [
+      {
+        name: "submit",
+        httpMethod: "POST",
+        resultType: "void",
+        params: [{ name: "note", type: "String", required: false }],
+      },
+    ],
+    artefacts: ["rest", "events"],
+  };
   const tools = toolsWith((msg) => {
-    if (msg.method === "workspace/exerisDomainDescribe") {
+    if (msg.method === "exeris/domainDescribe") {
       seenParams = msg.params;
-      return { jsonrpc: "2.0", id: msg.id, result: { fields: [] } };
+      return { jsonrpc: "2.0", id: msg.id, result: description };
     }
     return undefined;
   });
   const res = await tools.get("lsp:describe_domain")!.handler({ qualifiedName: "com.acme.Order" });
   assert.ok(!res.isError);
   assert.deepEqual(seenParams, { qualifiedName: "com.acme.Order" });
+  assert.deepEqual(JSON.parse(text(res)), description);
 });

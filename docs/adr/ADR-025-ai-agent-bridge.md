@@ -30,7 +30,7 @@ The repo is deliberately named *bridge*, not *mcp*: MCP is the first protocol su
 
 1. **Repository and layout.** `~/exeris-systems/exeris-ai-bridge/` — public, Apache 2.0, top-level sibling to `exeris-kernel`, `exeris-sdk`, `exeris-tooling`. TypeScript + Node 20+ as the implementation stack (rationale below). Module layout: `src/tools/lsp/`, `src/tools/docs/`, `src/tools/kernel/` for the three initial tool families; `src/server.ts` for the MCP server entry; `src/transport/` for stdio and SSE transports.
 2. **Three initial tool families.**
-   - `lsp:*` — query Studio/LSP for `@ExerisDomain` types, action signatures, codegen artefacts. Talks to `exeris-platform-lsp` over JSON-RPC (LSP-native transport, no new wire format).
+   - `lsp:*` — query Studio/LSP for `@ExerisDomain` types, action signatures, codegen artefacts. Talks to `exeris-platform-lsp` over JSON-RPC (LSP-native transport, no new wire format). *(The concrete method names + payload shapes are pinned by the 2026-06-24 amendment "`lsp:*` Binds to the Read-Only `exeris/*` LSP Slice" below: methods are `exeris/domains` / `exeris/domainDescribe` / `exeris/actions`, read-only.)*
    - `docs:*` — search the ADR registry, fetch ADR-NNN content, fetch HLA / whitepaper / template by name. Reads `exeris-docs/` filesystem; no network dependency.
    - `kernel:*` — introspect provider registry, subsystem DAG, per-subsystem detail, JVM/runtime ergonomics. MUST NOT embed kernel; MUST query a running kernel via a *read-only diagnostic SPI* (`KernelDiagnostics`) in `exeris-kernel-spi`. Talks via a thin JSON-over-stdio adapter spawned by the agent (no Spring, no servlet, no IoC — see Wall obligation below). *(The original wording listed "capability composition (per ADR-024)" here — **superseded by the 2026-06-17 amendment "`kernel:*` Is Cap-Blind" below**. ADR-024's 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel cap-blind, so capability composition is NOT a `kernel:*` surface; it is a tooling/platform concern. The provider-registry / subsystem-DAG clauses stand.)*
 3. **Stack: TypeScript.** Rationale: (a) `@modelcontextprotocol/sdk` is most mature in TS; (b) LSP bridge is naturally JSON-RPC in Node; (c) docs surface is filesystem-bound markdown — no Java needed; (d) kernel introspection crosses a process boundary by design (see The Wall obligation below), so language uniformity with the kernel is not a benefit. The kernel stays Java; the bridge stays TS; the boundary between them is JSON-over-stdio.
@@ -87,6 +87,21 @@ A kernel-sourced `list_capabilities` therefore cannot return real composition da
 - ADR-024 (Capability Composition Model — 2026-06-17 "Validation Stamp Lifecycle" amendment, revised obligation 9) — the cap-blind-kernel decision this amendment aligns to.
 - ADR-006 (The Wall) — Tier 1 stays blind to Tier 2 abstractions.
 - ADR-033 (`KernelDiagnostics` SPI, owned by `exeris-kernel`) — the SPI whose `listCapabilities()` method is removed in lockstep; tracked in that repo.
+
+## `lsp:*` Binds to the Read-Only `exeris/*` LSP Slice (2026-06-24 amendment)
+
+Obligation 2's `lsp:*` bullet committed the family to "query Studio/LSP … over JSON-RPC (LSP-native transport, no new wire format)" but did not pin the method names or payload shapes — at acceptance `exeris-platform-lsp` was a skeleton. The companion read-only slice has now landed (`exeris-platform`, `feat/lsp-readonly-slice`), so this amendment pins the contract the bridge consumes.
+
+### The Decision
+
+1. **Method namespace is `exeris/*`, not `workspace/exeris*`.** The three custom requests are `exeris/domains`, `exeris/domainDescribe` (params `{ qualifiedName }`), and `exeris/actions`. They map onto the bridge tools `lsp:list_domains`, `lsp:describe_domain`, and `lsp:list_actions` respectively. (The earlier `workspace/exeris*` working names from ROADMAP 0.3.0 are superseded.)
+2. **The wire shapes are fixed and validated bridge-side.** `exeris/domains` → `DomainSummary[]` (`qualifiedName`, `simpleName`, `packageName`, `sourcePath`); `exeris/domainDescribe` → `DomainDescription` (the summary fields plus `fields[]` of `{ name, type, required }`, `actions[]` of `{ name, httpMethod, resultType, params[] }`, and `artefacts[]` — generated surfaces such as `rest` / `graphql` / `realtime` / `eventSourced` / `saga` / `events` / `internalClient`); `exeris/actions` → `ActionSummary[]` (`owningDomain`, `name`, `httpMethod`, `resultType`, `params[]`). The bridge validates each result against these shapes (`src/tools/lsp/shapes.ts`) and re-emits only the contract fields, so a version-skewed server surfaces a clear shape error instead of leaking drift to the agent.
+3. **The slice is read-only — by design and by construction.** Per the platform method-surface contract the `exeris/*` namespace also reserves a write-back method (`exeris/applyMutation`); the bridge **does not** consume it and MUST NOT. This is the `lsp:*` analogue of hard constraint 3 (no mutation of kernel state): the bridge is a read-only introspection surface across **all** families, not only `kernel:*`.
+
+### Cross-references for this amendment
+
+- ADR-006 (The Wall) — the bridge proxies the LSP over a process boundary; no Java interop.
+- `exeris-platform/exeris-platform-lsp/` (`feat/lsp-readonly-slice`) — the companion that defines `ExerisProtocolExtensions` + `ProtocolProjections`; the authoritative source of these wire shapes.
 
 ## Cross-references
 

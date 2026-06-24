@@ -6,23 +6,30 @@ import {
   LspTransportError,
 } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
+import {
+  LspShapeError,
+  parseActionSummaries,
+  parseDomainDescription,
+  parseDomainSummaries,
+} from "./shapes.js";
 
 // lsp:* — bridges agent queries to a child exeris-platform-lsp process over
 // JSON-RPC (see ../../transport/lsp-client.ts). Exposes @ExerisDomain types,
 // their source-model descriptions, and @Action signatures.
 //
-// Phase 3a (ROADMAP 0.3.0) ships the transport, discovery, and resilient
-// error model. The three custom requests below do NOT yet exist in
-// exeris-platform-lsp (that module is currently a skeleton); a companion PR
-// adds them. Until then, a live call reaches the server and comes back as a
-// JSON-RPC "method not found", which we translate into a clear "not yet
-// supported" tool result rather than a crash. The bridge surface — tool
-// names and input schemas — is final, so agents and tests can wire against
-// it today.
+// Phase 3a (ROADMAP 0.3.0) shipped the transport, discovery, and resilient
+// error model. The companion read-only `exeris/*` slice now exists in
+// exeris-platform-lsp (the three requests below); each result is validated
+// against its wire shape (./shapes.ts) before being returned. A server that
+// predates the slice answers "method not found", which we translate into a
+// clear "update the LSP server" result rather than a crash. The bridge
+// surface — tool names and input schemas — is final and read-only; the
+// write-back method (`exeris/applyMutation`) is deliberately NOT consumed
+// (ADR-025 §"no mutation of kernel state" generalises to no mutation, period).
 
-const METHOD_LIST_DOMAINS = "workspace/exerisDomains";
-const METHOD_DESCRIBE_DOMAIN = "workspace/exerisDomainDescribe";
-const METHOD_LIST_ACTIONS = "workspace/exerisActions";
+const METHOD_LIST_DOMAINS = "exeris/domains";
+const METHOD_DESCRIBE_DOMAIN = "exeris/domainDescribe";
+const METHOD_LIST_ACTIONS = "exeris/actions";
 
 export function registerLspTools(config: BridgeConfig, clientOverride?: LspClient): RegisteredTool[] {
   // One client per server process, shared across the family. Construction is
@@ -38,7 +45,7 @@ function listDomainsTool(client: LspClient): RegisteredTool {
       description: "List all @ExerisDomain types known to the active LSP session.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => callLsp(client, METHOD_LIST_DOMAINS),
+    handler: async () => callLsp(client, METHOD_LIST_DOMAINS, undefined, parseDomainSummaries),
   };
 }
 
@@ -61,7 +68,7 @@ function describeDomainTool(client: LspClient): RegisteredTool {
       if (typeof qualifiedName !== "string" || qualifiedName.trim().length === 0) {
         return errorResult("Invalid input: 'qualifiedName' must be a non-empty string");
       }
-      return callLsp(client, METHOD_DESCRIBE_DOMAIN, { qualifiedName });
+      return callLsp(client, METHOD_DESCRIBE_DOMAIN, { qualifiedName }, parseDomainDescription);
     },
   };
 }
@@ -73,24 +80,30 @@ function listActionsTool(client: LspClient): RegisteredTool {
       description: "List all @Action methods across the workspace, with their owning @ExerisDomain.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => callLsp(client, METHOD_LIST_ACTIONS),
+    handler: async () => callLsp(client, METHOD_LIST_ACTIONS, undefined, parseActionSummaries),
   };
 }
 
 /**
- * Run a single LSP request and render it as a tool result, mapping the
- * transport's typed failures onto actionable agent-facing messages.
+ * Run a single LSP request, validate the result against its wire shape, and
+ * render it as a tool result — mapping the transport's typed failures and any
+ * shape mismatch onto actionable agent-facing messages.
  */
-async function callLsp(client: LspClient, method: string, params?: unknown) {
+async function callLsp<T>(
+  client: LspClient,
+  method: string,
+  params: unknown,
+  parse: (result: unknown) => T,
+) {
+  let result: unknown;
   try {
-    const result = await client.request(method, params);
-    return ok(JSON.stringify(result, null, 2));
+    result = await client.request(method, params);
   } catch (err) {
     if (err instanceof LspRequestError && err.code === JSONRPC_METHOD_NOT_FOUND) {
       return errorResult(
-        `The configured exeris-platform-lsp does not implement '${method}' yet. ` +
-          `The bridge transport is ready (Phase 3a); this request lands with the ` +
-          `ROADMAP 0.3.0 companion PR in exeris-platform-lsp.`,
+        `The configured exeris-platform-lsp does not implement '${method}'. ` +
+          `The read-only 'exeris/*' slice ships in exeris-platform — update or rebuild ` +
+          `the LSP server (EXERIS_LSP_COMMAND) to a build that includes it.`,
       );
     }
     if (err instanceof LspRequestError) {
@@ -104,6 +117,19 @@ async function callLsp(client: LspClient, method: string, params?: unknown) {
     }
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(`Unexpected LSP error on '${method}': ${message}`);
+  }
+  try {
+    return ok(JSON.stringify(parse(result), null, 2));
+  } catch (err) {
+    if (err instanceof LspShapeError) {
+      return errorResult(
+        `The exeris-platform-lsp response to '${method}' did not match the expected ` +
+          `read-only wire shape: ${err.message}. The bridge and the LSP server may be on ` +
+          `mismatched versions of the 'exeris/*' contract.`,
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(`Failed to parse the '${method}' response: ${message}`);
   }
 }
 
