@@ -11,7 +11,7 @@ import { formatSandboxStderrLine, redactEcosystemPaths, registerDocsTools } from
 
 // docs:* handlers never touch config.lsp; a fixed stub keeps the literals
 // type-complete without coupling these tests to LSP transport details.
-const STUB_LSP = { command: "true", args: [] as string[], source: "default" as const };
+const STUB_LSP = { command: "true", args: [] as string[], source: "default" as const, workspaceRoot: "/var/empty" };
 
 let base: string;
 let config: BridgeConfig;

@@ -12,7 +12,7 @@ import { registerLspTools } from "./tools/lsp/index.js";
 const stubConfig: BridgeConfig = {
   docsRoot: "/var/empty/exeris-docs-stub",
   ecosystemRoot: "/var/empty",
-  lsp: { command: "true", args: [], source: "default" },
+  lsp: { command: "true", args: [], source: "default", workspaceRoot: "/var/empty" },
 };
 
 test("docs registry exposes at least one tool", () => {

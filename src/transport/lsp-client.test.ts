@@ -83,6 +83,27 @@ test("request performs the initialize handshake before the first call", async ()
   assert.equal(channel.sent[2].method, "exeris/domains");
 });
 
+test("initialize sends rootUri as a file URI when workspaceRoot is set, null otherwise", async () => {
+  // Responds to every message (incl. the trailing call) so no request is left pending.
+  const respondAll = (msg: any) => ({ jsonrpc: "2.0", id: msg.id, result: [] });
+
+  const withRoot = new FakeChannel();
+  withRoot.autoResponder = respondAll;
+  const client = new LspClient(
+    { ...SPEC, workspaceRoot: "/srv/project" },
+    { channelFactory: () => withRoot },
+  );
+  await client.request("exeris/domains");
+  assert.equal(withRoot.sent[0].method, "initialize");
+  assert.equal(withRoot.sent[0].params.rootUri, "file:///srv/project");
+
+  const noRoot = new FakeChannel();
+  noRoot.autoResponder = respondAll;
+  const plain = new LspClient(SPEC, { channelFactory: () => noRoot });
+  await plain.request("exeris/domains");
+  assert.equal(noRoot.sent[0].params.rootUri, null);
+});
+
 test("the handshake runs once across concurrent requests", async () => {
   const channel = new FakeChannel();
   channel.autoResponder = (msg) => ({ jsonrpc: "2.0", id: msg.id, result: msg.method });

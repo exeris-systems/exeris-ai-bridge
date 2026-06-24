@@ -127,3 +127,16 @@ test("a blank EXERIS_LSP_COMMAND falls back to the default", () => {
   assert.equal(cfg.lsp.command, "mvn");
   assert.equal(cfg.lsp.source, "default");
 });
+
+test("EXERIS_LSP_WORKSPACE sets the LSP workspace root; cwd is the default", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const explicit = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: "/srv/project" });
+  assert.equal(explicit.lsp.workspaceRoot, "/srv/project");
+
+  const defaulted = loadConfig({ EXERIS_DOCS_ROOT: docs });
+  assert.equal(defaulted.lsp.workspaceRoot, process.cwd());
+
+  const blank = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: "   " });
+  assert.equal(blank.lsp.workspaceRoot, process.cwd());
+});

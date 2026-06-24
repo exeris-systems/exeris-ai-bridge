@@ -21,8 +21,11 @@ export interface FieldDescription {
 
 export interface ActionDescription {
   name: string;
-  httpMethod: string;
-  resultType: string;
+  // httpMethod and resultType are nullable in the source model — an action need
+  // not be HTTP-mapped, and a void method has no result type. LSP4J/Gson omits
+  // a null Java String entirely, so the bridge normalizes "absent" to null.
+  httpMethod: string | null;
+  resultType: string | null;
   params: ParamSummary[];
 }
 
@@ -30,8 +33,8 @@ export interface ActionDescription {
 export interface ActionSummary {
   owningDomain: string;
   name: string;
-  httpMethod: string;
-  resultType: string;
+  httpMethod: string | null;
+  resultType: string | null;
   params: ParamSummary[];
 }
 
@@ -83,6 +86,14 @@ function asString(value: unknown, path: string): string {
   return value;
 }
 
+/** A string, or null when the field is absent/null (Gson omits null Strings). */
+function asNullableString(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return asString(value, path);
+}
+
 function asBoolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") {
     throw new LspShapeError(`${path} must be a boolean, got ${describe(value)}`);
@@ -122,8 +133,8 @@ function parseAction(value: unknown, path: string): ActionDescription {
   const o = asObject(value, path);
   return {
     name: asString(o.name, `${path}.name`),
-    httpMethod: asString(o.httpMethod, `${path}.httpMethod`),
-    resultType: asString(o.resultType, `${path}.resultType`),
+    httpMethod: asNullableString(o.httpMethod, `${path}.httpMethod`),
+    resultType: asNullableString(o.resultType, `${path}.resultType`),
     params: parseParams(o.params, `${path}.params`),
   };
 }
@@ -164,8 +175,8 @@ export function parseActionSummaries(result: unknown): ActionSummary[] {
     return {
       owningDomain: asString(o.owningDomain, `actions[${i}].owningDomain`),
       name: asString(o.name, `actions[${i}].name`),
-      httpMethod: asString(o.httpMethod, `actions[${i}].httpMethod`),
-      resultType: asString(o.resultType, `actions[${i}].resultType`),
+      httpMethod: asNullableString(o.httpMethod, `actions[${i}].httpMethod`),
+      resultType: asNullableString(o.resultType, `actions[${i}].resultType`),
       params: parseParams(o.params, `actions[${i}].params`),
     };
   });

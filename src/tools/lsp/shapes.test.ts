@@ -86,6 +86,37 @@ test("parseActionSummaries validates the owning domain and params", () => {
   assert.deepEqual(parseActionSummaries(actions), actions);
 });
 
+test("parseActionSummaries normalizes absent/null httpMethod and resultType to null", () => {
+  // A void, non-HTTP action: the server (LSP4J/Gson) omits the null String fields.
+  const out = parseActionSummaries([
+    { owningDomain: "com.acme.Order", name: "recalculate", params: [] },
+  ]);
+  assert.deepEqual(out, [
+    {
+      owningDomain: "com.acme.Order",
+      name: "recalculate",
+      httpMethod: null,
+      resultType: null,
+      params: [],
+    },
+  ]);
+});
+
+test("parseDomainDescription normalizes a void action's resultType to null", () => {
+  const description = {
+    qualifiedName: "com.acme.Order",
+    simpleName: "Order",
+    packageName: "com.acme",
+    sourcePath: "/ws/Order.java",
+    fields: [],
+    actions: [{ name: "submit", httpMethod: "POST", params: [] }], // resultType omitted (void)
+    artefacts: [],
+  };
+  const out = parseDomainDescription(description);
+  assert.equal(out.actions[0].resultType, null);
+  assert.equal(out.actions[0].httpMethod, "POST");
+});
+
 test("parseActionSummaries rejects a missing owningDomain", () => {
   assert.throws(
     () =>
