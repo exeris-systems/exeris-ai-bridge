@@ -145,8 +145,8 @@ export function parseDomainSummaries(result: unknown): DomainSummary[] {
 
 /** Validate an `exeris/domainDescribe` result into a canonical `DomainDescription`. */
 export function parseDomainDescription(result: unknown): DomainDescription {
-  const summary = parseDomainSummary(result, "domain");
-  const o = result as Record<string, unknown>;
+  const o = asObject(result, "domain");
+  const summary = parseDomainSummary(o, "domain");
   return {
     ...summary,
     fields: asArray(o.fields, "domain.fields").map((f, i) => parseField(f, `domain.fields[${i}]`)),

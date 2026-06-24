@@ -122,7 +122,8 @@ src/
                              HLA, whitepaper, search, per-repo docs surface)
       adr-index.ts           parser for exeris-docs/adr-index.md
     lsp/index.ts             lsp:list_domains, lsp:describe_domain, lsp:list_actions — LSP proxy
-                             (transport ready 0.3.0 Phase 3a; data path blocked on companion)
+                             (Phase 3b: bound to the exeris/* slice, shape-validated)
+    lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription / ActionSummary)
     kernel/index.ts          kernel:list_providers, kernel:get_bootstrap_dag, kernel:describe_subsystem
                              — diagnostic adapter (placeholder, 0.4.0; cap-blind — no list_capabilities)
 docs/

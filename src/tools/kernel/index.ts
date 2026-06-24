@@ -56,6 +56,8 @@ export function registerKernelTools(): RegisteredTool[] {
           required: ["name"],
         },
       },
+      // args.name must be forwarded to the diagnostics request once
+      // src/transport/kernel-adapter.ts lands (0.4.0); the placeholder ignores it.
       handler: async () => ({
         content: [{ type: "text", text: PENDING_ADAPTER }],
         isError: true,

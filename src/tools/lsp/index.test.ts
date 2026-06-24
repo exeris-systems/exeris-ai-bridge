@@ -18,13 +18,21 @@ const CONFIG: BridgeConfig = {
   lsp: { command: "lsp-stub", args: [], source: "default" },
 };
 
+/** Minimal JSON-RPC request shape the FakeChannel scripts against. */
+interface RpcRequest {
+  jsonrpc?: string;
+  id?: number | string | null;
+  method?: string;
+  params?: unknown;
+}
+
 /** Minimal scriptable channel — answers `initialize`, then defers to `onCall`. */
 class FakeChannel implements LspChannel {
   private dataHandler: ((c: Buffer) => void) | null = null;
   private readonly decoder = new LspMessageDecoder();
-  constructor(private readonly onCall: (msg: any) => unknown | undefined) {}
+  constructor(private readonly onCall: (msg: RpcRequest) => unknown | undefined) {}
   write(chunk: Buffer): void {
-    for (const msg of this.decoder.push(chunk) as any[]) {
+    for (const msg of this.decoder.push(chunk) as RpcRequest[]) {
       const response =
         msg.method === "initialize"
           ? { jsonrpc: "2.0", id: msg.id, result: { capabilities: {} } }
@@ -39,7 +47,7 @@ class FakeChannel implements LspChannel {
   close(): void {}
 }
 
-function toolsWith(onCall: (msg: any) => unknown | undefined) {
+function toolsWith(onCall: (msg: RpcRequest) => unknown | undefined) {
   const client = new LspClient(CONFIG.lsp, { channelFactory: () => new FakeChannel(onCall) });
   return new Map(registerLspTools(CONFIG, client).map((t) => [t.definition.name, t]));
 }
@@ -96,6 +104,24 @@ test("a method-not-found maps to a clear 'update the LSP server' result, not a c
   assert.equal(res.isError, true);
   assert.match(text(res), /does not implement 'exeris\/domains'/);
   assert.match(text(res), /update or rebuild/);
+});
+
+test("lsp:list_actions returns the validated ActionSummary[] as pretty JSON on success", async () => {
+  const actions = [
+    {
+      owningDomain: "com.acme.Order",
+      name: "submit",
+      httpMethod: "POST",
+      resultType: "void",
+      params: [{ name: "note", type: "String", required: false }],
+    },
+  ];
+  const tools = toolsWith((msg) =>
+    msg.method === "exeris/actions" ? { jsonrpc: "2.0", id: msg.id, result: actions } : undefined,
+  );
+  const res = await tools.get("lsp:list_actions")!.handler({});
+  assert.ok(!res.isError);
+  assert.deepEqual(JSON.parse(text(res)), actions);
 });
 
 test("a non-method-not-found JSON-RPC error surfaces code and message", async () => {
