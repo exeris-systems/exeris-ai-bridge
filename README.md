@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.2.0 — `docs:*` family live; `lsp:*` family complete and verified end-to-end (0.3.0 closed).** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` family (3 tools) is bound to the read-only `exeris/*` slice that shipped in `exeris-platform-lsp` (`feat/lsp-readonly-slice`): `lsp:list_domains` / `lsp:describe_domain` / `lsp:list_actions` call `exeris/domains` / `exeris/domainDescribe` / `exeris/actions` and validate each result against its wire shape. The live data path is covered by an opt-in integration test that spawns a real server over stdio (`EXERIS_LSP_IT=1`; the bridge points the server at `EXERIS_LSP_WORKSPACE`, default cwd, via `initialize` `rootUri`). The `kernel:*` family (3 tools) remains a definition-only placeholder; its upstream contract (the `KernelDiagnostics` SPI + CLI) has shipped in `exeris-kernel` (v0.9.0, ADR-033), so it is now blocked only on the bridge-side adapter (`src/transport/kernel-adapter.ts`, 0.4.0).
+**0.2.0 — `docs:*` live; `lsp:*` (0.3.0) and `kernel:*` (0.4.0) complete and verified end-to-end.** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` family (3 tools) is bound to the read-only `exeris/*` slice that shipped in `exeris-platform-lsp` (`feat/lsp-readonly-slice`): `lsp:list_domains` / `lsp:describe_domain` / `lsp:list_actions` call `exeris/domains` / `exeris/domainDescribe` / `exeris/actions` and validate each result against its wire shape; the live path is covered by an opt-in integration test (`EXERIS_LSP_IT=1`; the bridge points the server at `EXERIS_LSP_WORKSPACE`, default cwd, via `initialize` `rootUri`). The `kernel:*` family (3 tools) is bound to the `KernelDiagnostics` SPI that shipped in `exeris-kernel` (v0.9.0, ADR-033): `kernel:list_providers` / `kernel:get_bootstrap_dag` / `kernel:describe_subsystem` reach a child `exeris-kernel-diagnostics-cli` over NDJSON (`src/transport/kernel-adapter.ts`) and validate each snapshot against its wire shape; the live path is covered by an opt-in integration test that spawns the real CLI (`EXERIS_KERNEL_IT=1` + `EXERIS_KERNEL_COMMAND`). Read-only and cap-blind by construction (no `kernel:list_capabilities`). Next: MCP resources + prompts (0.5.0).
 
 Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
 
@@ -82,6 +82,8 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 
 `EXERIS_LSP_WORKSPACE` (optional) is the workspace root the LSP server indexes for `@ExerisDomain` sources, sent as `rootUri` in the `initialize` handshake. It defaults to the bridge's working directory (the project it was spawned in). With no resolvable workspace the server returns an empty index, so `lsp:*` tools answer `[]`.
 
+`EXERIS_KERNEL_COMMAND` (optional) is how the `kernel:*` family launches its `exeris-kernel-diagnostics-cli` child — a whitespace-separated command + args (no shell quoting; exec'd directly), spawned lazily on the first `kernel:*` call and cached. It defaults to `mvn -q -f <ecosystemRoot>/exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml exec:java -Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli` (`-q` keeps Maven's logging off the NDJSON stdout; the CLI logs to stderr, which is inherited into the bridge's logs). The CLI boots the kernel in **read-only inspect mode** and speaks newline-delimited JSON; the bridge correlates responses FIFO and validates each snapshot against its `KernelDiagnostics` wire shape. A pre-built shaded jar is the faster override — but because the kernel is Java 26 preview, a direct launch must enable preview: `EXERIS_KERNEL_COMMAND="java --enable-preview -jar /abs/exeris-kernel/exeris-kernel-diagnostics-cli/target/exeris-kernel-diagnostics-cli-<ver>.jar"`. If the CLI is missing or fails to boot, `kernel:*` calls return a structured "set EXERIS_KERNEL_COMMAND / start the CLI" result rather than crashing.
+
 For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
 
 ## Try it (end-to-end)
@@ -105,7 +107,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 15 tool definitions (9 live `docs:*`, plus the 3 `lsp:*` and 3 `kernel:*` placeholders); `tools/call` on `docs:get_adr` returns the ADR-024 body.
+`tools/list` advertises all 15 tool definitions (9 `docs:*`, 3 `lsp:*`, 3 `kernel:*` — all live); `tools/call` on `docs:get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
@@ -117,6 +119,8 @@ src/
   transport/
     lsp-framing.ts           LSP base-protocol (Content-Length) message codec
     lsp-client.ts            JSON-RPC client over a child exeris-platform-lsp process
+    ndjson-framing.ts        newline-delimited JSON message codec (kernel CLI)
+    kernel-adapter.ts        NDJSON client over a child exeris-kernel-diagnostics-cli process
   tools/
     types.ts                 Shared ToolDefinition / ToolHandler types
     docs/
@@ -127,7 +131,8 @@ src/
                              (Phase 3b: bound to the exeris/* slice, shape-validated)
     lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription / ActionSummary)
     kernel/index.ts          kernel:list_providers, kernel:get_bootstrap_dag, kernel:describe_subsystem
-                             — diagnostic adapter (placeholder, 0.4.0; cap-blind — no list_capabilities)
+                             — KernelDiagnostics proxy over NDJSON (cap-blind — no list_capabilities)
+    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/Subsystem)
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)

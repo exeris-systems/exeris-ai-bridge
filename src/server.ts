@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   for (const tool of [
     ...registerDocsTools(config),
     ...registerLspTools(config),
-    ...registerKernelTools(),
+    ...registerKernelTools(config),
   ]) {
     tools.set(tool.definition.name, tool);
   }

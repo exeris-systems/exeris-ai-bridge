@@ -1,67 +1,147 @@
+import type { BridgeConfig } from "../../config/env.js";
+import {
+  KernelAdapter,
+  KernelRequestError,
+  KernelTransportError,
+} from "../../transport/kernel-adapter.js";
 import type { RegisteredTool } from "../types.js";
+import {
+  KernelShapeError,
+  parseBootstrapDagSnapshot,
+  parseProvidersSnapshot,
+  parseSubsystemSnapshot,
+} from "./shapes.js";
 
-// Read-only introspection of a running Exeris kernel via the KernelDiagnostics SPI.
-// Crosses a process boundary by design — preserves The Wall (ADR-006).
+// kernel:* — read-only introspection of a running Exeris kernel via the
+// KernelDiagnostics SPI, reached through a child exeris-kernel-diagnostics-cli
+// process over NDJSON (see ../../transport/kernel-adapter.ts). Crossing that
+// process boundary is what preserves The Wall (ADR-006) by construction.
 //
-// Scope: runtime kernel state ONLY — provider registry, bootstrap/subsystem DAG,
-// per-subsystem detail. This family is cap-blind: capability composition is a
-// build-time tooling/platform surface, NOT a kernel one (ADR-024 2026-06-17
-// "Validation Stamp Lifecycle" amendment; ADR-025 2026-06-17 "kernel:* Is Cap-Blind"
-// amendment). Do NOT add a kernel:list_capabilities tool here.
+// Scope: runtime kernel state ONLY — provider registry, bootstrap/subsystem
+// DAG, per-subsystem detail. This family is cap-blind: capability composition
+// is a build-time tooling/platform surface, NOT a kernel one (ADR-024 2026-06-17
+// "Validation Stamp Lifecycle" amendment; ADR-025 "kernel:* Is Cap-Blind"
+// amendment). Do NOT add a kernel:list_capabilities tool here — if composition
+// is ever surfaced it sources from exeris-tooling build artefacts and/or the
+// exeris-platform composition runtime, never the kernel, and needs its own
+// ADR-025 amendment first.
 //
-// The KernelDiagnostics SPI + Community provider + exeris-kernel-diagnostics-cli have
-// shipped (exeris-kernel v0.9.0, ADR-033 ACCEPTED). These handlers are placeholders
-// until the Node-side adapter (src/transport/kernel-adapter.ts) lands in 0.4.0.
+// Every tool is read-only: the SPI is read-only by design and the bridge never
+// sends a mutating request (ADR-025 §"no mutation of kernel state").
 
-const PENDING_ADAPTER =
-  "Not implemented yet — the KernelDiagnostics SPI + CLI have shipped (exeris-kernel v0.9.0, " +
-  "ADR-033); blocked on the bridge-side kernel adapter (src/transport/kernel-adapter.ts, ROADMAP 0.4.0).";
+const METHOD_LIST_PROVIDERS = "listProviders";
+const METHOD_BOOTSTRAP_DAG = "getBootstrapDag";
+const METHOD_DESCRIBE_SUBSYSTEM = "describeSubsystem";
 
-export function registerKernelTools(): RegisteredTool[] {
-  return [
-    {
-      definition: {
-        name: "kernel:list_providers",
-        description:
-          "List all SPI providers registered with the running kernel, including driver origin (community/enterprise).",
-        inputSchema: { type: "object", properties: {} },
-      },
-      handler: async () => ({
-        content: [{ type: "text", text: PENDING_ADAPTER }],
-        isError: true,
-      }),
+export function registerKernelTools(
+  config: BridgeConfig,
+  adapterOverride?: KernelAdapter,
+): RegisteredTool[] {
+  // One adapter per CLI process, shared across the family. Construction is
+  // cheap and does NOT spawn — the child starts lazily on the first request.
+  const adapter = adapterOverride ?? new KernelAdapter(config.kernel);
+  return [listProvidersTool(adapter), getBootstrapDagTool(adapter), describeSubsystemTool(adapter)];
+}
+
+function listProvidersTool(adapter: KernelAdapter): RegisteredTool {
+  return {
+    definition: {
+      name: "kernel:list_providers",
+      description:
+        "List all SPI providers registered with the running kernel, including driver origin (community/enterprise priority).",
+      inputSchema: { type: "object", properties: {} },
     },
-    {
-      definition: {
-        name: "kernel:get_bootstrap_dag",
-        description:
-          "Snapshot of the kernel bootstrap dependency DAG — nodes (subsystems) with their phase, declared dependencies, and running state.",
-        inputSchema: { type: "object", properties: {} },
-      },
-      handler: async () => ({
-        content: [{ type: "text", text: PENDING_ADAPTER }],
-        isError: true,
-      }),
+    handler: async () =>
+      callKernel(adapter, METHOD_LIST_PROVIDERS, undefined, parseProvidersSnapshot),
+  };
+}
+
+function getBootstrapDagTool(adapter: KernelAdapter): RegisteredTool {
+  return {
+    definition: {
+      name: "kernel:get_bootstrap_dag",
+      description:
+        "Snapshot of the kernel bootstrap dependency DAG — nodes (subsystems) with their phase, declared dependencies, and running state.",
+      inputSchema: { type: "object", properties: {} },
     },
-    {
-      definition: {
-        name: "kernel:describe_subsystem",
-        description:
-          "Detail for a single kernel subsystem by name (e.g. memory, crypto, persistence, graph, transport, events, flow, http, security).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Subsystem name to describe." },
-          },
-          required: ["name"],
+    handler: async () =>
+      callKernel(adapter, METHOD_BOOTSTRAP_DAG, undefined, parseBootstrapDagSnapshot),
+  };
+}
+
+function describeSubsystemTool(adapter: KernelAdapter): RegisteredTool {
+  return {
+    definition: {
+      name: "kernel:describe_subsystem",
+      description:
+        "Detail for a single kernel subsystem by name (e.g. memory, crypto, persistence, graph, transport, events, flow, http, security).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Subsystem name to describe." },
         },
+        required: ["name"],
       },
-      // args.name must be forwarded to the diagnostics request once
-      // src/transport/kernel-adapter.ts lands (0.4.0); the placeholder ignores it.
-      handler: async () => ({
-        content: [{ type: "text", text: PENDING_ADAPTER }],
-        isError: true,
-      }),
     },
-  ];
+    handler: async (args) => {
+      const name = args.name;
+      if (typeof name !== "string" || name.trim().length === 0) {
+        return errorResult("Invalid input: 'name' must be a non-empty string");
+      }
+      return callKernel(adapter, METHOD_DESCRIBE_SUBSYSTEM, { name }, parseSubsystemSnapshot);
+    },
+  };
+}
+
+/**
+ * Run a single diagnostics request, validate the response against its wire
+ * shape, and render it as a tool result — mapping the adapter's typed failures
+ * and any shape mismatch onto actionable agent-facing messages.
+ */
+async function callKernel<T>(
+  adapter: KernelAdapter,
+  method: string,
+  params: Record<string, unknown> | undefined,
+  parse: (result: unknown) => T,
+) {
+  let result: unknown;
+  try {
+    result = await adapter.request(method, params);
+  } catch (err) {
+    if (err instanceof KernelRequestError) {
+      return errorResult(`Kernel diagnostics request '${method}' was rejected: ${err.message}`);
+    }
+    if (err instanceof KernelTransportError) {
+      return errorResult(
+        `${err.message}. Set EXERIS_KERNEL_COMMAND to point at a runnable ` +
+          `exeris-kernel-diagnostics-cli, or start the kernel diagnostics CLI manually; see README.`,
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(`Unexpected kernel error on '${method}': ${message}`);
+  }
+  try {
+    return ok(JSON.stringify(parse(result), null, 2));
+  } catch (err) {
+    if (err instanceof KernelShapeError) {
+      return errorResult(
+        `The kernel diagnostics response to '${method}' did not match the expected ` +
+          `read-only wire shape: ${err.message}. The bridge and the kernel CLI may be on ` +
+          `mismatched KernelDiagnostics schema versions.`,
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(`Failed to parse the '${method}' response: ${message}`);
+  }
+}
+
+function ok(text: string) {
+  return { content: [{ type: "text" as const, text }] };
+}
+
+function errorResult(message: string) {
+  return {
+    content: [{ type: "text" as const, text: message }],
+    isError: true,
+  };
 }

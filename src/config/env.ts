@@ -15,6 +15,8 @@ export interface BridgeConfig {
   readonly ecosystemRoot: string;
   /** How to launch the exeris-platform-lsp child for the lsp:* family. */
   readonly lsp: LspConfig;
+  /** How to launch the exeris-kernel-diagnostics-cli child for the kernel:* family. */
+  readonly kernel: KernelConfig;
 }
 
 /**
@@ -36,8 +38,21 @@ export interface LspConfig {
   readonly workspaceRoot: string;
 }
 
+/**
+ * Launch spec for the kernel diagnostics CLI child. Structurally compatible
+ * with the transport layer's KernelLaunchSpec (command + args); `source` is
+ * debug provenance for bridge:version (0.7.0) and is ignored by the spawner.
+ */
+export interface KernelConfig {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly source: "env" | "default";
+}
+
 const DEFAULT_DOCS_DIRNAME = "exeris-docs";
 const LSP_POM_RELATIVE = "exeris-platform/exeris-platform-lsp/pom.xml";
+const KERNEL_CLI_POM_RELATIVE = "exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml";
+const KERNEL_CLI_MAIN_CLASS = "eu.exeris.kernel.diagnostics.cli.DiagnosticsCli";
 
 /**
  * Resolve the bridge runtime config from the process environment.
@@ -53,7 +68,42 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
   const docsRoot = resolveExistingDir(candidate, "EXERIS_DOCS_ROOT");
   const ecosystemRoot = dirname(docsRoot);
   const lsp = resolveLspConfig(env, ecosystemRoot);
-  return { docsRoot, ecosystemRoot, lsp };
+  const kernel = resolveKernelConfig(env, ecosystemRoot);
+  return { docsRoot, ecosystemRoot, lsp, kernel };
+}
+
+/**
+ * Resolve the kernel diagnostics CLI launch spec from `EXERIS_KERNEL_COMMAND`,
+ * falling back to a Maven invocation against the sibling exeris-kernel CLI
+ * module. Same whitespace-split / no-shell-quoting rules as the LSP command,
+ * and likewise NOT an agent-supplied path: it is an operator-supplied
+ * executable, never derived from a tool argument, so the path-sandbox does not
+ * apply.
+ */
+function resolveKernelConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): KernelConfig {
+  const raw = env.EXERIS_KERNEL_COMMAND?.trim();
+  if (raw !== undefined && raw.length > 0) {
+    const tokens = raw.split(/\s+/);
+    return { command: tokens[0], args: tokens.slice(1), source: "env" };
+  }
+  // Default: run the CLI's main class via Maven against the sibling module. As
+  // with the LSP default, `-q` keeps Maven's own logging off the NDJSON stdout
+  // (the CLI writes responses to stdout, JVM/Maven logs to stderr). `exec:java`
+  // does not require the exec plugin in the module pom — the main class is
+  // passed explicitly. A pre-built shaded jar (`java -jar
+  // …/exeris-kernel-diagnostics-cli-<ver>.jar`) is the faster documented
+  // override via EXERIS_KERNEL_COMMAND.
+  return {
+    command: "mvn",
+    args: [
+      "-q",
+      "-f",
+      join(ecosystemRoot, KERNEL_CLI_POM_RELATIVE),
+      "exec:java",
+      `-Dexec.mainClass=${KERNEL_CLI_MAIN_CLASS}`,
+    ],
+    source: "default",
+  };
 }
 
 /**

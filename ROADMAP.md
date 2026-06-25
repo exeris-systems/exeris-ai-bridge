@@ -60,21 +60,23 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 - [x] **Cross-repo coordination** — companion in `exeris-platform/exeris-platform-lsp/` (`feat/lsp-readonly-slice`) adding the three read-only `exeris/*` requests; the bridge-side companion (method rename + shape validation) is this Phase 3b change
 - [x] **Integration test** — `src/transport/lsp-integration.test.ts`: spawns the real LSP server (default `exec:java`) against a temp fixture workspace (one `@ExerisDomain` source) and asserts all three tools' validated payloads over stdio. Opt-in (gated on `EXERIS_LSP_IT=1` + `EXERIS_LSP_COMMAND`) so the bridge's JVM-free CI stays fast. Confirmed the live data path, retired the stdout caveat, and caught the nullable `resultType`/`httpMethod` contract gap.
 
-## 0.4.0 — `kernel:*` family (upstream shipped; blocked on the bridge-side adapter)
+## 0.4.0 — `kernel:*` family ✅ (closed 2026-06-25)
 
 > Goal: the bridge introspects a running kernel through a process-boundary adapter. Read-only. Preserves The Wall by construction. **Cap-blind** — the kernel exposes runtime state only; capability composition is a tooling/platform surface, not a kernel one (ADR-024 2026-06-17 "Validation Stamp Lifecycle" amendment; ADR-025 §"`kernel:*` Is Cap-Blind").
+
+> **Phase 4a (2026-06-25) — adapter bound + live data path verified.** The Node-side adapter (`src/transport/kernel-adapter.ts`) spawns the shipped `exeris-kernel-diagnostics-cli` over NDJSON and the three tools validate each snapshot against its wire shape (`src/tools/kernel/shapes.ts`, mirrored 1:1 from the `eu.exeris.kernel.spi.diagnostics.*` records, `schemaVersion` "1.0"). The integration test spawns the real CLI end-to-end. Findings: (1) the id-less NDJSON protocol is correlated **FIFO**, so a request timeout / framing desync **soft-resets** the adapter (kills the child, next call re-spawns) rather than misaligning the queue or permanently bricking the family on a slow cold boot; CLI-gone (spawn-error / exit) stays sticky. (2) The default `mvn -q … exec:java` launch keeps NDJSON stdout clean (JVM/Maven logs → stderr); a `java -jar` override needs `--enable-preview` (the kernel is Java 26 preview) and inherits the same clean-stdout property.
 
 - [x] **`KernelDiagnostics` SPI RFC** — `exeris-kernel/docs/rfc/RFC-2026-05-18-kernel-diagnostics-spi.md` ACCEPTED; ADR-033 ACCEPTED (read-only surface, stability contract, NDJSON adapter shape)
 - [x] **`KernelDiagnostics` SPI implementation in `exeris-kernel-spi`** — interface + snapshot records (shipped exeris-kernel v0.9.0)
 - [x] **Community provider in `exeris-kernel-community`** — implements the SPI against the `KernelProviders.SUBSYSTEMS` bootstrap state (inspect mode)
 - [x] **`exeris-kernel-diagnostics-cli`** — Java executable; reads NDJSON requests on stdin, writes responses on stdout; the bridge spawns this as a child process
-- [ ] **`src/transport/kernel-adapter.ts`** — Node-side wrapper: spawn, framed JSON-over-stdio (NDJSON), lifecycle (start lazy, kill on exit). *This is now the gating item — the upstream contract is done.*
-- [ ] **`kernel:list_providers`** — provider class names + driver origin (community / enterprise) + which SPI each one provides
-- [ ] **`kernel:get_bootstrap_dag`** — current state of the FOUNDATION / SERVICES / RUNTIME DAG (per `exeris-kernel/docs/subsystems/bootstrap.md`)
-- [ ] **`kernel:describe_subsystem`** — drill into a specific subsystem (`memory`, `crypto`, `persistence`, `graph`, `transport`, `events`, `flow`, `http`, `security`)
-- [ ] ~~`kernel:list_capabilities`~~ — **removed.** Capability composition is NOT a kernel surface: the open kernel is cap-blind (ADR-024 revised obligation 9). If the bridge ever surfaces composition it reads the build-time `cap-manifest.json` + composition manifest (`exeris-tooling`) and/or the `exeris-platform` composition runtime — never the kernel — and requires its own ADR-025 amendment first. Deferred: no `exeris-caps-*` repo exists yet (first targeted H1 2027).
-- [ ] **Auth-free local mode** — the kernel adapter trusts the spawning process by default; if/when remote introspection lands, auth is layered in 0.6 (SSE + transport auth)
-- [ ] **Integration test** — bridge → kernel adapter → minimal kernel instance, exercising every `kernel:*` tool
+- [x] **`src/transport/kernel-adapter.ts`** — Node-side wrapper: lazy spawn, NDJSON framing (`src/transport/ndjson-framing.ts`), FIFO correlation, per-request timeout, typed `KernelRequestError` / `KernelTransportError`, hard-close vs soft-reset lifecycle. Launch spec is `EXERIS_KERNEL_COMMAND` (default: `mvn -q -f <ecosystemRoot>/exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml exec:java -Dexec.mainClass=…`)
+- [x] **`kernel:list_providers`** — validated `ProvidersSnapshot` (`providers[]`: `providerName`, `spiType`, `priority`, nullable `displayName`); enumerates one Community provider per SPI domain
+- [x] **`kernel:get_bootstrap_dag`** — validated `BootstrapDagSnapshot` (`nodes[]`: `name`, `phase`, `dependsOn`, `running`, `optional`)
+- [x] **`kernel:describe_subsystem`** — validated `SubsystemSnapshot` (`requestedName` echoed, `subsystem` `null` for an unknown name — a clean not-found, not an error)
+- [x] ~~`kernel:list_capabilities`~~ — **removed.** Capability composition is NOT a kernel surface: the open kernel is cap-blind (ADR-024 revised obligation 9). If the bridge ever surfaces composition it reads the build-time `cap-manifest.json` + composition manifest (`exeris-tooling`) and/or the `exeris-platform` composition runtime — never the kernel — and requires its own ADR-025 amendment first. Deferred: no `exeris-caps-*` repo exists yet (first targeted H1 2027).
+- [x] **Auth-free local mode** — the kernel adapter trusts the spawning process by default; if/when remote introspection lands, auth is layered in 0.6 (SSE + transport auth)
+- [x] **Integration test** — `src/transport/kernel-integration.test.ts`: spawns the real diagnostics CLI and exercises all three tools' validated payloads over NDJSON. Opt-in (gated on `EXERIS_KERNEL_IT=1` + `EXERIS_KERNEL_COMMAND`) so the bridge's JVM-free CI stays fast. Confirmed the live data path and the clean-stdout property; the FakeChannel unit suite covers FIFO, timeout soft-reset, framing desync, and sticky crash.
 
 ## 0.5.0 — MCP resources + prompts
 
@@ -156,7 +158,7 @@ This file tracks scope per milestone. Items marked `[ ]` are open; `[x]` shipped
 | Milestone | Dependency repo            | What it needs                                                                                                  |
 |:----------|:----------------------------|:---------------------------------------------------------------------------------------------------------------|
 | 0.3.0     | `exeris-platform`          | Three read-only custom LSP requests in `exeris-platform-lsp` (`exeris/domains`, `exeris/domainDescribe`, `exeris/actions`) — **shipped** (`feat/lsp-readonly-slice`); live data path verified end-to-end by the bridge integration test (default `exec:java` launch clean). 0.3.0 **closed** |
-| 0.4.0     | `exeris-kernel`            | `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli` — **shipped** (v0.9.0, ADR-033). Cap-blind: no capability-composition surface. Gating item is now the bridge-side adapter |
+| 0.4.0     | `exeris-kernel`            | `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli` — **shipped** (v0.9.0, ADR-033). Cap-blind: no capability-composition surface. Bridge-side adapter + live data path verified end-to-end. 0.4.0 **closed** |
 | 0.5.0     | `exeris-docs`              | Stable file layout for ADRs, HLA, whitepaper, templates (no new requirement; just don't restructure the tree)   |
 | 0.6.0     | none                       | (self-contained — SSE + Docker + k8s are local concerns)                                                       |
 
