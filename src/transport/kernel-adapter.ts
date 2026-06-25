@@ -193,11 +193,17 @@ export class KernelAdapter {
 
   private handleMessage(message: unknown): void {
     if (typeof message !== "object" || message === null || Array.isArray(message)) {
-      return; // not a response object — ignore
+      return; // a scalar/array line (e.g. a bare banner) is discarded, not paired
     }
+    // NOTE the asymmetry: a scalar line is discarded above, but an *object*-shaped
+    // spurious line (a stray `{...}` on stdout) is CONSUMED here — it shifts the
+    // oldest pending and is delivered to that caller, which then fails shape
+    // validation. The id-less FIFO has no way to tell a spurious object from a
+    // real response, so this depends on the CLI's clean-stdout guarantee (logs →
+    // stderr); a desync is recovered by timeout soft-reset, not prevented here.
     const pending = this.pending.shift();
     if (pending === undefined) {
-      return; // unsolicited line (e.g. a banner that slipped onto stdout) — ignore
+      return; // no caller waiting — an unsolicited object with an empty queue; ignore
     }
     clearTimeout(pending.timer);
     const error = (message as { error?: unknown }).error;
@@ -212,6 +218,10 @@ export class KernelAdapter {
   private hardClose(reason: KernelCloseReason): void {
     if (this.closeReason === null) this.closeReason = reason;
     this.rejectAllPending(this.transportErrorForClose(reason));
+    // Bump the epoch for the same reason softReset does — a late onData/onClose
+    // from the dying child is then a no-op, keeping the two teardown paths
+    // symmetric. (closeReason already makes request() fail fast regardless.)
+    this.epoch++;
     this.channel?.close();
     this.channel = null;
   }

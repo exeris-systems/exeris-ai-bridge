@@ -103,6 +103,23 @@ test("parseSubsystemSnapshot maps an absent/null subsystem to null (not an error
   assert.equal(explicitNull.subsystem, null);
 });
 
+test("a compatible minor schemaVersion (1.x) is accepted", () => {
+  const out = parseProvidersSnapshot({ schemaVersion: "1.7", capturedAt: "t", providers: [] });
+  assert.equal(out.schemaVersion, "1.7");
+});
+
+test("an incompatible major schemaVersion (2.0) is a clear version error", () => {
+  assert.throws(
+    () => parseBootstrapDagSnapshot({ schemaVersion: "2.0", capturedAt: "t", nodes: [] }),
+    (err: unknown) => {
+      assert.ok(err instanceof KernelShapeError);
+      assert.match(err.message, /incompatible KernelDiagnostics schema major/);
+      assert.match(err.message, /supports 1\.x/);
+      return true;
+    },
+  );
+});
+
 test("a snapshot missing schemaVersion is a shape error", () => {
   assert.throws(
     () => parseProvidersSnapshot({ capturedAt: "t", providers: [] }),

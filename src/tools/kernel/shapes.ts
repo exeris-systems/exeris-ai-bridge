@@ -71,6 +71,28 @@ export class KernelShapeError extends Error {
   }
 }
 
+const SUPPORTED_SCHEMA_MAJOR = "1";
+
+/**
+ * Validate `schemaVersion` and assert major-version compatibility.
+ *
+ * The KernelDiagnostics contract (ADR-033) is append-only within a major: a
+ * "1.x" minor bump stays wire-compatible (new fields are simply ignored by the
+ * shape validators below), while removing or repurposing a field requires a
+ * major bump ("2.0"). So the bridge accepts ANY "1.x" and rejects only a
+ * different major — a literal "1.0" pin would wrongly reject a benign "1.1".
+ */
+function parseSchemaVersion(value: unknown, path: string): string {
+  const version = asString(value, path);
+  if (version.split(".")[0] !== SUPPORTED_SCHEMA_MAJOR) {
+    throw new KernelShapeError(
+      `${path} is '${version}', an incompatible KernelDiagnostics schema major; ` +
+        `this bridge supports ${SUPPORTED_SCHEMA_MAJOR}.x`,
+    );
+  }
+  return version;
+}
+
 function asObject(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new KernelShapeError(`${path} must be an object, got ${describe(value)}`);
@@ -139,7 +161,7 @@ function parseProvider(value: unknown, path: string): ProviderDescriptor {
 export function parseProvidersSnapshot(result: unknown): ProvidersSnapshot {
   const o = asObject(result, "providersSnapshot");
   return {
-    schemaVersion: asString(o.schemaVersion, "providersSnapshot.schemaVersion"),
+    schemaVersion: parseSchemaVersion(o.schemaVersion, "providersSnapshot.schemaVersion"),
     capturedAt: asString(o.capturedAt, "providersSnapshot.capturedAt"),
     providers: asArray(o.providers, "providersSnapshot.providers").map((p, i) =>
       parseProvider(p, `providersSnapshot.providers[${i}]`),
@@ -162,7 +184,7 @@ function parseDagNode(value: unknown, path: string): DagNode {
 export function parseBootstrapDagSnapshot(result: unknown): BootstrapDagSnapshot {
   const o = asObject(result, "bootstrapDagSnapshot");
   return {
-    schemaVersion: asString(o.schemaVersion, "bootstrapDagSnapshot.schemaVersion"),
+    schemaVersion: parseSchemaVersion(o.schemaVersion, "bootstrapDagSnapshot.schemaVersion"),
     capturedAt: asString(o.capturedAt, "bootstrapDagSnapshot.capturedAt"),
     nodes: asArray(o.nodes, "bootstrapDagSnapshot.nodes").map((n, i) =>
       parseDagNode(n, `bootstrapDagSnapshot.nodes[${i}]`),
@@ -175,7 +197,7 @@ export function parseSubsystemSnapshot(result: unknown): SubsystemSnapshot {
   const o = asObject(result, "subsystemSnapshot");
   const subsystem = o.subsystem;
   return {
-    schemaVersion: asString(o.schemaVersion, "subsystemSnapshot.schemaVersion"),
+    schemaVersion: parseSchemaVersion(o.schemaVersion, "subsystemSnapshot.schemaVersion"),
     capturedAt: asString(o.capturedAt, "subsystemSnapshot.capturedAt"),
     requestedName: asString(o.requestedName, "subsystemSnapshot.requestedName"),
     subsystem:
