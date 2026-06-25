@@ -103,6 +103,22 @@ Obligation 2's `lsp:*` bullet committed the family to "query Studio/LSP … over
 - ADR-006 (The Wall) — the bridge proxies the LSP over a process boundary; no Java interop.
 - `exeris-platform/exeris-platform-lsp/` (`feat/lsp-readonly-slice`) — the companion that defines `ExerisProtocolExtensions` + `ProtocolProjections`; the authoritative source of these wire shapes.
 
+## `kernel:*` Binds to the `KernelDiagnostics` NDJSON Contract (2026-06-25 amendment)
+
+Obligation 2's `kernel:*` bullet committed the family to "query a running kernel via a read-only diagnostic SPI (`KernelDiagnostics`) … via a thin JSON-over-stdio adapter" but, at acceptance, the SPI and CLI were not yet shipped. They have now landed (`exeris-kernel` v0.9.0, ADR-033), so this amendment pins the contract the bridge consumes — the `kernel:*` analogue of the `lsp:*` binding amendment above.
+
+### The Decision
+
+1. **Transport is NDJSON over stdio to a child `exeris-kernel-diagnostics-cli`.** One JSON request line in, one response line out, in receipt order, with **no id field** — the protocol is stateless and the bridge correlates responses **FIFO** (`src/transport/kernel-adapter.ts`, framing in `src/transport/ndjson-framing.ts`). Launch spec is `EXERIS_KERNEL_COMMAND` (operator-supplied, never agent-supplied; the path-sandbox does not apply, exactly as for `EXERIS_LSP_COMMAND`).
+2. **The three methods are `listProviders`, `getBootstrapDag`, and `describeSubsystem`** (params `{ name }`), mapping onto `kernel:list_providers`, `kernel:get_bootstrap_dag`, and `kernel:describe_subsystem`. The wire shapes are fixed and validated bridge-side (`src/tools/kernel/shapes.ts`, mirrored 1:1 from `eu.exeris.kernel.spi.diagnostics.*`, `schemaVersion` "1.0"): `ProvidersSnapshot` (`providers[]` of `{ providerName, spiType, priority, displayName }`, `displayName` nullable), `BootstrapDagSnapshot` (`nodes[]` of `{ name, phase, dependsOn[], running, optional }`), `SubsystemSnapshot` (`requestedName`, nullable `subsystem`). A version-skewed CLI surfaces a clear shape error, not drift. The CLI also exposes `getJvmErgonomics`; the bridge does **not** surface it yet — adding a `kernel:*` runtime-ergonomics tool is a future scoped change, not a contract gap.
+3. **Read-only and cap-blind — by design and by construction.** The SPI is read-only and the bridge sends no mutating request (hard constraint 3). `listProviders` enumerates one Community provider per SPI domain; it is **not** a capability-composition surface, consistent with the 2026-06-17 "`kernel:*` Is Cap-Blind" amendment. No `kernel:list_capabilities`.
+
+### Cross-references for this amendment
+
+- ADR-006 (The Wall) — the bridge reaches the kernel only through a child process over NDJSON; no Java interop, no embedded kernel.
+- ADR-033 / `exeris-kernel` (v0.9.0) — `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli`; the authoritative source of these snapshot shapes and the `schemaVersion` "1.0" stability contract.
+- The 2026-06-17 "`kernel:*` Is Cap-Blind" amendment above — the cap-blind stance this binding upholds.
+
 ## Cross-references
 
 - ADR-006 (Spring-Free Kernel Boundary) — the bridge MUST NOT bring Spring into the kernel; the boundary is by-design satisfied because the bridge is a separate process in a separate language.

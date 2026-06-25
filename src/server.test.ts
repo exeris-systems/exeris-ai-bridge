@@ -13,6 +13,7 @@ const stubConfig: BridgeConfig = {
   docsRoot: "/var/empty/exeris-docs-stub",
   ecosystemRoot: "/var/empty",
   lsp: { command: "true", args: [], source: "default", workspaceRoot: "/var/empty" },
+  kernel: { command: "true", args: [], source: "default" },
 };
 
 test("docs registry exposes at least one tool", () => {
@@ -24,14 +25,14 @@ test("lsp registry exposes at least one tool", () => {
 });
 
 test("kernel registry exposes at least one tool", () => {
-  assert.ok(registerKernelTools().length > 0);
+  assert.ok(registerKernelTools(stubConfig).length > 0);
 });
 
 test("tool names are unique across all three families", () => {
   const names = [
     ...registerDocsTools(stubConfig),
     ...registerLspTools(stubConfig),
-    ...registerKernelTools(),
+    ...registerKernelTools(stubConfig),
   ].map((t) => t.definition.name);
   assert.equal(new Set(names).size, names.length);
 });
@@ -43,7 +44,7 @@ test("every tool name is prefixed with its family", () => {
   for (const t of registerLspTools(stubConfig)) {
     assert.match(t.definition.name, /^lsp:/);
   }
-  for (const t of registerKernelTools()) {
+  for (const t of registerKernelTools(stubConfig)) {
     assert.match(t.definition.name, /^kernel:/);
   }
 });

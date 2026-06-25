@@ -128,6 +128,46 @@ test("a blank EXERIS_LSP_COMMAND falls back to the default", () => {
   assert.equal(cfg.lsp.source, "default");
 });
 
+test("kernel config defaults to the sibling exeris-kernel diagnostics-CLI Maven invocation", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs });
+  assert.equal(cfg.kernel.command, "mvn");
+  assert.equal(cfg.kernel.source, "default");
+  assert.ok(cfg.kernel.args.includes("exec:java"));
+  // The CLI main class is passed explicitly (the module pom has no exec config).
+  assert.ok(
+    cfg.kernel.args.some((a) => a === "-Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli"),
+    `expected the CLI main class in args, got ${JSON.stringify(cfg.kernel.args)}`,
+  );
+  // The -f pom path is anchored under ecosystemRoot (= dirname(docsRoot)).
+  assert.ok(
+    cfg.kernel.args.some((a) => a.endsWith("exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml")),
+    `expected a pom path in args, got ${JSON.stringify(cfg.kernel.args)}`,
+  );
+  assert.ok(cfg.kernel.args.some((a) => a.startsWith(cfg.ecosystemRoot)));
+});
+
+test("EXERIS_KERNEL_COMMAND overrides the default, split on whitespace", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({
+    EXERIS_DOCS_ROOT: docs,
+    EXERIS_KERNEL_COMMAND: "  java   -jar   /opt/diag-cli.jar  ",
+  });
+  assert.equal(cfg.kernel.command, "java");
+  assert.deepEqual(cfg.kernel.args, ["-jar", "/opt/diag-cli.jar"]);
+  assert.equal(cfg.kernel.source, "env");
+});
+
+test("a blank EXERIS_KERNEL_COMMAND falls back to the default", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_KERNEL_COMMAND: "   " });
+  assert.equal(cfg.kernel.command, "mvn");
+  assert.equal(cfg.kernel.source, "default");
+});
+
 test("EXERIS_LSP_WORKSPACE sets the LSP workspace root; cwd is the default", () => {
   const docs = join(work, "exeris-docs");
   mkdirSync(docs);

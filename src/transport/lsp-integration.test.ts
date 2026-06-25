@@ -90,7 +90,16 @@ test(
     // Own the client so we can dispose() the child JVM in the finally block.
     const client = new LspClient(config, { requestTimeoutMs: REQUEST_TIMEOUT_MS });
     const tools = new Map(
-      registerLspTools({ docsRoot: "", ecosystemRoot: "", lsp: config }, client).map((t) => [
+      registerLspTools(
+        {
+          docsRoot: "",
+          ecosystemRoot: "",
+          lsp: config,
+          // registerLspTools never reads config.kernel; a stub keeps the type complete.
+          kernel: { command: "true", args: [], source: "default" },
+        },
+        client,
+      ).map((t) => [
         t.definition.name,
         t,
       ]),

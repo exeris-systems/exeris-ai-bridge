@@ -16,6 +16,7 @@ const CONFIG: BridgeConfig = {
   docsRoot: "/var/empty/exeris-docs-stub",
   ecosystemRoot: "/var/empty",
   lsp: { command: "lsp-stub", args: [], source: "default", workspaceRoot: "/var/empty" },
+  kernel: { command: "kernel-stub", args: [], source: "default" },
 };
 
 /** Minimal JSON-RPC request shape the FakeChannel scripts against. */
