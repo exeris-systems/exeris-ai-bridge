@@ -103,7 +103,9 @@ test(
           qualifiedName: "com.example.shop.Order",
           simpleName: "Order",
           packageName: "com.example.shop",
-          sourcePath: domains[0]?.sourcePath, // absolute temp path; assert its tail below
+          // Dynamic absolute temp path — echoed here so deepEqual ignores it;
+          // its value is validated by the assert.match on the tail just below.
+          sourcePath: domains[0]?.sourcePath,
         },
       ]);
       assert.match(domains[0].sourcePath, /Order\.java$/);

@@ -68,7 +68,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
  * tool argument.
  */
 function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspConfig {
-  const workspaceRoot = env.EXERIS_LSP_WORKSPACE?.trim() || process.cwd();
+  const explicitWorkspace = env.EXERIS_LSP_WORKSPACE?.trim();
+  const workspaceRoot = explicitWorkspace || process.cwd();
+  // An empty workspace is legal (a project with no @ExerisDomain sources yet),
+  // so a missing root must NOT throw — but a misspelled EXERIS_LSP_WORKSPACE
+  // would otherwise yield a silent empty index that looks like "no domains".
+  // Warn to stderr (never stdout — that channel is JSON-RPC) when an explicitly
+  // set root does not resolve to a directory, so the `[]` is diagnosable.
+  if (explicitWorkspace && !isExistingDir(workspaceRoot)) {
+    process.stderr.write(
+      `[exeris-ai-bridge] warning: EXERIS_LSP_WORKSPACE is not an existing directory: ` +
+        `${workspaceRoot} — lsp:* tools will return an empty index.\n`,
+    );
+  }
   const raw = env.EXERIS_LSP_COMMAND?.trim();
   if (raw !== undefined && raw.length > 0) {
     const tokens = raw.split(/\s+/);
@@ -101,6 +113,15 @@ function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspCon
 function defaultDocsRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, "..", "..", "..", DEFAULT_DOCS_DIRNAME);
+}
+
+/** Non-throwing existence+directory probe for warn-only diagnostics. */
+function isExistingDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function resolveExistingDir(path: string, envName: string): string {
