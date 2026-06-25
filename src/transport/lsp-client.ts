@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import { encodeMessage, LspMessageDecoder } from "./lsp-framing.js";
 
@@ -41,6 +42,12 @@ export interface LspChannel {
 export interface LspLaunchSpec {
   readonly command: string;
   readonly args: readonly string[];
+  /**
+   * Workspace root sent as `rootUri` in the `initialize` handshake so the
+   * server indexes the right `@ExerisDomain` tree. Omitted/empty → `rootUri:
+   * null` (server returns an empty index).
+   */
+  readonly workspaceRoot?: string | null;
 }
 
 export type LspChannelFactory = (spec: LspLaunchSpec) => LspChannel;
@@ -145,11 +152,12 @@ export class LspClient {
     this.channel.onClose((reason) => this.failPendingAndClose(reason));
 
     // LSP handshake: initialize request, then the initialized notification.
+    const root = this.spec.workspaceRoot;
     await this.dispatch("initialize", {
       processId: null,
       clientInfo: { name: "exeris-ai-bridge" },
       capabilities: {},
-      rootUri: null,
+      rootUri: root ? pathToFileURL(root).href : null,
     });
     this.notify("initialized", {});
   }

@@ -26,6 +26,14 @@ export interface LspConfig {
   readonly command: string;
   readonly args: readonly string[];
   readonly source: "env" | "default";
+  /**
+   * Workspace root the LSP server indexes for `@ExerisDomain` sources, sent as
+   * `rootUri` in the `initialize` handshake. The server walks this tree at
+   * initialize time; with no root it returns an empty index. Defaults to the
+   * bridge's cwd (the project it was spawned in); override with
+   * `EXERIS_LSP_WORKSPACE`.
+   */
+  readonly workspaceRoot: string;
 }
 
 const DEFAULT_DOCS_DIRNAME = "exeris-docs";
@@ -60,22 +68,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
  * tool argument.
  */
 function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspConfig {
+  const explicitWorkspace = env.EXERIS_LSP_WORKSPACE?.trim();
+  const workspaceRoot = explicitWorkspace || process.cwd();
+  // An empty workspace is legal (a project with no @ExerisDomain sources yet),
+  // so a missing root must NOT throw — but a misspelled EXERIS_LSP_WORKSPACE
+  // would otherwise yield a silent empty index that looks like "no domains".
+  // Warn to stderr (never stdout — that channel is JSON-RPC) when an explicitly
+  // set root does not resolve to a directory, so the `[]` is diagnosable.
+  if (explicitWorkspace && !isExistingDir(workspaceRoot)) {
+    process.stderr.write(
+      `[exeris-ai-bridge] warning: EXERIS_LSP_WORKSPACE is not an existing directory: ` +
+        `${workspaceRoot} — lsp:* tools will return an empty index.\n`,
+    );
+  }
   const raw = env.EXERIS_LSP_COMMAND?.trim();
   if (raw !== undefined && raw.length > 0) {
     const tokens = raw.split(/\s+/);
-    return { command: tokens[0], args: tokens.slice(1), source: "env" };
+    return { command: tokens[0], args: tokens.slice(1), source: "env", workspaceRoot };
   }
   // `-q` silences Maven's own [INFO]/[WARNING] lines, which would otherwise
-  // land on the same stdout the framing decoder reads and desync it. NOTE for
-  // the data-path (ROADMAP 0.3.0 companion, currently blocked): `exec:java`
-  // runs the server in Maven's JVM, so the app's System.out still shares this
-  // stdout. Before the first live spawn this default must move to a clean
-  // channel (e.g. `exec:exec` with stdout reserved for JSON-RPC, or a
-  // dedicated launcher) — otherwise expect an immediate LspFramingError.
+  // land on the same stdout the framing decoder reads and desync it. The
+  // server (exeris-platform-lsp, LspMain) writes JSON-RPC frames to stdout and
+  // logs to stderr, so with `-q` the framing channel stays clean. If a given
+  // environment still leaks Maven output onto stdout, switch this default to a
+  // clean channel (`exec:exec` with stdout reserved for JSON-RPC, or launch the
+  // built jar directly) — the integration test (ROADMAP 0.3.0) exercises this.
   return {
     command: "mvn",
     args: ["-q", "-f", join(ecosystemRoot, LSP_POM_RELATIVE), "exec:java"],
     source: "default",
+    workspaceRoot,
   };
 }
 
@@ -91,6 +113,15 @@ function resolveLspConfig(env: NodeJS.ProcessEnv, ecosystemRoot: string): LspCon
 function defaultDocsRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, "..", "..", "..", DEFAULT_DOCS_DIRNAME);
+}
+
+/** Non-throwing existence+directory probe for warn-only diagnostics. */
+function isExistingDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function resolveExistingDir(path: string, envName: string): string {

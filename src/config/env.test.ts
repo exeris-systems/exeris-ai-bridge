@@ -127,3 +127,54 @@ test("a blank EXERIS_LSP_COMMAND falls back to the default", () => {
   assert.equal(cfg.lsp.command, "mvn");
   assert.equal(cfg.lsp.source, "default");
 });
+
+test("EXERIS_LSP_WORKSPACE sets the LSP workspace root; cwd is the default", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const ws = join(work, "workspace");
+  mkdirSync(ws);
+  const explicit = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: ws });
+  assert.equal(explicit.lsp.workspaceRoot, ws);
+
+  const defaulted = loadConfig({ EXERIS_DOCS_ROOT: docs });
+  assert.equal(defaulted.lsp.workspaceRoot, process.cwd());
+
+  const blank = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: "   " });
+  assert.equal(blank.lsp.workspaceRoot, process.cwd());
+});
+
+test("a missing explicit EXERIS_LSP_WORKSPACE warns on stderr but does not throw", () => {
+  const docs = join(work, "exeris-docs");
+  mkdirSync(docs);
+  const missing = join(work, "does-not-exist");
+
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = "";
+  process.stderr.write = (chunk: string) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: missing });
+    // The bad path is still honoured (the server will return an empty index)...
+    assert.equal(cfg.lsp.workspaceRoot, missing);
+  } finally {
+    process.stderr.write = original;
+  }
+  // ...but the operator gets a diagnosable warning naming the path.
+  assert.match(captured, /EXERIS_LSP_WORKSPACE is not an existing directory/);
+  assert.match(captured, /empty index/);
+
+  // The default (cwd, which exists) must stay silent.
+  let silent = "";
+  process.stderr.write = (chunk: string) => {
+    silent += chunk;
+    return true;
+  };
+  try {
+    loadConfig({ EXERIS_DOCS_ROOT: docs });
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.equal(silent, "");
+});

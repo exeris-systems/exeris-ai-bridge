@@ -15,7 +15,7 @@ import { registerLspTools } from "./index.js";
 const CONFIG: BridgeConfig = {
   docsRoot: "/var/empty/exeris-docs-stub",
   ecosystemRoot: "/var/empty",
-  lsp: { command: "lsp-stub", args: [], source: "default" },
+  lsp: { command: "lsp-stub", args: [], source: "default", workspaceRoot: "/var/empty" },
 };
 
 /** Minimal JSON-RPC request shape the FakeChannel scripts against. */
