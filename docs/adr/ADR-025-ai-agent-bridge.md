@@ -8,7 +8,7 @@
 | **Scope**       | cross-repo                                                                                                             |
 | **Owning Repo** | `exeris-ai-bridge`                                                                                                     |
 | **Driven By**   | Recurrent demand for AI-agent assistance across the ecosystem; need to expose Studio/LSP, docs registry, and kernel introspection through a single, agent-native surface |
-| **Compliance**  | [ADR-020](../../../exeris-docs/adr/ADR-020-open-core-documentation-mirror-policy.md) (visibility), [ADR-006](../../../exeris-docs/adr/ADR-006-spring-free-kernel-boundary.md) (The Wall) |
+| **Compliance**  | [ADR-020](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-020-open-core-documentation-mirror-policy.md) (visibility), [ADR-006](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-006-spring-free-kernel-boundary.md) (The Wall) |
 
 ## Context and Problem Statement
 
