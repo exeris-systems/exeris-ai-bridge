@@ -119,6 +119,52 @@ Obligation 2's `kernel:*` bullet committed the family to "query a running kernel
 - ADR-033 / `exeris-kernel` (v0.9.0) — `KernelDiagnostics` SPI + Community provider + `exeris-kernel-diagnostics-cli`; the authoritative source of these snapshot shapes and the `schemaVersion` "1.0" stability contract.
 - The 2026-06-17 "`kernel:*` Is Cap-Blind" amendment above — the cap-blind stance this binding upholds.
 
+## Two Personas — The Bridge Serves Application Developers, Not Only Ecosystem Contributors (2026-08-16 amendment)
+
+The body of this ADR scopes the mission as "**ecosystem** introspection": obligation 2's three families are each sourced from an ecosystem-internal artefact — `docs:*` from the ADR registry of Exeris' own decisions, `lsp:*` from the Studio index, `kernel:*` from a running kernel. That framing was right for the first four milestones and is incomplete for the next four. This amendment names the second audience the bridge was always going to need, and authorises the surfaces that serve it.
+
+### The gap, as evidenced
+
+The bridge has one implicit user: someone working **on** Exeris, with all sibling repositories checked out. The developer building a product **on** Exeris — the commercial adopter — is served by nothing. Three pieces of evidence, none of them a matter of taste:
+
+1. **Configuration makes the second persona impossible, not merely inconvenient.** `loadConfig()` resolves `EXERIS_DOCS_ROOT ?? ../exeris-docs` through a fail-fast existence check and derives `ecosystemRoot = dirname(docsRoot)`, from which the default LSP and kernel-CLI launch specs are built as `mvn -f <ecosystemRoot>/…/pom.xml exec:java`. An application developer has a Maven dependency on `eu.exeris:*` and their own sources — no such tree. **The server does not boot.**
+2. **The planned prompt surface was entirely single-persona.** ROADMAP 0.5.0 listed `review-three-tier-violations`, `draft-adr`, `route-this-task`, `wall-audit`. Four contributor workflows; zero entity-authoring workflows.
+3. **The authoring surfaces exist upstream and are unreachable.** `exeris-sdk` publishes 43 annotations whose canonical `@Field` / `@Validation` scoping is stated in two `package-info.java` files; `exeris-tooling` emits `DomainMetadata`, `cap-manifest.json`, and processor diagnostics; `MutationOp` defines nine entity-authoring operations with `SourceDigest` / `BaselineTrust` concurrency, applied idempotently by `exeris/applyMutation`. An agent helping an application developer today rediscovers all of it by grep — precisely the cost this ADR's Context section was written to eliminate, re-incurred one layer up.
+
+### The Decision
+
+1. **Two named personas, co-equal through 1.0.** **P1 — ecosystem contributor** (works on Exeris; has the sibling checkout; served by `docs:*` / `kernel:*` / `lsp:*`). **P2 — application developer** (builds on Exeris; has no ecosystem checkout; served by the families below). The mission sentence in The Decision above is read accordingly: the bridge exposes Exeris **semantic** surfaces to agents — ecosystem introspection is the first class of those surfaces, not the whole set.
+
+2. **Zero-checkout is a first-class operating mode.** The bridge MUST boot and serve on a machine with no ecosystem repository present. Concretely: a missing root disables its family with a structured error rather than throwing out of config load; `ecosystemRoot` becomes optional rather than load-bearing; the P2 reference corpus (annotation catalog, AST schema, authoring guides) ships inside the npm package, generated at release time from released upstream artifacts; and the LSP and diagnostics-CLI children become launchable from published artifacts, not only from a source tree. Contributor mode remains, selected by `EXERIS_BRIDGE_MODE`.
+
+3. **Three new tool families are authorised, with sources pinned.**
+   - **`sdk:*`** — annotation catalog, attribute contracts, `@Field`/`@Validation` canonical scoping, deprecation pipeline, AST/JSON-Schema shapes. Source: **released `exeris-sdk` artifacts**, vendored into the package at release. Read-only.
+   - **`build:*`** — the user's own project: emitted `DomainMetadata`, which artefacts codegen will produce, L1/L2 detach state, decoded processor diagnostics. Source: **the user's project filesystem**, under a pinned project root with the same sandbox discipline as `docs:*`. Read-only.
+   - **`caps:*`** — `cap-manifest.json` (schema v2) and its `CompositionStamp`. Source: **build-time artefacts emitted by `exeris-tooling`**. Read-only, and it reads manifests only — it does **not** re-resolve the `@Requires`→`@Provides` DAG, which is tooling's job.
+
+   **`caps:*` is the family the 2026-06-17 amendment pre-authorised.** That amendment permitted a future composition surface on two conditions: that it source from build-time artefacts and/or the platform composition runtime and **never** from the kernel, and that it arrive through "its own ADR-025 amendment naming the family and pinning its source". This clause is that amendment. `kernel:*` remains cap-blind; there is still no `kernel:list_capabilities`.
+
+4. **The cross-family read-only invariant stands. The bridge previews; it does not write.** The 2026-06-24 amendment established that the bridge is read-only across *all* families and MUST NOT consume `exeris/applyMutation`. That holds unchanged. To make canonical edits reachable without breaching it, the bridge consumes a **new, read-only** `exeris/previewMutation`: a `MutationOp` is applied **in memory** platform-side and the resulting diff plus `MutationResult` is returned; **nothing is written to disk by anyone but the agent's own file tools.** No tool handler may write into the user's project — enforced by test, not by review. Direct write-back (`lsp:apply_mutation`) is deliberately **deferred**: it would redefine this invariant and therefore requires a further amendment, taken with usage evidence from the preview cut in hand rather than in advance.
+
+5. **Sequencing: the P2 track lands before 1.0, ahead of hosting and observability.** 1.0 GA freezes the tool surface. Freezing a surface that serves only P1 would push the commercial adopter's families past the freeze, where a namespace never designed for them must absorb them additively — or force a 2.0. The ROADMAP renumbers accordingly (P2 track at 0.5.0–0.8.0; resources/prompts, SSE, observability, security, polish shift to 0.9.0–0.13.0).
+
+6. **Cross-repo obligations.** Each is a companion ask in the owning repo, tracked in the ROADMAP's cross-repo table: **`exeris-platform`** — artifact-launchable LSP (0.5.0) and `exeris/previewMutation` (0.8.0); **`exeris-kernel`** — artifact-launchable diagnostics CLI (0.5.0); **`exeris-sdk`** — `annotation-catalog.json` plus a published AST JSON Schema, generated by the reflection mechanism `AnnotationContractTest` already uses (0.6.0); **`exeris-tooling`** — stable diagnostic IDs in `ExerisDomainProcessor`, which emits free text today (0.7.0).
+
+### What this amendment does NOT change
+
+- **The Wall (obligation 4).** Every new family is filesystem-bound or crosses the existing process boundary. No Java interop, no kernel classpath, no embedded kernel.
+- **No model API calls (obligation 3 / hard constraint 2).** Unchanged.
+- **Not a capability (obligation 5).** `caps:*` *reads about* capabilities; it does not make the bridge one. No `@Provides` / `@Requires`, no composition membership.
+- **Cap-blind kernel.** `kernel:*` gains nothing here. Composition data comes from build-time artefacts exclusively.
+- **License (obligation 6).** Apache 2.0.
+
+### Cross-references for this amendment
+
+- The 2026-06-17 "`kernel:*` Is Cap-Blind" amendment above — whose deferred-composition clause this amendment satisfies for `caps:*`.
+- The 2026-06-24 "`lsp:*` Binds to the Read-Only `exeris/*` LSP Slice" amendment above — whose read-only invariant the preview-not-write stance upholds.
+- ADR-024 (Capability Composition Model) — composition is a build-time artefact; `caps:*` reads its output and re-derives nothing.
+- ADR-003 (Entity-First Development Strategy, `exeris-sdk`) — the premise the `sdk:*` and `build:*` families serve: the annotated Java class is the single source of truth, so agent assistance belongs at the annotation and codegen layer.
+
 ## Cross-references
 
 - ADR-006 (Spring-Free Kernel Boundary) — the bridge MUST NOT bring Spring into the kernel; the boundary is by-design satisfied because the bridge is a separate process in a separate language.
