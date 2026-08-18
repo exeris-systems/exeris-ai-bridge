@@ -43,8 +43,26 @@ Each tool family is documented in its own folder. Keep the scope tight; if a too
 | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
 | `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail — read-only (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
+| `sdk:*`    | *(planned 0.6.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
+| `build:*`  | *(planned 0.7.0)* The **user's own project**: emitted `DomainMetadata`, artefact preview, L1/L2 detach state, decoded processor diagnostics — read-only | User's project filesystem, pinned project root |
+| `caps:*`   | *(planned 0.7.0)* `cap-manifest.json` + `CompositionStamp` — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | Build-time artefacts from `exeris-tooling` |
 
-New families require an ADR-025 amendment (or a successor ADR). Do not invent a `caps:*` or `sku:*` family unilaterally.
+New families require an ADR-025 amendment (or a successor ADR). Do not invent a `sku:*` family unilaterally. `sdk:*`, `build:*` and `caps:*` are authorised by the 2026-08-16 "Two Personas" amendment — `caps:*` specifically satisfies the deferred-composition clause of the 2026-06-17 cap-blind amendment. Their tools are **not yet implemented**; adding one is milestone work, not a free-for-all.
+
+## Two personas — who a change is for
+
+Per the ADR-025 2026-08-16 amendment, the bridge serves two co-equal audiences. Name which one a change serves before designing it:
+
+- **P1 — ecosystem contributor.** Works *on* Exeris, has every sibling repo checked out. Served by `docs:*` / `kernel:*` / `lsp:*`.
+- **P2 — application developer.** Builds *on* Exeris, has **no ecosystem checkout** — only a Maven dependency on `eu.exeris:*` and their own sources. Served by `sdk:*` / `build:*` / `caps:*`.
+
+**Zero-checkout is a hard requirement, not a nicety.** Any change to config resolution must keep the server booting on a machine with no `exeris-docs`, no `exeris-platform`, no `exeris-kernel` on disk. A missing root disables its family with a structured error; it never throws out of config load. `ecosystemRoot` is optional — never assume it exists.
+
+## Preview, never write
+
+Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp:preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.
+
+No tool handler may write into the user's project. If you find yourself reaching for `fs.writeFile` against a project path, stop: that is `lsp:apply_mutation`, it is deliberately deferred past 1.0, and it needs a further amendment first.
 
 ## When to consult cross-repo ADRs
 

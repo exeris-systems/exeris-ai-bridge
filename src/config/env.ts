@@ -22,7 +22,7 @@ export interface BridgeConfig {
 /**
  * Launch spec for the LSP child process. Structurally compatible with the
  * transport layer's LspLaunchSpec (command + args); `source` is debug
- * provenance for bridge:version (0.7.0) and is ignored by the spawner.
+ * provenance for bridge:version (0.5.0) and is ignored by the spawner.
  */
 export interface LspConfig {
   readonly command: string;
@@ -41,7 +41,7 @@ export interface LspConfig {
 /**
  * Launch spec for the kernel diagnostics CLI child. Structurally compatible
  * with the transport layer's KernelLaunchSpec (command + args); `source` is
- * debug provenance for bridge:version (0.7.0) and is ignored by the spawner.
+ * debug provenance for bridge:version (0.5.0) and is ignored by the spawner.
  */
 export interface KernelConfig {
   readonly command: string;
