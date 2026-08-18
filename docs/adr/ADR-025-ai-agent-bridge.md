@@ -153,7 +153,7 @@ The bridge has one implicit user: someone working **on** Exeris, with all siblin
 ### What this amendment does NOT change
 
 - **The Wall (obligation 4).** Every new family is filesystem-bound or crosses the existing process boundary. No Java interop, no kernel classpath, no embedded kernel.
-- **No model API calls (obligation 3 / hard constraint 2).** Unchanged.
+- **No model API calls** (§"What is NOT in scope" → "Embedding LLMs"; CLAUDE.md hard constraint 2). Unchanged.
 - **Not a capability (obligation 5).** `caps:*` *reads about* capabilities; it does not make the bridge one. No `@Provides` / `@Requires`, no composition membership.
 - **Cap-blind kernel.** `kernel:*` gains nothing here. Composition data comes from build-time artefacts exclusively.
 - **License (obligation 6).** Apache 2.0.

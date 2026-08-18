@@ -1014,7 +1014,7 @@ export function formatSandboxStderrLine(err: SandboxEscapeError): string {
  * shown to the agent. Wire-facing message stays sanitized.
  *
  * Side effect: writes a JSON-serialised stderr line carrying the absolute
- * paths for operator debugging. Placeholder for 0.7.0 observability.
+ * paths for operator debugging. Placeholder for 0.11.0 observability.
  */
 function describeReadError(err: unknown, config: BridgeConfig, resourceName: string): string {
   if (err instanceof SandboxEscapeError) {

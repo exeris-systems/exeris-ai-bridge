@@ -1,6 +1,6 @@
 # Exeris AI Bridge — Roadmap to 1.0.0 GA
 
-The bridge is the **agent-facing surface** of the Exeris ecosystem: an MCP server that exposes semantic surfaces — `docs:*` (ADR registry, HLA, whitepaper), `lsp:*` (Studio/LSP semantic index), `kernel:*` (read-only kernel introspection via `KernelDiagnostics`), and from 0.6.0 the authoring surfaces `sdk:*` / `build:*` / `caps:*` — to AI agents over stdio (and later SSE).
+The bridge is the **agent-facing surface** of the Exeris ecosystem: an MCP server that exposes semantic surfaces — `docs:*` (ADR registry, HLA, whitepaper), `lsp:*` (Studio/LSP semantic index), `kernel:*` (read-only kernel introspection via `KernelDiagnostics`), and the authoring surfaces `sdk:*` (0.6.0), `build:*` and `caps:*` (0.7.0) — to AI agents over stdio (and later SSE).
 
 **1.0.0 GA means: the MCP tool surface is stable.** Tool names, input schemas, and output shapes are frozen under semver. Third-party agents and IDE extensions can pin to a `@exeris/ai-bridge@^1` and trust that a 1.x bump will not break their prompts or tool-call wiring.
 
@@ -16,7 +16,7 @@ Through 0.4.0 the roadmap served exactly one of these, without ever naming it. T
 
 **P1 — ecosystem contributor.** Works *on* Exeris: kernel, SDK, tooling, platform. Has every sibling repo checked out under `~/exeris-systems/`. Needs the ADR registry, cross-repo routing rules, kernel runtime internals. **Served by `docs:*`, `kernel:*`, and the LSP index pointed at an ecosystem repo.**
 
-**P2 — application developer.** Works *on Exeris* — builds a product on top of the SDK + tooling. Has **no** ecosystem checkout: a Maven dependency on `eu.exeris:exeris-sdk-*`, the codegen plugin, and their own `@ExerisDomain` sources. Needs the annotation contract, what codegen will emit, why the build failed, and canonical entity edits. **Served by nothing today.**
+**P2 — application developer.** Builds *on* Exeris — a product on top of the SDK + tooling. Has **no** ecosystem checkout: a Maven dependency on `eu.exeris:exeris-sdk-*`, the codegen plugin, and their own `@ExerisDomain` sources. Needs the annotation contract, what codegen will emit, why the build failed, and canonical entity edits. **Served by nothing today.**
 
 The gap is structural, not cosmetic. Three concrete pieces of evidence:
 
