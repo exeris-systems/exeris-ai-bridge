@@ -116,7 +116,7 @@ This is a configuration and packaging milestone, not a tool milestone. No new to
 
 The single highest-value item is the **`@Field` vs `@Validation` scoping rule**. It is the most likely place in the whole SDK to introduce a subtle regression (per `exeris-sdk/CLAUDE.md`), it is stated authoritatively in two `package-info.java` files, and today an agent finds it only by reading them. `@Validation.required` is deprecated-for-removal with a processor fallback window — an agent that guesses wrong writes code that compiles with a warning today and breaks at SDK 1.0.0.
 
-- [ ] **`sdk:list_annotations`** — all public `@interface`s across `annotation`, `annotation.system`, `annotation.security`, `annotation.capability` (43 at time of writing), each with `@Target`, `@Retention`, one-line purpose
+- [ ] **`sdk:list_annotations`** — all public `@interface`s across `annotation`, `annotation.system`, `annotation.security`, `annotation.capability` (49 at time of writing: 33 root, 10 `system`, 4 `capability`, 2 `security`), each with `@Target`, `@Retention`, one-line purpose
 - [ ] **`sdk:describe_annotation`** — full attribute list per annotation: name, type, default, required-ness, deprecation status + canonical replacement, and the prose rationale from the owning `package-info`
 - [ ] **`sdk:get_scoping_rules`** — the `@Field` (shape + lifecycle) vs `@Validation` (constraints) split, `FieldMetadata` as the single AST carrier, and the derived NOT NULL / not-blank semantics, served as structured data rather than as a doc the agent must read and remember
 - [ ] **`sdk:list_deprecations`** — everything `@Deprecated(forRemoval = true)` with its replacement and removal version; sourced from the SDK's own `MIGRATION.md` pipeline
