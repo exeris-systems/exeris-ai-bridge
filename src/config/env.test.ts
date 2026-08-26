@@ -271,23 +271,22 @@ test("a blank EXERIS_*_COMMAND is treated as unset", () => {
   assert.equal(kernelOf(cfg).source, "source-tree");
 });
 
-test("rung 2: EXERIS_KERNEL_JAR launches java --enable-preview -jar", () => {
-  // The kernel compiles at `release 25` WITH preview on, so a direct jar
-  // launch that omits the flag fails at startup.
-  const jar = installJar("exeris-kernel-diagnostics-cli", "0.11.0");
-  const kernel = kernelOf(load({ EXERIS_KERNEL_JAR: jar }));
+test("rung 2: an explicit jar launches java -jar, with no preview flag", () => {
+  // Neither child is preview-stamped: exeris-kernel binds --enable-preview to
+  // test-compile and surefire only (ADR-066 — the distributed artifact is
+  // preview-clean, confirmed by class-file minor 0x0000 in every published CLI
+  // jar), and exeris-platform uses no preview at all. Adding the flag would
+  // imply a constraint neither artifact has.
+  const kernelJar = installJar("exeris-kernel-diagnostics-cli", "0.11.0");
+  const kernel = kernelOf(load({ EXERIS_KERNEL_JAR: kernelJar }));
   assert.equal(kernel.source, "env-jar");
   assert.equal(kernel.command, "java");
-  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
-});
+  assert.deepEqual(kernel.args, ["-jar", kernelJar]);
 
-test("rung 2: EXERIS_LSP_JAR launches java -jar with NO preview flag", () => {
-  // exeris-platform compiles at `release 26` with no preview features; passing
-  // --enable-preview there would be wrong, so the flag is per-artifact.
-  const jar = installJar("exeris-platform-lsp", "0.1.0", "eu/exeris/platform");
-  const lsp = lspOf(load({ EXERIS_LSP_JAR: jar }));
+  const lspJar = installJar("exeris-platform-lsp", "0.1.0", "eu/exeris/platform");
+  const lsp = lspOf(load({ EXERIS_LSP_JAR: lspJar }));
   assert.equal(lsp.source, "env-jar");
-  assert.deepEqual(lsp.args, ["-jar", jar]);
+  assert.deepEqual(lsp.args, ["-jar", lspJar]);
 });
 
 test("an explicitly named jar that is missing takes the family dark, not down a rung", () => {
@@ -311,7 +310,7 @@ test("rung 3: a published CLI in the local Maven repository serves a zero-checko
   const kernel = kernelOf(cfg);
   assert.equal(kernel.source, "m2");
   assert.equal(kernel.artifactVersion, "0.11.0");
-  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
+  assert.deepEqual(kernel.args, ["-jar", jar]);
   // docs:* has nothing to resolve; the kernel family is live regardless.
   assert.equal(cfg.docs.state, "unavailable");
   assert.equal(cfg.mode, "app");
@@ -339,7 +338,7 @@ test("EXERIS_KERNEL_VERSION pins rung 3", () => {
   const jar = installJar("exeris-kernel-diagnostics-cli", "0.10.2");
   const kernel = kernelOf(loadZeroCheckout({ EXERIS_KERNEL_VERSION: "0.10.2" }));
   assert.equal(kernel.artifactVersion, "0.10.2");
-  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
+  assert.deepEqual(kernel.args, ["-jar", jar]);
 });
 
 test("a pinned version with no jar warns and lets the ladder continue", () => {
@@ -422,7 +421,7 @@ test("contributor mode prefers the source tree; app mode prefers the published j
   // Preference, not gating: the second rung still fires when the first cannot.
   const kernel = kernelOf(loadZeroCheckout({ EXERIS_BRIDGE_MODE: "contributor" }));
   assert.equal(kernel.source, "m2");
-  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
+  assert.deepEqual(kernel.args, ["-jar", jar]);
 });
 
 test("JAVA_HOME selects the java binary for jar launches", () => {

@@ -309,22 +309,32 @@ interface ChildFamilySpec {
    * artifact is launchable yet, which skips the rung entirely.
    */
   readonly artifact: { readonly target: MavenCoordinate; readonly versionAnchor: MavenCoordinate } | null;
-  /** Whether a direct `java -jar` launch of this artifact needs --enable-preview. */
-  readonly enablePreview: boolean;
 }
 
 // Both children are Java, both are launched the same four ways, and they differ
-// only in these values — including two facts verified against the upstream poms
-// on 2026-08-26 that are easy to get backwards:
+// only in these values.
 //
-//   - exeris-kernel compiles at `release 25` WITH preview features on, so a
-//     direct jar launch needs --enable-preview and a matching JDK. Its CLI is
-//     published shaded, with Main-Class in the manifest, so the m2 rung works.
-//   - exeris-platform compiles at `release 26` with NO preview, so passing the
-//     flag there would be wrong. Its LSP jar is NOT executable — the published
-//     artifact carries no Main-Class — so it has no m2 rung until the companion
-//     shading ask lands upstream (ROADMAP cross-repo table, 0.5.0). Until then
-//     EXERIS_LSP_JAR still serves anyone who builds a runnable jar themselves.
+// NEITHER gets --enable-preview, and the reason is version history rather than
+// a blanket rule. exeris-kernel went preview-clean at 0.11.0 — its root pom now
+// binds preview to the test-compile execution and the surefire JVM only, citing
+// ADR-066 ("the DISTRIBUTED artifact is preview-clean"). Scanning the published
+// shaded jars confirms the boundary exactly: 0.10.2 carries 12 preview-stamped
+// classes out of 799, and 0.11.0 carries 0 out of 897. exeris-platform uses no
+// preview at all.
+//
+// So the flag is NOT passed, and a pre-0.11.0 kernel jar is out of scope for the
+// jar rungs. That is deliberate: adding version-conditional flags would encode
+// upstream release history in this file, and the failure is already loud and
+// self-describing — the JVM answers "Preview features are not enabled … Try
+// running with '--enable-preview'", which the transport surfaces verbatim. An
+// operator on an older jar uses EXERIS_KERNEL_COMMAND, which takes a full
+// command line for exactly this reason.
+//
+// The remaining asymmetry is executability: the kernel CLI is published shaded
+// with Main-Class in the manifest, so its m2 rung works. The LSP jar is not
+// executable, so lsp:* has no m2 rung until the companion shading ask lands
+// upstream (ROADMAP cross-repo table, 0.5.0); EXERIS_LSP_JAR still serves
+// anyone who builds a runnable jar themselves.
 const CHILD_FAMILIES: Record<ChildFamily, ChildFamilySpec> = {
   lsp: {
     artefact: "exeris-platform-lsp",
@@ -334,7 +344,6 @@ const CHILD_FAMILIES: Record<ChildFamily, ChildFamilySpec> = {
     pomRelative: "exeris-platform/exeris-platform-lsp/pom.xml",
     mavenArgs: [],
     artifact: null,
-    enablePreview: false,
   },
   kernel: {
     artefact: "exeris-kernel-diagnostics-cli",
@@ -347,7 +356,6 @@ const CHILD_FAMILIES: Record<ChildFamily, ChildFamilySpec> = {
       target: { groupId: "eu.exeris", artifactId: "exeris-kernel-diagnostics-cli" },
       versionAnchor: { groupId: "eu.exeris", artifactId: "exeris-kernel-core" },
     },
-    enablePreview: true,
   },
 };
 
@@ -391,7 +399,7 @@ function resolveChildLaunch(family: ChildFamily, launch: LaunchContext): ChildLa
           `resolve one itself. The path that failed is on the bridge's stderr.`,
       };
     }
-    return { state: "available", ...jarLaunch(env, jar, spec.enablePreview), source: "env-jar" };
+    return { state: "available", ...jarLaunch(env, jar), source: "env-jar" };
   }
 
   // Rungs 3 and 4 — a published jar from the local Maven repository, and a
@@ -444,7 +452,7 @@ function localRepositoryRung(spec: ChildFamilySpec, { env }: LaunchContext): Chi
   if (resolved === null) return null;
   return {
     state: "available",
-    ...jarLaunch(env, resolved.jar, spec.enablePreview),
+    ...jarLaunch(env, resolved.jar),
     source: "m2",
     artifactVersion: resolved.version,
   };
@@ -498,15 +506,8 @@ function javaCommand(env: NodeJS.ProcessEnv): string {
   return home !== undefined && home.length > 0 ? join(home, "bin", binary) : binary;
 }
 
-function jarLaunch(
-  env: NodeJS.ProcessEnv,
-  jar: string,
-  enablePreview: boolean,
-): { command: string; args: readonly string[] } {
-  return {
-    command: javaCommand(env),
-    args: enablePreview ? ["--enable-preview", "-jar", jar] : ["-jar", jar],
-  };
+function jarLaunch(env: NodeJS.ProcessEnv, jar: string): { command: string; args: readonly string[] } {
+  return { command: javaCommand(env), args: ["-jar", jar] };
 }
 
 /**
