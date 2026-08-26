@@ -50,6 +50,24 @@ export interface KernelLaunchSpec {
 
 export type KernelChannelFactory = (spec: KernelLaunchSpec) => KernelChannel;
 
+/**
+ * A read-only view of the child process, for bridge:health. Reading it NEVER
+ * spawns — the diagnostic surface must be cheap enough to call freely and must
+ * not perturb what it reports.
+ */
+export interface KernelStatus {
+  readonly state: "not-started" | "running" | "closed";
+  /** The sticky terminal reason, when the CLI is permanently gone. */
+  readonly closeReason: KernelCloseReason | null;
+  /**
+   * Message of the most recent SOFT reset (request timeout, framing desync).
+   * A soft reset clears the channel and leaves closeReason null so the next
+   * call re-spawns — which reads as "not-started" again, indistinguishable
+   * from never having run. This is what makes that history visible.
+   */
+  readonly lastSoftReset: string | null;
+}
+
 /** An `{"error": "..."}` response from the CLI (unknown method, bad args, ...). */
 export class KernelRequestError extends Error {
   constructor(message: string) {
@@ -91,6 +109,8 @@ export class KernelAdapter {
   // Sticky terminal reason (hard close only). Soft resets leave this null so the
   // next request re-spawns.
   private closeReason: KernelCloseReason | null = null;
+  // Last recoverable teardown, kept for bridge:health — see KernelStatus.
+  private lastSoftReset: string | null = null;
   // Bumped on every spawn and on every soft reset, so a callback delivered late
   // by a killed child (its async 'exit', a trailing stdout chunk) is ignored
   // instead of corrupting the state of the channel that replaced it.
@@ -146,6 +166,21 @@ export class KernelAdapter {
         reject(new KernelTransportError(`Failed to write to kernel CLI: ${message}`));
       }
     });
+  }
+
+  /**
+   * Current transport state, without touching the child. Safe to call before
+   * any request — it reports "not-started" rather than spawning anything.
+   */
+  status(): KernelStatus {
+    if (this.closeReason !== null) {
+      return { state: "closed", closeReason: this.closeReason, lastSoftReset: this.lastSoftReset };
+    }
+    return {
+      state: this.channel !== null ? "running" : "not-started",
+      closeReason: null,
+      lastSoftReset: this.lastSoftReset,
+    };
   }
 
   /** Terminate the CLI and reject all in-flight requests. Sticky. Idempotent. */
@@ -228,6 +263,7 @@ export class KernelAdapter {
 
   /** Recoverable teardown: kill the current child; the next request re-spawns. */
   private softReset(err: KernelTransportError): void {
+    this.lastSoftReset = err.message;
     this.rejectAllPending(err);
     this.epoch++; // invalidate the dying child's callbacks
     this.channel?.close();

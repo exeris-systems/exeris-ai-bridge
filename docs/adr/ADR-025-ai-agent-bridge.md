@@ -165,6 +165,38 @@ The bridge has one implicit user: someone working **on** Exeris, with all siblin
 - ADR-024 (Capability Composition Model) — composition is a build-time artefact; `caps:*` reads its output and re-derives nothing.
 - ADR-003 (Entity-First Development Strategy, `exeris-sdk`) — the premise the `sdk:*` and `build:*` families serve: the annotated Java class is the single source of truth, so agent assistance belongs at the annotation and codegen layer.
 
+## `bridge:*` — The Self-Diagnostic Family, Frozen at Two Tools (2026-08-26 amendment)
+
+Obligation 2 names three families, all of which report on **Exeris**. Nothing in this ADR authorised a family that reports on the **bridge itself**, and CLAUDE.md requires an amendment before a family exists. The 1.0 tool-surface freeze list already assumes `bridge:*` (2 tools) and the ROADMAP already schedules it; this amendment is the missing authorisation, taken as the family lands rather than after.
+
+### Why it is needed now rather than at 0.7.0
+
+The zero-checkout mode introduced by the "Two Personas" amendment above multiplies the ways a family can be dark: no checkout at all, a checkout the operator pointed at wrongly, a pinned mode that contradicts what resolved, a launch spec that resolved but whose child then died. Config resolution now computes a `reason` and a `remedy` for each of those, and before this family that work was reachable only by calling a tool and reading its failure. Shipping the diagnostic surface after the thing it diagnoses is backwards, which is why the ROADMAP pulled it forward from 0.7.0 to 0.5.0.
+
+### The Decision
+
+1. **`bridge:*` reports on the bridge, never on Exeris.** Its source is this server's own boot-time state: the resolved persona mode, per-family availability, and the state of the child processes the other families own. It reads no ecosystem content and no user-project content, so it does not overlap any other family's scope. **Frozen at two tools** — `bridge:version` and `bridge:health` — matching the 1.0 freeze list. A third needs a further amendment.
+
+2. **It is the one family that is never environment-gated.** Every other family is masked by config resolution; `bridge:*` has no external dependency to resolve, which is exactly what makes it useful — it is the surface that explains the others when they fail. It is therefore deliberately excluded from the `ToolFamily` union the availability guard ranges over, so "gate `bridge:*`" is not expressible rather than merely discouraged, and a test asserts it stays live on a config where every other family is dark.
+
+3. **Zero spawns, by construction.** Both handlers read config resolved at boot plus non-spawning `status()` accessors on the two transports. A diagnostic an agent hesitates to call is not a diagnostic, and one that perturbs what it reports is worse than none.
+
+   **`bridge:health` therefore does NOT answer "can this child actually launch?"** An earlier plan for this family carried a `probe` flag that would spawn each child to find out. It is dropped: the family's own tools answer that question by doing the real work and already return a structured transport error when it fails, and the resulting transport state then appears in the next `bridge:health`. A probe flag would duplicate that with lower fidelity, make one tool's cost vary by orders of magnitude with a boolean, and put the diagnostic family in the business of knowing other families' methods. Adding it later remains possible; removing it after the 1.0 freeze would not be.
+
+4. **It reports strictly less than the family tools already do.** The launch command stays off the wire: `bridge:health` reports which ladder rung produced a spec (`source`) and a path-free summary of the last transport failure, but never the command itself, which the transports do embed in the errors they throw. This holds the same line the config `reason` / `remedy` strings hold — operator paths belong on stderr.
+
+### What this amendment does NOT change
+
+- **Read-only.** Both tools are pure reads of in-process state. No mutation, no writes, nothing spawned.
+- **The Wall (obligation 4).** `bridge:*` touches no kernel; it reads the Node-side transport handles only.
+- **Not a capability (obligation 5), license (obligation 6).** Unchanged.
+
+### Cross-references for this amendment
+
+- The 2026-08-16 "Two Personas" amendment above — whose zero-checkout mode created the failure modes this family exists to explain.
+- ROADMAP 0.5.0 (`bridge:health` + `bridge:version`) and 1.0.0 (tool surface frozen, `bridge:*` at 2 tools).
+- ROADMAP 0.11.0 (`bridge:health` deepening) — latency history and richer per-family failure detail land there, on top of this cut.
+
 ## Cross-references
 
 - ADR-006 (Spring-Free Kernel Boundary) — the bridge MUST NOT bring Spring into the kernel; the boundary is by-design satisfied because the bridge is a separate process in a separate language.

@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import type { BridgeConfig } from "./config/env.js";
+import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
@@ -33,7 +34,13 @@ function registerAll(config: BridgeConfig) {
     ...registerDocsTools(config),
     ...registerLspTools(config),
     ...registerKernelTools(config),
+    ...registerBridgeTools(config),
   ];
+}
+
+/** bridge:* is the self-diagnostic family; it is never environment-gated. */
+function isGated(name: string): boolean {
+  return !name.startsWith("bridge:");
 }
 
 test("docs registry exposes at least one tool", () => {
@@ -63,6 +70,9 @@ test("every tool name is prefixed with its family", () => {
   for (const t of registerKernelTools(stubConfig)) {
     assert.match(t.definition.name, /^kernel:/);
   }
+  for (const t of registerBridgeTools(stubConfig)) {
+    assert.match(t.definition.name, /^bridge:/);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -82,7 +92,7 @@ test("every tool in a dark family returns the structured reason and remedy", asy
   // The anti-drift guard for the masking in tools/unavailable.ts: a handler
   // added without guard() would reach its transport (or its filesystem read)
   // here and fail some other way.
-  for (const tool of registerAll(zeroCheckoutConfig)) {
+  for (const tool of registerAll(zeroCheckoutConfig).filter((t) => isGated(t.definition.name))) {
     const name = tool.definition.name;
     const family = name.split(":")[0];
     const res = await tool.handler({});
@@ -92,5 +102,17 @@ test("every tool in a dark family returns the structured reason and remedy", asy
     assert.equal(payload.family, family, name);
     assert.equal(payload.reason, `${family} reason`, name);
     assert.equal(payload.remedy, `${family} remedy`, name);
+  }
+});
+
+test("bridge:* stays live when every environment-dependent family is dark", async () => {
+  // The surface that explains the others must not be gated by the same thing
+  // it explains. If bridge:* ever starts answering family_unavailable, the
+  // diagnostic path has gone dark exactly when it is needed.
+  const bridge = registerAll(zeroCheckoutConfig).filter((t) => !isGated(t.definition.name));
+  assert.equal(bridge.length, 2);
+  for (const tool of bridge) {
+    const res = await tool.handler({});
+    assert.ok(!res.isError, tool.definition.name);
   }
 });

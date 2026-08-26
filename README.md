@@ -76,7 +76,9 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 15 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 17 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+
+When something is dark, **`bridge:health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge:version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge:health`.
 
 `EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` is simply unavailable — the expected state when building an application *on* Exeris rather than working *on* Exeris.
 
@@ -111,7 +113,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 15 tool definitions (9 `docs:*`, 3 `lsp:*`, 3 `kernel:*` — all live); `tools/call` on `docs:get_adr` returns the ADR-024 body.
+`tools/list` advertises all 17 tool definitions (9 `docs:*`, 3 `lsp:*`, 3 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs:get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
@@ -138,6 +140,8 @@ src/
     kernel/index.ts          kernel:list_providers, kernel:get_bootstrap_dag, kernel:describe_subsystem
                              — KernelDiagnostics proxy over NDJSON (cap-blind — no list_capabilities)
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/Subsystem)
+    bridge/index.ts          bridge:version, bridge:health — the bridge's own diagnostic
+                             surface (never gated, never spawns)
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)

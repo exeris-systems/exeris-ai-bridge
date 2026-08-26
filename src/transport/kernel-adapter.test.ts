@@ -251,3 +251,57 @@ test("a synchronous write failure rejects the request instead of stranding it", 
     return true;
   });
 });
+
+// ---------------------------------------------------------------------------
+// status() — the non-spawning view bridge:health reads (ROADMAP 0.5.0)
+
+test("status() reports not-started without spawning, then running after a request", async () => {
+  let spawns = 0;
+  const channel = new FakeChannel();
+  channel.autoResponder = () => PROVIDERS;
+  const adapter = new KernelAdapter(SPEC, {
+    channelFactory: () => {
+      spawns++;
+      return channel;
+    },
+  });
+
+  assert.deepEqual(adapter.status(), { state: "not-started", closeReason: null, lastSoftReset: null });
+  adapter.status();
+  adapter.status();
+  assert.equal(spawns, 0, "status() must never spawn");
+
+  await adapter.request("listProviders");
+  assert.equal(adapter.status().state, "running");
+  assert.equal(spawns, 1);
+});
+
+test("status() reports a sticky hard close with its reason", async () => {
+  const channel = new FakeChannel();
+  const adapter = new KernelAdapter(SPEC, { channelFactory: () => channel });
+
+  const pending = adapter.request("listProviders");
+  await flush();
+  channel.emitClose({ kind: "exited", code: 2, signal: null });
+  await assert.rejects(pending, KernelTransportError);
+
+  const status = adapter.status();
+  assert.equal(status.state, "closed");
+  assert.deepEqual(status.closeReason, { kind: "exited", code: 2, signal: null });
+});
+
+test("status() surfaces a soft reset, which otherwise looks like never having run", async () => {
+  // A soft reset drops the channel and leaves closeReason null so the next call
+  // re-spawns — indistinguishable from "not-started" without lastSoftReset.
+  const adapter = new KernelAdapter(SPEC, {
+    channelFactory: () => new FakeChannel(), // never answers
+    requestTimeoutMs: 20,
+  });
+
+  await assert.rejects(adapter.request("listProviders"), KernelTransportError);
+
+  const status = adapter.status();
+  assert.equal(status.state, "not-started");
+  assert.equal(status.closeReason, null);
+  assert.match(status.lastSoftReset ?? "", /timed out after 20ms/);
+});
