@@ -198,3 +198,23 @@ test("bridge:health renders a terminal close without leaking the launch command"
   // the spec, so the command itself adds nothing and stays off the wire.
   assert.ok(!text.includes("--secret-arg"), `leaked the launch command: ${text}`);
 });
+
+test("bridge:health names the artifact version when the ladder resolved one", async () => {
+  // Only the local-repository rung resolves a version. "kernel:* is live" and
+  // "kernel:* is live against 0.10.2 while your project builds 0.11.0" are
+  // different claims, and only the second one is diagnosable.
+  const m2: KernelConfig = {
+    state: "available",
+    command: "java",
+    args: ["--enable-preview", "-jar", "/repo/exeris-kernel-diagnostics-cli-0.10.2.jar"],
+    source: "m2",
+    artifactVersion: "0.10.2",
+  };
+  const body = await call({ ...LIVE, kernel: m2 }, "bridge:health");
+  assert.equal(body.families[2].source, "m2");
+  assert.equal(body.families[2].artifactVersion, "0.10.2");
+
+  // A rung that resolves no version must not report one at all.
+  const plain = await call(LIVE, "bridge:health");
+  assert.equal("artifactVersion" in plain.families[2], false);
+});
