@@ -22,3 +22,8 @@ dist/
 
 # Local planning scratch — never committed
 *.local.md
+
+# Generated at pack time by scripts/vendor-reference-data.mjs — never committed.
+# Leading slash anchors this to the repo root: an unanchored `data/` would also
+# swallow src/data/, which is source and must be committed.
+/data/

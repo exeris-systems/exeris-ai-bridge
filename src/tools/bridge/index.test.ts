@@ -6,6 +6,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BridgeConfig, KernelConfig, LspConfig, Unavailable } from "../../config/env.js";
 import { KernelAdapter, type KernelChannel } from "../../transport/kernel-adapter.js";
 import { LspClient, LspTransportError, type LspChannel, type LspCloseReason } from "../../transport/lsp-client.js";
+import type { BundleState } from "../../data/bundle.js";
 import { getServerVersion } from "../../version.js";
 import { registerBridgeTools } from "./index.js";
 
@@ -76,8 +77,21 @@ function payload(res: CallToolResult): any {
   return JSON.parse((res.content[0] as { text: string }).text);
 }
 
-async function call(config: BridgeConfig, name: string, transports?: { lsp?: LspClient; kernel?: KernelAdapter }) {
-  const tool = tools(config, transports).get(name);
+const NO_BUNDLE: BundleState = {
+  state: "unavailable",
+  reason: "no bundle (test)",
+  remedy: "generate one (test)",
+};
+
+async function call(
+  config: BridgeConfig,
+  name: string,
+  transports?: { lsp?: LspClient; kernel?: KernelAdapter },
+  bundle: BundleState = NO_BUNDLE,
+) {
+  const tool = new Map(
+    registerBridgeTools(config, transports, bundle).map((t) => [t.definition.name, t]),
+  ).get(name);
   assert.ok(tool, `${name} is not registered`);
   const res = await tool.handler({});
   assert.ok(!res.isError, `${name} returned an error: ${(res.content[0] as { text: string }).text}`);
@@ -217,4 +231,60 @@ test("bridge:health names the artifact version when the ladder resolved one", as
   // A rung that resolves no version must not report one at all.
   const plain = await call(LIVE, "bridge:health");
   assert.equal("artifactVersion" in plain.families[2], false);
+});
+
+// ---------------------------------------------------------------------------
+// bundled reference data
+
+test("bridge:version reports an absent bundle as a first-class state", async () => {
+  // Absent is the ordinary state of a bridge run from a source checkout, and
+  // the first thing to check when the reference surfaces know nothing. Omitting
+  // it would make that question unanswerable from the tool surface.
+  const body = await call(LIVE, "bridge:version");
+  assert.equal(body.bundle.state, "unavailable");
+  assert.equal(body.bundle.reason, "no bundle (test)");
+  assert.equal(body.bundle.remedy, "generate one (test)");
+});
+
+test("bridge:version reports an empty bundle as present, not missing", async () => {
+  // 0.5.0 ships exactly this: the mechanism, with content arriving in 0.6.0.
+  const bundle: BundleState = {
+    state: "available",
+    generatedAt: "2026-08-26T00:00:00.000Z",
+    bridgeVersion: "0.5.0",
+    entries: [],
+  };
+  const body = await call(LIVE, "bridge:version", undefined, bundle);
+  assert.equal(body.bundle.state, "available");
+  assert.equal(body.bundle.entryCount, 0);
+  assert.deepEqual(body.bundle.sourceArtifacts, []);
+});
+
+test("bridge:version names the upstream releases the bundled data came from", async () => {
+  // Which release an answer reflects is the question a version tool exists to
+  // answer; a file count alone cannot.
+  const entry = (id: string, sourceArtifact: string) => ({
+    id,
+    path: `${id}.json`,
+    sha256: "0".repeat(64),
+    bytes: 2,
+    sourceArtifact,
+  });
+  const bundle: BundleState = {
+    state: "available",
+    generatedAt: "2026-08-26T00:00:00.000Z",
+    bridgeVersion: "0.6.0",
+    entries: [
+      entry("catalog", "eu.exeris:exeris-sdk-annotations:0.10.0"),
+      entry("ast", "eu.exeris:exeris-tooling-core:0.7.0"),
+      entry("scoping", "eu.exeris:exeris-sdk-annotations:0.10.0"),
+    ],
+  };
+  const body = await call(LIVE, "bridge:version", undefined, bundle);
+  assert.equal(body.bundle.entryCount, 3);
+  // Deduplicated and ordered — three entries from two artifacts.
+  assert.deepEqual(body.bundle.sourceArtifacts, [
+    "eu.exeris:exeris-sdk-annotations:0.10.0",
+    "eu.exeris:exeris-tooling-core:0.7.0",
+  ]);
 });

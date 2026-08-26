@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { loadConfig, type BridgeConfig } from "./config/env.js";
+import { loadBundle } from "./data/bundle.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
@@ -35,13 +36,18 @@ async function main(): Promise<void> {
   const lsp = config.lsp.state === "available" ? new LspClient(config.lsp) : undefined;
   const kernel = config.kernel.state === "available" ? new KernelAdapter(config.kernel) : undefined;
 
+  // Read once at boot, like the config: the bundle ships inside the package and
+  // cannot change under a running server. 0.6.0's sdk:* family reads the same
+  // instance rather than loading its own.
+  const bundle = loadBundle();
+
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
 
   for (const tool of [
     ...registerDocsTools(config),
     ...registerLspTools(config, lsp),
     ...registerKernelTools(config, kernel),
-    ...registerBridgeTools(config, { lsp, kernel }),
+    ...registerBridgeTools(config, { lsp, kernel }, bundle),
   ]) {
     tools.set(tool.definition.name, tool);
   }
