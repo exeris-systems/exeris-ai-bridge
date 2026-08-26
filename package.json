@@ -13,6 +13,7 @@
   },
   "files": [
     "dist",
+    "data",
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
     "!dist/**/*.test.js.map",
@@ -27,14 +28,16 @@
     "LICENSE"
   ],
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist data",
     "prebuild": "npm run clean",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
-    "test": "cd dist && node --test"
+    "test": "cd dist && node --test",
+    "vendor:data": "node scripts/vendor-reference-data.mjs --emit",
+    "prepack": "node scripts/vendor-reference-data.mjs --emit --verify"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"

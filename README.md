@@ -103,6 +103,19 @@ Rung 3 finds the local repository at `EXERIS_MAVEN_REPO`, then `<localRepository
 
 `EXERIS_KERNEL_COMMAND` (optional) is how the `kernel:*` family launches its `exeris-kernel-diagnostics-cli` child — a whitespace-separated command + args (no shell quoting; exec'd directly), spawned lazily on the first `kernel:*` call and cached. It defaults to `mvn -q -f <ecosystemRoot>/exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml exec:java -Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli` (`-q` keeps Maven's logging off the NDJSON stdout; the CLI logs to stderr, which is inherited into the bridge's logs). The CLI boots the kernel in **read-only inspect mode** and speaks newline-delimited JSON; the bridge correlates responses FIFO and validates each snapshot against its `KernelDiagnostics` wire shape. A pre-built shaded jar is the faster override — but because the kernel compiles at `release 25` with preview features on, a direct launch must enable preview and run on a matching JDK: `EXERIS_KERNEL_COMMAND="java --enable-preview -jar /abs/exeris-kernel/exeris-kernel-diagnostics-cli/target/exeris-kernel-diagnostics-cli-<ver>.jar"`. The same jar is published, so the path may equally be a local Maven repo coordinate (`~/.m2/repository/eu/exeris/exeris-kernel-diagnostics-cli/<ver>/…jar`). If the CLI is missing or fails to boot, `kernel:*` calls return a structured "set EXERIS_KERNEL_COMMAND / start the CLI" result rather than crashing.
 
+### Bundled reference data
+
+The published package carries a small read-only corpus so an application developer with **no ecosystem checkout and no network** still gets grounded answers. It is generated at pack time by `scripts/vendor-reference-data.mjs`, and `data/` is deliberately **not committed** — which means a bridge run from a source checkout has no bundle, and reports that plainly rather than pretending.
+
+`bridge:version` reports which state you are in:
+
+```jsonc
+"bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.5.0", "entryCount": 0, "sourceArtifacts": [] }
+```
+
+At 0.5.0 the bundle ships with **zero entries** on purpose: this milestone builds the mechanism — manifest, loader, integrity check, packaging — and the `sdk:*` family fills it with the annotation catalog and AST schema at 0.6.0. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
+
 For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
 
 ## Try it (end-to-end)
@@ -156,6 +169,10 @@ src/
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/Subsystem)
     bridge/index.ts          bridge:version, bridge:health — the bridge's own diagnostic
                              surface (never gated, never spawns)
+  data/bundle.ts             reader for the bundled reference corpus — manifest parse,
+                             per-entry SHA-256 verification, sandboxed to data/
+scripts/
+  vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)

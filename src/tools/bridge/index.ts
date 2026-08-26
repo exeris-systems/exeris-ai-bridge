@@ -6,6 +6,7 @@ import type {
   ToolFamily,
   Unavailable,
 } from "../../config/env.js";
+import { loadBundle, type BundleState } from "../../data/bundle.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
 import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
@@ -41,21 +42,23 @@ export interface BridgeTransports {
 export function registerBridgeTools(
   config: BridgeConfig,
   transports: BridgeTransports = {},
+  bundle: BundleState = loadBundle(),
 ): RegisteredTool[] {
-  return [versionTool(config), healthTool(config, transports)];
+  return [versionTool(config, bundle), healthTool(config, transports)];
 }
 
 // ---------------------------------------------------------------------------
 // bridge:version
 
-function versionTool(config: BridgeConfig): RegisteredTool {
+function versionTool(config: BridgeConfig, bundle: BundleState): RegisteredTool {
   return {
     definition: {
       name: "bridge:version",
       description:
         "Identify this MCP server: package name and version, the Node runtime it " +
-        "is running on, and which persona mode it resolved to. Use it to confirm " +
-        "which bridge build an answer came from.",
+        "is running on, which persona mode it resolved to, and what bundled " +
+        "reference data it carries. Use it to confirm which bridge build an " +
+        "answer came from, and which upstream release that data reflects.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async () =>
@@ -65,7 +68,32 @@ function versionTool(config: BridgeConfig): RegisteredTool {
         node: process.version,
         mode: config.mode,
         modeSource: config.modeSource,
+        bundle: describeBundle(bundle),
       }),
+  };
+}
+
+/**
+ * Render the bundled reference data for the wire.
+ *
+ * Absent is a first-class answer, not an omission: it is the ordinary state of
+ * a bridge run from a source checkout, and it is the first thing to check when
+ * an agent asks why the reference surfaces know nothing. Entries carry their
+ * own `sourceArtifact` so the answer can name which upstream release it
+ * reflects rather than only how many files it has.
+ */
+function describeBundle(bundle: BundleState): unknown {
+  if (bundle.state === "unavailable") {
+    return { state: "unavailable", reason: bundle.reason, remedy: bundle.remedy };
+  }
+  return {
+    state: "available",
+    generatedAt: bundle.generatedAt,
+    bridgeVersion: bundle.bridgeVersion,
+    entryCount: bundle.entries.length,
+    sourceArtifacts: [...new Set(bundle.entries.map((e) => e.sourceArtifact))].sort((a, b) =>
+      a.localeCompare(b),
+    ),
   };
 }
 
