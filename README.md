@@ -72,7 +72,10 @@ npm run smoke:p2             # pack, install into a scratch dir, speak MCP to th
 `smoke:p2` is the one test that does not run against the source tree. It builds the real
 package, installs it somewhere that has only an application project, points `HOME` at an
 empty directory and scrubs every `EXERIS_*` variable — the machine an application developer
-actually has. Add `--keep` to leave the scratch directory behind for inspection.
+actually has. It must be launched through npm (`npm run smoke:p2 -- --keep` leaves the scratch
+directory behind for inspection) — that is how it resolves the npm binary to an
+absolute path instead of a `PATH` lookup, and it guarantees the pack and the
+install run on the same npm that manages the project.
 
 ## Wiring into an agent
 

@@ -30,6 +30,26 @@ const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
 const KEEP = process.argv.includes("--keep");
 
+// npm's own CLI, as an absolute path, taken from the npm that invoked this
+// script. Two reasons, and neither is style: `pack` and `install` must run on
+// the SAME npm that manages the project (a machine with several on PATH would
+// otherwise pack with one and install with another), and resolving the binary
+// through PATH would let a writable PATH entry decide what this test executes.
+//
+// Set by npm for anything it runs, so `npm run smoke:p2` works and a bare
+// `node scripts/p2-smoke.mjs` is refused with the invocation that does.
+const NPM_CLI = process.env.npm_execpath;
+if (NPM_CLI === undefined || NPM_CLI.length === 0) {
+  throw new Error(
+    "run this through npm so it can find npm: `npm run smoke:p2` (pass flags after `--`, e.g. `npm run smoke:p2 -- --keep`)",
+  );
+}
+
+/** Run an npm subcommand on the resolved CLI, never on a PATH lookup. */
+function npm(args, options) {
+  execFileSync(process.execPath, [NPM_CLI, ...args], options);
+}
+
 // Cold `npm install` plus a Node boot; generous, but a hang must still fail the
 // job rather than sit until the CI runner's own timeout.
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -69,7 +89,7 @@ function pack() {
   mkdirSync(out);
   // Packed into an empty directory and read back, rather than parsed out of
   // npm's stdout: the prepack lifecycle script writes there too.
-  execFileSync("npm", ["pack", "--pack-destination", out], { cwd: PACKAGE_ROOT, stdio: "inherit" });
+  npm(["pack", "--pack-destination", out], { cwd: PACKAGE_ROOT, stdio: "inherit" });
   const files = readdirSync(out);
   assert.equal(files.length, 1, `expected exactly one tarball in ${out}, got ${files.join(", ")}`);
   return join(out, files[0]);
@@ -132,8 +152,15 @@ function writeApplicationProject() {
   return project;
 }
 
+/**
+ * `--ignore-scripts` because this install must not execute anything: the point
+ * is to observe what the tarball does when the SERVER runs, and a lifecycle
+ * script firing first would be both a confound and an execution path nothing
+ * here reviewed. Our own package declares no install script, so it changes
+ * nothing about what is being tested.
+ */
 function install(project, tarball) {
-  execFileSync("npm", ["install", "--no-audit", "--no-fund", "--prefer-offline", tarball], {
+  npm(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline", tarball], {
     cwd: project,
     stdio: "inherit",
   });
@@ -188,7 +215,7 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
 
   assert.equal(health.mode, "app");
   const dark = new Map(health.families.map((f) => [f.family, f]));
-  assert.deepEqual([...dark.keys()].sort(), ["docs", "kernel", "lsp"]);
+  assert.deepEqual([...dark.keys()].sort((a, b) => a.localeCompare(b)), ["docs", "kernel", "lsp"]);
   for (const [family, report] of dark) {
     assert.equal(report.state, "unavailable", `${family}:* resolved on a machine that has nothing to resolve it from`);
     assert.ok(report.reason?.length > 0, `${family}:* is dark without a reason`);
@@ -235,7 +262,7 @@ function assertSurfaceInvariant(dark, lit) {
   assert.ok(dark.tools.length >= 2, "expected a non-trivial tool surface");
   const names = dark.tools.map((t) => t.name);
   assert.deepEqual(
-    names.filter((n) => n.startsWith("bridge:")).sort(),
+    names.filter((n) => n.startsWith("bridge:")).sort((a, b) => a.localeCompare(b)),
     ["bridge:health", "bridge:version"],
     "bridge:* is frozen at two tools by the ADR-025 2026-08-26 addendum",
   );
@@ -368,7 +395,10 @@ class StdioClient {
   }
 
   request(method, params) {
-    if (this.#fatal !== null) return Promise.reject(this.#fatal);
+    // `instanceof` rather than a null check: #fatal only ever holds an Error,
+    // and saying so here is what makes the rejection reason provable at the
+    // call site rather than merely true.
+    if (this.#fatal instanceof Error) return Promise.reject(this.#fatal);
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
