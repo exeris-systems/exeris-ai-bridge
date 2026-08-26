@@ -22,24 +22,32 @@ const MANIFEST = join(DATA_DIR, "manifest.json");
 const SCHEMA_VERSION = 1;
 
 /**
- * What to vendor. EMPTY ON PURPOSE at 0.5.0: this milestone ships the mechanism
- * and 0.6.0's sdk:* family ships the content — the annotation catalog and AST
+ * Decide what to vendor.
+ *
+ * Returns nothing at 0.5.0, on purpose: this milestone ships the mechanism and
+ * 0.6.0's sdk:* family ships the content — the annotation catalog and AST
  * schema, generated upstream by the reflection mechanism `AnnotationContractTest`
- * already uses. Shipping placeholder content to prove the pipeline works would
- * put fiction in a public package, so the bundle ships with zero entries and an
+ * already uses. Shipping placeholder content to prove a pipeline works would put
+ * fiction in a public package, so the bundle ships with zero entries and an
  * honest manifest instead.
  *
- * Each source is `{ id, file, sourceArtifact }`: `file` is an absolute path to
- * read, `sourceArtifact` the Maven coordinate it was derived from, so an agent
- * can say which upstream release an answer reflects.
+ * A function rather than a constant because 0.6.0 has to *locate* these — probe
+ * the local Maven repository, pick a version, fail loudly if the artifact is
+ * absent — which is logic, not a literal.
+ *
+ * @returns {Array<{id: string, file: string, sourceArtifact: string}>} `file` is
+ *   an absolute path to read; `sourceArtifact` the Maven coordinate it was
+ *   derived from, so an agent can say which upstream release an answer reflects.
  */
-const SOURCES = [];
+function collectSources() {
+  return [];
+}
 
 function emit() {
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
 
-  const entries = SOURCES.map(({ id, file, sourceArtifact }) => {
+  const entries = collectSources().map(({ id, file, sourceArtifact }) => {
     const bytes = readFileSync(file);
     const path = `${id}.json`;
     copyFileSync(file, join(DATA_DIR, path));
@@ -97,8 +105,8 @@ function fail(message) {
   process.exit(1);
 }
 
-const args = process.argv.slice(2);
-const wantsVerify = args.includes("--verify");
-const wantsEmit = args.includes("--emit") || !wantsVerify;
+const args = new Set(process.argv.slice(2));
+const wantsVerify = args.has("--verify");
+const wantsEmit = args.has("--emit") || !wantsVerify;
 if (wantsEmit) emit();
 if (wantsVerify) verify();
