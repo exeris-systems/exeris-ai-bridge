@@ -395,10 +395,15 @@ class StdioClient {
   }
 
   request(method, params) {
-    // `instanceof` rather than a null check: #fatal only ever holds an Error,
-    // and saying so here is what makes the rejection reason provable at the
-    // call site rather than merely true.
-    if (this.#fatal instanceof Error) return Promise.reject(this.#fatal);
+    // Wrapped rather than re-thrown, so the failure says which call hit the
+    // dead transport. Without the method name every request after the first
+    // fatal rejects with the same "server exited" text and the run reads as if
+    // it died on whatever happened to be last.
+    if (this.#fatal !== null) {
+      return Promise.reject(
+        new Error(`${method} was not sent: ${this.#fatal.message}`, { cause: this.#fatal }),
+      );
+    }
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
