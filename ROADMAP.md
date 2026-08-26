@@ -200,7 +200,7 @@ The mechanism: the agent sends a `MutationOp`, the platform applies it **in-memo
 
 - [ ] **Path-traversal audit** — formal review of every filesystem-touching code path; fuzz tests for `../`, symlinks, Windows drive letters
 - [ ] **JSON-RPC injection audit** — LSP and kernel-adapter requests must escape correctly; no template-string concat of agent-supplied identifiers
-- [ ] **Dependency audit** — `npm audit` clean; SBOM published with each release; `@modelcontextprotocol/sdk` pinned to a reviewed version
+- [ ] **Dependency audit** — `npm audit` clean; SBOM published with each release; `@modelcontextprotocol/sdk` pinned to a reviewed version. *(Partially done ahead of schedule 2026-08-26: the SDK floor moved `^1.0.0` → `^1.30.0` and the tree went from 6 advisories — 3 high — to `found 0 vulnerabilities`. All of them were transitive under the SDK's HTTP stack (`hono`, `@hono/node-server`, `express`/`body-parser`, `express-rate-limit`/`ip-address`, `ajv`/`fast-uri`), which the stdio transport never executes — but 0.10.0 turns exactly that stack on. Still open here: an exact pin and the SBOM.)*
 - [ ] **Resource-limit caps** — `docs:search` result size capped, `lsp:*` request budget per session capped, child-process memory limits
 - [ ] **License notice** — generated `NOTICE.md` lists every third-party dep + license; CI gate fails if a non-permissive license sneaks in
 - [ ] **Threat model doc** — `docs/threat-model.md` enumerating trust boundaries (agent ↔ bridge, bridge ↔ LSP, bridge ↔ kernel adapter, bridge ↔ filesystem)
