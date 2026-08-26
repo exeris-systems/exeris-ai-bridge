@@ -60,6 +60,8 @@ Per the ADR-025 2026-08-16 amendment, the bridge serves two co-equal audiences. 
 
 **Zero-checkout is a hard requirement, not a nicety.** Any change to config resolution must keep the server booting on a machine with no `exeris-docs`, no `exeris-platform`, no `exeris-kernel` on disk. A missing root disables its family with a structured error; it never throws out of config load. `ecosystemRoot` is optional — never assume it exists.
 
+This is enforced, not merely stated: `scripts/p2-smoke.mjs` (CI job `p2-smoke`, `npm run smoke:p2`) packs the real tarball, installs it into a scratch directory holding only an application project, points `HOME` at an empty directory and scrubs every `EXERIS_*` variable. **If you change config resolution, packaging (`files`, `bin`, `prepack`), or the launch ladder, run it** — the unit suite runs inside an ecosystem checkout and cannot see a zero-checkout regression. Its `assertZeroCheckout` guard exists because the test can go vacuous silently: the install-neighbour docs default resolving would make every assertion below it pass while testing nothing.
+
 ## Preview, never write
 
 Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp:preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.

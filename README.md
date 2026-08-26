@@ -14,7 +14,11 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.2.0 — `docs:*` live; `lsp:*` (0.3.0) and `kernel:*` (0.4.0) complete and verified end-to-end.** ADR-025 ACCEPTED (2026-05-15). The full `docs:*` surface (9 tools) is implemented and filesystem-bound against `exeris-docs` — a Claude Code session can call `docs:list_adrs`, `docs:get_adr`, `docs:search`, and the per-repo docs tools end-to-end (see [Try it](#try-it-end-to-end)). The `lsp:*` family (3 tools) is bound to the read-only `exeris/*` slice that shipped in `exeris-platform-lsp` (`feat/lsp-readonly-slice`): `lsp:list_domains` / `lsp:describe_domain` / `lsp:list_actions` call `exeris/domains` / `exeris/domainDescribe` / `exeris/actions` and validate each result against its wire shape; the live path is covered by an opt-in integration test (`EXERIS_LSP_IT=1`; the bridge points the server at `EXERIS_LSP_WORKSPACE`, default cwd, via `initialize` `rootUri`). The `kernel:*` family (3 tools) is bound to the `KernelDiagnostics` SPI that shipped in `exeris-kernel` (v0.9.0, ADR-033): `kernel:list_providers` / `kernel:get_bootstrap_dag` / `kernel:describe_subsystem` reach a child `exeris-kernel-diagnostics-cli` over NDJSON (`src/transport/kernel-adapter.ts`) and validate each snapshot against its wire shape; the live path is covered by an opt-in integration test that spawns the real CLI (`EXERIS_KERNEL_IT=1` + `EXERIS_KERNEL_COMMAND`). Read-only and cap-blind by construction (no `kernel:list_capabilities`). Next: zero-checkout mode (0.5.0) — the foundation for the application-developer persona named by the ADR-025 2026-08-16 "Two Personas" amendment, followed by the `sdk:*` (0.6.0) and `build:*` / `caps:*` (0.7.0) authoring families. MCP resources + prompts moved to 0.9.0.
+**0.5.0 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (3 tools, bound to the `KernelDiagnostics` SPI over NDJSON — read-only and cap-blind by construction, so no `kernel:list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+
+What 0.5.0 adds is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
+
+Two upstream dependencies remain open and are documented rather than papered over: `exeris-platform-lsp` publishes no runnable jar, so `lsp:*` has no local-repository rung and stays contributor-only; and the published `exeris-kernel-diagnostics-cli:0.11.0` jar does not boot (see the note under [Wiring into an agent](#wiring-into-an-agent)). Next: the `sdk:*` family (0.6.0) — the annotation catalog that fills the bundle — then `build:*` / `caps:*` (0.7.0). MCP resources + prompts are at 0.9.0.
 
 Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
 
@@ -57,6 +61,18 @@ For development with auto-reload:
 ```sh
 npm run dev
 ```
+
+Tests, and the zero-checkout check that CI runs on every PR:
+
+```sh
+npm test                     # unit + shape tests (builds first)
+npm run smoke:p2             # pack, install into a scratch dir, speak MCP to the tarball
+```
+
+`smoke:p2` is the one test that does not run against the source tree. It builds the real
+package, installs it somewhere that has only an application project, points `HOME` at an
+empty directory and scrubs every `EXERIS_*` variable — the machine an application developer
+actually has. Add `--keep` to leave the scratch directory behind for inspection.
 
 ## Wiring into an agent
 
@@ -175,6 +191,8 @@ src/
                              per-entry SHA-256 verification, sandboxed to data/
 scripts/
   vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
+  p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
+                             the tarball on a scrubbed environment (CI job `p2-smoke`)
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)

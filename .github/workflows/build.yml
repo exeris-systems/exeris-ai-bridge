@@ -32,3 +32,34 @@ jobs:
 
       - name: Test
         run: npm test
+
+  p2-smoke:
+    # Everything in `build` runs against the source tree, inside an ecosystem
+    # checkout, with a developer's environment — which is exactly the machine
+    # the zero-checkout contract is not about. This job packs the tarball,
+    # installs it into a scratch directory holding only an application project,
+    # and speaks MCP to it with HOME pointed at an empty directory and no
+    # EXERIS_* set. It is what proves the package boots for P2, not just the
+    # sources it was built from. See scripts/p2-smoke.mjs.
+    name: p2 smoke (zero-checkout)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The engines floor. If the package boots here it boots on 22, and the
+      # matrix above already covers the source tree on both.
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack, install and interrogate
+        run: node scripts/p2-smoke.mjs
