@@ -2,6 +2,8 @@ import { realpathSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { findArtifactJar, newestReleaseVersion, resolveLocalRepository, type MavenCoordinate } from "./maven.js";
+
 // Config resolution for the two personas the bridge serves (ADR-025,
 // 2026-08-16 "Two Personas" amendment):
 //
@@ -28,11 +30,18 @@ import { fileURLToPath } from "node:url";
 export type BridgeMode = "contributor" | "app";
 
 /**
- * How a child-process launch spec was arrived at. The 0.5.0 ladder adds
- * further rungs (a published jar, a local Maven repository probe); this union
- * is the closed set of rungs that exist today, and `bridge:health` reports it.
+ * Which rung of the launch ladder produced a child's spec. Ordered by
+ * precedence, first hit wins, and `bridge:health` reports which one fired:
+ *
+ *   env-command  EXERIS_*_COMMAND — a full command line; the escape hatch
+ *   env-jar      EXERIS_*_JAR     — a jar this machine already has
+ *   m2           a published jar in the local Maven repository, by coordinate
+ *   source-tree  mvn against a sibling module, contributor mode only
+ *
+ * No rung touches the network. `m2` is what makes the family reachable for an
+ * application developer with no checkout.
  */
-export type LaunchSource = "env-command" | "source-tree";
+export type LaunchSource = "env-command" | "env-jar" | "m2" | "source-tree";
 
 /** The tool families whose availability depends on the environment. */
 export type ToolFamily = "docs" | "lsp" | "kernel";
@@ -76,6 +85,8 @@ export interface LspConfig {
   readonly command: string;
   readonly args: readonly string[];
   readonly source: LaunchSource;
+  /** The artifact version, when the spec came from the local Maven repository. */
+  readonly artifactVersion?: string;
   /**
    * Workspace root the LSP server indexes for `@ExerisDomain` sources, sent as
    * `rootUri` in the `initialize` handshake. The server walks this tree at
@@ -96,6 +107,8 @@ export interface KernelConfig {
   readonly command: string;
   readonly args: readonly string[];
   readonly source: LaunchSource;
+  /** The artifact version, when the spec came from the local Maven repository. */
+  readonly artifactVersion?: string;
 }
 
 export interface BridgeConfig {
@@ -114,9 +127,6 @@ export interface BridgeConfig {
 }
 
 const DEFAULT_DOCS_DIRNAME = "exeris-docs";
-const LSP_POM_RELATIVE = "exeris-platform/exeris-platform-lsp/pom.xml";
-const KERNEL_CLI_POM_RELATIVE = "exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml";
-const KERNEL_CLI_MAIN_CLASS = "eu.exeris.kernel.diagnostics.cli.DiagnosticsCli";
 
 /**
  * Resolve the bridge runtime config from the process environment.
@@ -144,14 +154,24 @@ export function loadConfig(
   const pinned = resolvePinnedMode(env);
   const docs = resolveDocsConfig(env, pinned, defaultRoot);
   const ecosystemRoot = docs.state === "available" ? docs.ecosystemRoot : null;
+  const mode = pinned ?? (docs.state === "available" ? "contributor" : "app");
+  const launch: LaunchContext = { env, ecosystemRoot, mode, pinned };
   return {
-    mode: pinned ?? (docs.state === "available" ? "contributor" : "app"),
+    mode,
     modeSource: pinned === null ? "probe" : "env",
     ecosystemRoot,
     docs,
-    lsp: resolveLspConfig(env, ecosystemRoot, pinned),
-    kernel: resolveKernelConfig(env, ecosystemRoot, pinned),
+    lsp: resolveLspConfig(env, launch),
+    kernel: resolveChildLaunch("kernel", launch),
   };
+}
+
+/** Everything the launch ladder needs, resolved before the children are. */
+interface LaunchContext {
+  readonly env: NodeJS.ProcessEnv;
+  readonly ecosystemRoot: string | null;
+  readonly mode: BridgeMode;
+  readonly pinned: BridgeMode | null;
 }
 
 /**
@@ -222,22 +242,16 @@ function resolveDocsConfig(
 }
 
 /**
- * Resolve the LSP launch spec from `EXERIS_LSP_COMMAND`, falling back to a
- * Maven invocation against the sibling exeris-platform module when there is an
- * ecosystem checkout to run it from.
+ * Resolve the LSP launch spec. The ladder itself lives in resolveChildLaunch;
+ * this adds the workspace root, which is lsp-specific.
  *
- * The env var is split on whitespace into command + args — it does NOT honour
+ * The env vars are split on whitespace into command + args — they do NOT honour
  * shell quoting or globbing (no shell is involved; the spawner exec's the
- * command directly). A value whose first token would be empty is treated as
- * unset. The path-sandbox does not apply here: this is an operator-supplied
- * executable, not an agent-supplied path, and it is never derived from a tool
- * argument.
+ * command directly). None of this is agent-supplied: these are operator-supplied
+ * executables, never derived from a tool argument, so the path-sandbox does not
+ * apply.
  */
-function resolveLspConfig(
-  env: NodeJS.ProcessEnv,
-  ecosystemRoot: string | null,
-  pinned: BridgeMode | null,
-): LspConfig | Unavailable {
+function resolveLspConfig(env: NodeJS.ProcessEnv, launch: LaunchContext): LspConfig | Unavailable {
   const explicitWorkspace = env.EXERIS_LSP_WORKSPACE?.trim();
   const workspaceRoot = explicitWorkspace || process.cwd();
   // An empty workspace is legal (a project with no @ExerisDomain sources yet),
@@ -251,95 +265,274 @@ function resolveLspConfig(
         `lsp:* tools will return an empty index.`,
     );
   }
-  const raw = env.EXERIS_LSP_COMMAND?.trim();
-  if (raw !== undefined && raw.length > 0) {
-    const tokens = raw.split(/\s+/);
-    return { state: "available", command: tokens[0], args: tokens.slice(1), source: "env-command", workspaceRoot };
-  }
-  if (ecosystemRoot === null) {
-    return noLaunchSpec("lsp", pinned);
-  }
-  // `-q` silences Maven's own [INFO]/[WARNING] lines, which would otherwise
-  // land on the same stdout the framing decoder reads and desync it. The
-  // server (exeris-platform-lsp, LspMain) writes JSON-RPC frames to stdout and
-  // logs to stderr, so with `-q` the framing channel stays clean. If a given
-  // environment still leaks Maven output onto stdout, switch this default to a
-  // clean channel (`exec:exec` with stdout reserved for JSON-RPC, or launch the
-  // built jar directly) — the integration test (ROADMAP 0.3.0) exercises this.
-  return {
-    state: "available",
-    command: "mvn",
-    args: ["-q", "-f", join(ecosystemRoot, LSP_POM_RELATIVE), "exec:java"],
-    source: "source-tree",
-    workspaceRoot,
-  };
+  const resolved = resolveChildLaunch("lsp", launch);
+  if (resolved.state === "unavailable") return resolved;
+  return { ...resolved, workspaceRoot };
 }
 
-/**
- * Resolve the kernel diagnostics CLI launch spec from `EXERIS_KERNEL_COMMAND`,
- * falling back to a Maven invocation against the sibling exeris-kernel CLI
- * module when there is an ecosystem checkout to run it from. Same
- * whitespace-split / no-shell-quoting rules as the LSP command, and likewise
- * NOT an agent-supplied path.
- */
-function resolveKernelConfig(
-  env: NodeJS.ProcessEnv,
-  ecosystemRoot: string | null,
-  pinned: BridgeMode | null,
-): KernelConfig | Unavailable {
-  const raw = env.EXERIS_KERNEL_COMMAND?.trim();
-  if (raw !== undefined && raw.length > 0) {
-    const tokens = raw.split(/\s+/);
-    return { state: "available", command: tokens[0], args: tokens.slice(1), source: "env-command" };
-  }
-  if (ecosystemRoot === null) {
-    return noLaunchSpec("kernel", pinned);
-  }
-  // As with the LSP default, `-q` keeps Maven's own logging off the NDJSON
-  // stdout (the CLI writes responses to stdout, JVM/Maven logs to stderr).
-  // `exec:java` does not require the exec plugin in the module pom — the main
-  // class is passed explicitly. A pre-built shaded jar (`java -jar
-  // …/exeris-kernel-diagnostics-cli-<ver>.jar`) is the faster documented
-  // override via EXERIS_KERNEL_COMMAND.
-  return {
-    state: "available",
-    command: "mvn",
-    args: [
-      "-q",
-      "-f",
-      join(ecosystemRoot, KERNEL_CLI_POM_RELATIVE),
-      "exec:java",
-      `-Dexec.mainClass=${KERNEL_CLI_MAIN_CLASS}`,
-    ],
-    source: "source-tree",
-  };
+type ChildFamily = "lsp" | "kernel";
+
+interface ChildFamilySpec {
+  /** What the child is, in operator-facing prose. */
+  readonly artefact: string;
+  readonly commandVar: string;
+  readonly jarVar: string;
+  readonly versionVar: string;
+  /** Module pom, relative to the ecosystem root, for the source-tree rung. */
+  readonly pomRelative: string;
+  /** Extra Maven args the source-tree rung needs beyond `exec:java`. */
+  readonly mavenArgs: readonly string[];
+  /**
+   * The executable artifact to probe for in the local Maven repository, and the
+   * artifact whose newest release names the version — or null when no published
+   * artifact is launchable yet, which skips the rung entirely.
+   */
+  readonly artifact: { readonly target: MavenCoordinate; readonly versionAnchor: MavenCoordinate } | null;
+  /** Whether a direct `java -jar` launch of this artifact needs --enable-preview. */
+  readonly enablePreview: boolean;
 }
 
-/** Per-family wording for "there is nothing to launch". */
-const CHILD_FAMILIES: Record<"lsp" | "kernel", { artefact: string; envVar: string }> = {
-  lsp: { artefact: "exeris-platform-lsp", envVar: "EXERIS_LSP_COMMAND" },
-  kernel: { artefact: "exeris-kernel-diagnostics-cli", envVar: "EXERIS_KERNEL_COMMAND" },
+// Both children are Java, both are launched the same four ways, and they differ
+// only in these values — including two facts verified against the upstream poms
+// on 2026-08-26 that are easy to get backwards:
+//
+//   - exeris-kernel compiles at `release 25` WITH preview features on, so a
+//     direct jar launch needs --enable-preview and a matching JDK. Its CLI is
+//     published shaded, with Main-Class in the manifest, so the m2 rung works.
+//   - exeris-platform compiles at `release 26` with NO preview, so passing the
+//     flag there would be wrong. Its LSP jar is NOT executable — the published
+//     artifact carries no Main-Class — so it has no m2 rung until the companion
+//     shading ask lands upstream (ROADMAP cross-repo table, 0.5.0). Until then
+//     EXERIS_LSP_JAR still serves anyone who builds a runnable jar themselves.
+const CHILD_FAMILIES: Record<ChildFamily, ChildFamilySpec> = {
+  lsp: {
+    artefact: "exeris-platform-lsp",
+    commandVar: "EXERIS_LSP_COMMAND",
+    jarVar: "EXERIS_LSP_JAR",
+    versionVar: "EXERIS_LSP_VERSION",
+    pomRelative: "exeris-platform/exeris-platform-lsp/pom.xml",
+    mavenArgs: [],
+    artifact: null,
+    enablePreview: false,
+  },
+  kernel: {
+    artefact: "exeris-kernel-diagnostics-cli",
+    commandVar: "EXERIS_KERNEL_COMMAND",
+    jarVar: "EXERIS_KERNEL_JAR",
+    versionVar: "EXERIS_KERNEL_VERSION",
+    pomRelative: "exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml",
+    mavenArgs: [`-Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli`],
+    artifact: {
+      target: { groupId: "eu.exeris", artifactId: "exeris-kernel-diagnostics-cli" },
+      versionAnchor: { groupId: "eu.exeris", artifactId: "exeris-kernel-core" },
+    },
+    enablePreview: true,
+  },
 };
 
+interface ChildLaunch {
+  readonly state: "available";
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly source: LaunchSource;
+  readonly artifactVersion?: string;
+}
+
 /**
- * The dark state for a child-process family: no explicit command and no
- * ecosystem checkout to build one from. This is the ordinary P2 state for both
- * families today; the 0.5.0 launch ladder will fill it in from a published
- * artefact in the local Maven repository.
+ * Walk the launch ladder for one child family. First hit wins; nothing here
+ * touches the network.
  */
-function noLaunchSpec(family: "lsp" | "kernel", pinned: BridgeMode | null): Unavailable {
-  const { artefact, envVar } = CHILD_FAMILIES[family];
-  const reason =
-    pinned === "contributor"
-      ? `EXERIS_BRIDGE_MODE pins contributor mode, but ${envVar} is unset and there is no ecosystem checkout to run ${artefact} from.`
-      : `No launch spec for ${artefact}: ${envVar} is unset and there is no ecosystem checkout to run it from.`;
+function resolveChildLaunch(family: ChildFamily, launch: LaunchContext): ChildLaunch | Unavailable {
+  const { env, ecosystemRoot, mode, pinned } = launch;
+  const spec = CHILD_FAMILIES[family];
+
+  // Rung 1 — a full command line. The escape hatch: anything the other rungs
+  // cannot express (a different JDK, an agent, a wrapper script) goes here.
+  const command = env[spec.commandVar]?.trim();
+  if (command !== undefined && command.length > 0) {
+    const tokens = command.split(/\s+/);
+    return { state: "available", command: tokens[0], args: tokens.slice(1), source: "env-command" };
+  }
+
+  // Rung 2 — a jar this machine already has. An explicitly named jar that is
+  // not there takes the family dark rather than quietly falling through: the
+  // operator named a mechanism, and silently using a different one would hide
+  // the typo. Same stance as an unresolvable EXERIS_DOCS_ROOT.
+  const jar = env[spec.jarVar]?.trim();
+  if (jar !== undefined && jar.length > 0) {
+    if (!isExistingFile(jar)) {
+      warn(`${spec.jarVar} does not point at an existing file: ${jar} — ${family}:* is unavailable.`);
+      return {
+        state: "unavailable",
+        reason: `${spec.jarVar} is set but does not point at an existing file.`,
+        remedy:
+          `Point ${spec.jarVar} at a runnable ${spec.artefact} jar, or unset it to let the bridge ` +
+          `resolve one itself. The path that failed is on the bridge's stderr.`,
+      };
+    }
+    return { state: "available", ...jarLaunch(env, jar, spec.enablePreview), source: "env-jar" };
+  }
+
+  // Rungs 3 and 4 — a published jar from the local Maven repository, and a
+  // build from the sibling checkout. Their ORDER depends on the mode, and this
+  // is the one place mode changes behaviour rather than merely describing it:
+  //
+  //   contributor — the source tree wins. Someone with the checkout is working
+  //     ON that tree; answering from a released jar would report the state of
+  //     code they are not editing, and they would have no reason to suspect it.
+  //     A slow, correct answer beats a fast, quietly stale one.
+  //   app — there is usually no tree at all, and where one exists it is not
+  //     what the developer is working on, so the published jar wins.
+  //
+  // This is preference, not gating: whichever rung is second still fires when
+  // the first cannot, so availability keeps its single source of truth.
+  const rungs = mode === "contributor" ? [sourceTreeRung, localRepositoryRung] : [localRepositoryRung, sourceTreeRung];
+  for (const rung of rungs) {
+    const hit = rung(spec, launch);
+    if (hit !== null) return hit;
+  }
+
+  return noLaunchSpec(spec, ecosystemRoot, pinned);
+}
+
+/**
+ * Build from the sibling checkout — only when the module is actually there. An
+ * ecosystem root that predates the module would otherwise produce a spec that
+ * fails at spawn time.
+ *
+ * `-q` silences Maven's own [INFO]/[WARNING] lines, which would otherwise land
+ * on the same stdout the framing decoders read and desync them. Both children
+ * write their protocol to stdout and their logs to stderr, so with `-q` the
+ * channel stays clean; the integration tests exercise exactly this.
+ */
+function sourceTreeRung(spec: ChildFamilySpec, { ecosystemRoot }: LaunchContext): ChildLaunch | null {
+  if (ecosystemRoot === null) return null;
+  const pom = join(ecosystemRoot, spec.pomRelative);
+  if (!isExistingFile(pom)) return null;
+  return {
+    state: "available",
+    command: "mvn",
+    args: ["-q", "-f", pom, "exec:java", ...spec.mavenArgs],
+    source: "source-tree",
+  };
+}
+
+/** A published jar in the local Maven repository — the rung that needs no checkout. */
+function localRepositoryRung(spec: ChildFamilySpec, { env }: LaunchContext): ChildLaunch | null {
+  const resolved = spec.artifact === null ? null : resolveFromLocalRepository(env, spec);
+  if (resolved === null) return null;
+  return {
+    state: "available",
+    ...jarLaunch(env, resolved.jar, spec.enablePreview),
+    source: "m2",
+    artifactVersion: resolved.version,
+  };
+}
+
+/**
+ * Rung 3: find a runnable jar in the local Maven repository.
+ *
+ * The version comes from the newest RELEASE of the anchor artifact present in
+ * that repository — NOT from the user's project dependency graph, which would
+ * need a Maven invocation and therefore a network round-trip on the boot path.
+ * Those usually agree, because the anchor is a dependency the project resolved.
+ * When they do not, `<FAMILY>_VERSION` pins it.
+ */
+function resolveFromLocalRepository(
+  env: NodeJS.ProcessEnv,
+  spec: ChildFamilySpec,
+): { jar: string; version: string } | null {
+  if (spec.artifact === null) return null;
+  const repo = resolveLocalRepository(env);
+  if (repo === null) return null;
+
+  const pinnedVersion = env[spec.versionVar]?.trim();
+  if (pinnedVersion !== undefined && pinnedVersion.length > 0) {
+    const jar = findArtifactJar(repo, spec.artifact.target, pinnedVersion);
+    if (jar !== null) return { jar, version: pinnedVersion };
+    // Unlike the JAR variable, this one does not name a launch mechanism — it
+    // only qualifies this rung — so a miss warns and lets the ladder continue.
+    warn(
+      `${spec.versionVar}=${pinnedVersion} has no ${spec.artifact.target.artifactId} jar in the ` +
+        `local Maven repository — continuing down the launch ladder.`,
+    );
+    return null;
+  }
+
+  const version = newestReleaseVersion(repo, spec.artifact.versionAnchor);
+  if (version === null) return null;
+  const jar = findArtifactJar(repo, spec.artifact.target, version);
+  return jar === null ? null : { jar, version };
+}
+
+/**
+ * The `java` binary for a jar launch. Honours JAVA_HOME — the universal
+ * convention — instead of inventing an Exeris-specific variable, and otherwise
+ * takes whatever is on PATH. An operator who needs more control uses rung 1,
+ * which accepts a full command line.
+ */
+function javaCommand(env: NodeJS.ProcessEnv): string {
+  const binary = process.platform === "win32" ? "java.exe" : "java";
+  const home = env.JAVA_HOME?.trim();
+  return home !== undefined && home.length > 0 ? join(home, "bin", binary) : binary;
+}
+
+function jarLaunch(
+  env: NodeJS.ProcessEnv,
+  jar: string,
+  enablePreview: boolean,
+): { command: string; args: readonly string[] } {
+  return {
+    command: javaCommand(env),
+    args: enablePreview ? ["--enable-preview", "-jar", jar] : ["-jar", jar],
+  };
+}
+
+/**
+ * The dark state for a child family: no rung fired. The remedy names the rungs
+ * that could realistically be made to fire on this machine, which differs by
+ * family — lsp:* has no local-repository rung until its artifact is published
+ * as an executable jar.
+ */
+function noLaunchSpec(
+  spec: ChildFamilySpec,
+  ecosystemRoot: string | null,
+  pinned: BridgeMode | null,
+): Unavailable {
+  const checkout =
+    ecosystemRoot === null
+      ? "there is no ecosystem checkout to build it from"
+      : `the ecosystem checkout has no ${spec.pomRelative}`;
+  const repoClause =
+    spec.artifact === null
+      ? ""
+      : `, no ${spec.artifact.target.artifactId} jar was found in the local Maven repository`;
+  const prefix =
+    pinned === "contributor" ? "EXERIS_BRIDGE_MODE pins contributor mode, but " : "";
+  const repoRemedy =
+    spec.artifact === null
+      ? ""
+      : ` The bridge also looks for a published jar in your local Maven repository; ` +
+        `"mvn dependency:get -Dartifact=${spec.artifact.target.groupId}:${spec.artifact.target.artifactId}:<version>" ` +
+        `puts one there (it resolves from GitHub Packages, so it needs PACKAGES_READ_TOKEN).`;
   return {
     state: "unavailable",
-    reason,
+    reason:
+      `${prefix}no launch spec for ${spec.artefact}: ${spec.commandVar} and ${spec.jarVar} are unset` +
+      `${repoClause}, and ${checkout}.`,
     remedy:
-      `Set ${envVar} to a command that starts ${artefact} on stdio (for example a "java -jar …" invocation), ` +
-      `or run the bridge from an ecosystem checkout so it can build ${artefact} from source.`,
+      `Set ${spec.jarVar} to a runnable ${spec.artefact} jar, or ${spec.commandVar} to a command that ` +
+      `starts it on stdio.${repoRemedy}`,
   };
+}
+
+/** Non-throwing existence+file probe, for launch specs that name a jar or pom. */
+function isExistingFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**

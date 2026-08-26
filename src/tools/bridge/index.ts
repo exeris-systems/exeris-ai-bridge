@@ -102,6 +102,8 @@ interface FamilyReport {
   readonly state: "available" | "unavailable";
   /** Which rung of the launch ladder produced the spec. Absent for docs:*. */
   readonly source?: string;
+  /** Which artifact version the ladder picked, when it resolved one by coordinate. */
+  readonly artifactVersion?: string;
   readonly reason?: string;
   readonly remedy?: string;
   readonly transport?: TransportReport | null;
@@ -141,12 +143,18 @@ function childFamilyReport(
   transport: LspStatus | KernelStatus | undefined,
 ): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
-  return {
+  const report: FamilyReport = {
     family,
     state: "available",
     source: config.source,
     transport: transport === undefined ? null : describeTransport(transport),
   };
+  // Only the local-repository rung resolves a version, and when it does the
+  // operator needs to see WHICH one — "kernel:* is live" is a different claim
+  // from "kernel:* is live against 0.10.2 while your project builds 0.11.0".
+  return config.artifactVersion === undefined
+    ? report
+    : { ...report, artifactVersion: config.artifactVersion };
 }
 
 function darkFamilyReport(family: ToolFamily, config: Unavailable): FamilyReport {

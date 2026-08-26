@@ -1,16 +1,51 @@
 import { strict as assert } from "node:assert";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
 
 import { loadConfig, type BridgeConfig, type DocsConfig, type KernelConfig, type LspConfig, type Unavailable } from "./env.js";
 
 let work: string;
+let mavenRepo: string;
 
 beforeEach(() => {
   work = mkdtempSync(join(tmpdir(), "exeris-env-"));
+  // An EMPTY local Maven repository, pinned into every load() below.
+  //
+  // Without this the launch ladder's m2 rung reads the developer's real ~/.m2,
+  // and whether kernel:* resolves would depend on which eu.exeris artifacts
+  // that machine happens to have installed. Tests that exercise the rung
+  // install artifacts into this scratch repo explicitly.
+  mavenRepo = join(work, "m2");
+  mkdirSync(mavenRepo, { recursive: true });
 });
+
+/** loadConfig with the local Maven repository pinned to the scratch repo. */
+function load(env: NodeJS.ProcessEnv = {}, defaultRoot?: string): BridgeConfig {
+  return loadConfig({ EXERIS_MAVEN_REPO: mavenRepo, ...env }, defaultRoot);
+}
+
+/** Install a fake artifact jar into the scratch repo and return its path. */
+function installJar(artifactId: string, version: string, groupPath = "eu/exeris"): string {
+  const dir = join(mavenRepo, groupPath, artifactId, version);
+  mkdirSync(dir, { recursive: true });
+  const jar = join(dir, `${artifactId}-${version}.jar`);
+  writeFileSync(jar, "not really a jar");
+  return jar;
+}
+
+/** Create a version directory with no jar — enough to anchor version discovery. */
+function installVersionDir(artifactId: string, version: string): void {
+  mkdirSync(join(mavenRepo, "eu/exeris", artifactId, version), { recursive: true });
+}
+
+/** Create the sibling module pom the source-tree rung requires. */
+function installPom(relative: string): void {
+  const pom = join(work, relative);
+  mkdirSync(dirname(pom), { recursive: true });
+  writeFileSync(pom, "<project/>");
+}
 
 afterEach(() => {
   rmSync(work, { recursive: true, force: true });
@@ -35,7 +70,7 @@ function missing(name = "missing"): string {
  * branch under test would never be reached.
  */
 function loadZeroCheckout(env: NodeJS.ProcessEnv): BridgeConfig {
-  return loadConfig(env, missing("no-default-docs"));
+  return load(env, missing("no-default-docs"));
 }
 
 function docsOf(cfg: BridgeConfig): DocsConfig {
@@ -78,13 +113,13 @@ function captureStderr<T>(fn: () => T): { value: T; stderr: string } {
 
 test("loadConfig honours EXERIS_DOCS_ROOT when set to an existing directory", () => {
   const docs = withDocs();
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs });
+  const cfg = load({ EXERIS_DOCS_ROOT: docs });
   assert.ok(isAbsolute(docsOf(cfg).docsRoot));
   assert.equal(docsOf(cfg).docsRoot, docs);
 });
 
 test("loadConfig derives ecosystemRoot as dirname(docsRoot)", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs() });
+  const cfg = load({ EXERIS_DOCS_ROOT: withDocs() });
   assert.equal(cfg.ecosystemRoot, work);
   assert.equal(docsOf(cfg).ecosystemRoot, work);
 });
@@ -99,11 +134,11 @@ test("loadConfig resolves symlinks in EXERIS_DOCS_ROOT to the real path", () => 
   } catch {
     return;
   }
-  assert.equal(docsOf(loadConfig({ EXERIS_DOCS_ROOT: link })).docsRoot, real);
+  assert.equal(docsOf(load({ EXERIS_DOCS_ROOT: link })).docsRoot, real);
 });
 
 test("loadConfig returns absolute paths for both roots", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs() });
+  const cfg = load({ EXERIS_DOCS_ROOT: withDocs() });
   assert.ok(isAbsolute(docsOf(cfg).docsRoot));
   assert.ok(isAbsolute(docsOf(cfg).ecosystemRoot));
   assert.ok(cfg.ecosystemRoot !== null && isAbsolute(cfg.ecosystemRoot));
@@ -113,7 +148,7 @@ test("loadConfig returns absolute paths for both roots", () => {
 // fail-soft: loadConfig never throws (ADR-025 two-personas amendment)
 
 test("loadConfig does not throw when EXERIS_DOCS_ROOT does not exist — docs:* goes dark", () => {
-  const { value: cfg } = captureStderr(() => loadConfig({ EXERIS_DOCS_ROOT: missing() }));
+  const { value: cfg } = captureStderr(() => load({ EXERIS_DOCS_ROOT: missing() }));
   const dark = darkOf(cfg.docs);
   assert.match(dark.reason, /EXERIS_DOCS_ROOT is set but does not resolve/);
   assert.ok(dark.remedy.length > 0);
@@ -123,7 +158,7 @@ test("loadConfig does not throw when EXERIS_DOCS_ROOT does not exist — docs:* 
 test("loadConfig does not throw when EXERIS_DOCS_ROOT is a file, not a directory", () => {
   const file = join(work, "not-a-dir");
   writeFileSync(file, "x");
-  const { value: cfg } = captureStderr(() => loadConfig({ EXERIS_DOCS_ROOT: file }));
+  const { value: cfg } = captureStderr(() => load({ EXERIS_DOCS_ROOT: file }));
   assert.match(darkOf(cfg.docs).reason, /does not resolve to a readable directory/);
 });
 
@@ -132,7 +167,7 @@ test("an unresolvable EXERIS_DOCS_ROOT names the path on stderr but never in rea
   // operator's absolute path belongs on stderr only. Same discipline as
   // SandboxEscapeError keeping paths out of `.message`.
   const bad = missing("secret-checkout");
-  const { value: cfg, stderr } = captureStderr(() => loadConfig({ EXERIS_DOCS_ROOT: bad }));
+  const { value: cfg, stderr } = captureStderr(() => load({ EXERIS_DOCS_ROOT: bad }));
   const dark = darkOf(cfg.docs);
   assert.ok(stderr.includes(bad), `expected the path on stderr, got: ${stderr}`);
   assert.ok(!dark.reason.includes(bad), `leaked path in reason: ${dark.reason}`);
@@ -155,14 +190,14 @@ test("loadConfig on a bare application project boots with every family dark", ()
 });
 
 test("loadConfig with the real process environment does not throw", () => {
-  assert.doesNotThrow(() => loadConfig());
+  assert.doesNotThrow(() => load());
 });
 
 // ---------------------------------------------------------------------------
 // EXERIS_BRIDGE_MODE
 
 test("mode probes to contributor when the docs root resolves", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs() });
+  const cfg = load({ EXERIS_DOCS_ROOT: withDocs() });
   assert.equal(cfg.mode, "contributor");
   assert.equal(cfg.modeSource, "probe");
 });
@@ -177,7 +212,7 @@ test("EXERIS_BRIDGE_MODE=contributor with no checkout reports a misconfiguration
 });
 
 test("EXERIS_BRIDGE_MODE is descriptive, not a mask: pinning app keeps a resolved docs root", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_BRIDGE_MODE: "app" });
+  const cfg = load({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_BRIDGE_MODE: "app" });
   assert.equal(cfg.mode, "app");
   assert.equal(cfg.modeSource, "env");
   assert.equal(cfg.docs.state, "available");
@@ -186,7 +221,7 @@ test("EXERIS_BRIDGE_MODE is descriptive, not a mask: pinning app keeps a resolve
 test("EXERIS_BRIDGE_MODE=auto and blank both mean probe", () => {
   const docs = withDocs();
   for (const value of ["auto", "  AUTO  ", "", "   "]) {
-    const cfg = loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: value });
+    const cfg = load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: value });
     assert.equal(cfg.modeSource, "probe", `for ${JSON.stringify(value)}`);
   }
 });
@@ -194,7 +229,7 @@ test("EXERIS_BRIDGE_MODE=auto and blank both mean probe", () => {
 test("an unrecognised EXERIS_BRIDGE_MODE warns and falls back to auto", () => {
   const docs = withDocs();
   const { value: cfg, stderr } = captureStderr(() =>
-    loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "contrib" }),
+    load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "contrib" }),
   );
   assert.equal(cfg.modeSource, "probe");
   assert.equal(cfg.mode, "contributor");
@@ -202,24 +237,19 @@ test("an unrecognised EXERIS_BRIDGE_MODE warns and falls back to auto", () => {
 });
 
 // ---------------------------------------------------------------------------
-// lsp launch spec
+// the launch ladder — env-command → env-jar → m2 → source-tree → dark
 
-test("lsp config defaults to the sibling exeris-platform Maven invocation", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs() });
-  const lsp = lspOf(cfg);
-  assert.equal(lsp.command, "mvn");
-  assert.equal(lsp.source, "source-tree");
-  assert.ok(lsp.args.includes("exec:java"));
-  // The -f pom path is anchored under ecosystemRoot (= dirname(docsRoot)).
-  assert.ok(
-    lsp.args.some((a) => a.endsWith("exeris-platform/exeris-platform-lsp/pom.xml")),
-    `expected a pom path in args, got ${JSON.stringify(lsp.args)}`,
-  );
-  assert.ok(lsp.args.some((a) => a.startsWith(work)));
-});
+const LSP_POM = "exeris-platform/exeris-platform-lsp/pom.xml";
+const KERNEL_POM = "exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml";
 
-test("EXERIS_LSP_COMMAND overrides the default, split on whitespace", () => {
-  const cfg = loadConfig({
+/** Put a runnable kernel CLI in the scratch repo, anchored by kernel-core. */
+function installKernelCli(version: string): string {
+  installVersionDir("exeris-kernel-core", version);
+  return installJar("exeris-kernel-diagnostics-cli", version);
+}
+
+test("rung 1: EXERIS_LSP_COMMAND is split on whitespace and wins outright", () => {
+  const cfg = load({
     EXERIS_DOCS_ROOT: withDocs(),
     EXERIS_LSP_COMMAND: "  node   /opt/lsp/server.js   --stdio  ",
   });
@@ -229,71 +259,196 @@ test("EXERIS_LSP_COMMAND overrides the default, split on whitespace", () => {
   assert.equal(lsp.source, "env-command");
 });
 
-test("a blank EXERIS_LSP_COMMAND falls back to the default", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_LSP_COMMAND: "   " });
-  assert.equal(lspOf(cfg).command, "mvn");
+test("a blank EXERIS_*_COMMAND is treated as unset", () => {
+  installPom(LSP_POM);
+  installPom(KERNEL_POM);
+  const cfg = load({
+    EXERIS_DOCS_ROOT: withDocs(),
+    EXERIS_LSP_COMMAND: "   ",
+    EXERIS_KERNEL_COMMAND: "   ",
+  });
   assert.equal(lspOf(cfg).source, "source-tree");
+  assert.equal(kernelOf(cfg).source, "source-tree");
 });
 
-test("lsp:* goes dark with no command and no ecosystem checkout to build from", () => {
-  const dark = darkOf(loadZeroCheckout({}).lsp);
-  assert.match(dark.reason, /exeris-platform-lsp/);
-  assert.match(dark.reason, /EXERIS_LSP_COMMAND is unset/);
-  assert.match(dark.remedy, /EXERIS_LSP_COMMAND/);
+test("rung 2: EXERIS_KERNEL_JAR launches java --enable-preview -jar", () => {
+  // The kernel compiles at `release 25` WITH preview on, so a direct jar
+  // launch that omits the flag fails at startup.
+  const jar = installJar("exeris-kernel-diagnostics-cli", "0.11.0");
+  const kernel = kernelOf(load({ EXERIS_KERNEL_JAR: jar }));
+  assert.equal(kernel.source, "env-jar");
+  assert.equal(kernel.command, "java");
+  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
 });
 
-test("EXERIS_LSP_COMMAND alone keeps lsp:* live with no checkout at all", () => {
-  // A P2 who points the bridge at a downloaded jar gets the family, even
-  // though docs:* and kernel:* stay dark.
-  const cfg = loadZeroCheckout({ EXERIS_LSP_COMMAND: "java -jar /opt/lsp.jar" });
-  assert.equal(lspOf(cfg).source, "env-command");
-  assert.equal(cfg.docs.state, "unavailable");
-  assert.equal(cfg.kernel.state, "unavailable");
+test("rung 2: EXERIS_LSP_JAR launches java -jar with NO preview flag", () => {
+  // exeris-platform compiles at `release 26` with no preview features; passing
+  // --enable-preview there would be wrong, so the flag is per-artifact.
+  const jar = installJar("exeris-platform-lsp", "0.1.0", "eu/exeris/platform");
+  const lsp = lspOf(load({ EXERIS_LSP_JAR: jar }));
+  assert.equal(lsp.source, "env-jar");
+  assert.deepEqual(lsp.args, ["-jar", jar]);
 });
 
-// ---------------------------------------------------------------------------
-// kernel launch spec
+test("an explicitly named jar that is missing takes the family dark, not down a rung", () => {
+  // The operator named a mechanism. Quietly using a different one would hide
+  // the typo — same stance as an unresolvable EXERIS_DOCS_ROOT.
+  installPom(KERNEL_POM);
+  installKernelCli("0.11.0");
+  const gone = missing("nope.jar");
+  const { value: cfg, stderr } = captureStderr(() =>
+    load({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_KERNEL_JAR: gone }),
+  );
+  const dark = darkOf(cfg.kernel);
+  assert.match(dark.reason, /EXERIS_KERNEL_JAR is set but does not point at an existing file/);
+  assert.ok(stderr.includes(gone), "the failing path belongs on stderr");
+  assert.ok(!dark.reason.includes(gone), `leaked path: ${dark.reason}`);
+});
 
-test("kernel config defaults to the sibling exeris-kernel diagnostics-CLI Maven invocation", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs() });
+test("rung 3: a published CLI in the local Maven repository serves a zero-checkout P2", () => {
+  const jar = installKernelCli("0.11.0");
+  const cfg = loadZeroCheckout({});
   const kernel = kernelOf(cfg);
-  assert.equal(kernel.command, "mvn");
+  assert.equal(kernel.source, "m2");
+  assert.equal(kernel.artifactVersion, "0.11.0");
+  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
+  // docs:* has nothing to resolve; the kernel family is live regardless.
+  assert.equal(cfg.docs.state, "unavailable");
+  assert.equal(cfg.mode, "app");
+});
+
+test("rung 3 anchors the version on the newest RELEASE, ignoring snapshots and junk", () => {
+  // A real local repository accumulates all of this next to the releases.
+  for (const v of ["0.9.0", "0.10.0", "0.10.2", "0.11.0-SNAPSHOT", "0.11.0-preview-SNAPSHOT", "0.6.0-RESEARCH-LOCALITY", "UNSPECIFIED-PIN-VIA-Dexeris.kernel.version"]) {
+    installVersionDir("exeris-kernel-core", v);
+  }
+  // 0.10.2 must outrank 0.9.0 — lexicographic ordering gets that backwards.
+  installJar("exeris-kernel-diagnostics-cli", "0.10.2");
+  assert.equal(kernelOf(loadZeroCheckout({})).artifactVersion, "0.10.2");
+});
+
+test("the local-repository rung is skipped when the anchor version has no matching CLI jar", () => {
+  installVersionDir("exeris-kernel-core", "0.11.0"); // no CLI jar alongside it
+  installPom(KERNEL_POM);
+  const cfg = load({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_BRIDGE_MODE: "app" });
+  assert.equal(kernelOf(cfg).source, "source-tree");
+});
+
+test("EXERIS_KERNEL_VERSION pins rung 3", () => {
+  installKernelCli("0.11.0");
+  const jar = installJar("exeris-kernel-diagnostics-cli", "0.10.2");
+  const kernel = kernelOf(loadZeroCheckout({ EXERIS_KERNEL_VERSION: "0.10.2" }));
+  assert.equal(kernel.artifactVersion, "0.10.2");
+  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
+});
+
+test("a pinned version with no jar warns and lets the ladder continue", () => {
+  // Unlike the JAR variable, this one does not name a launch mechanism — it
+  // only qualifies one rung — so a miss must not take the family dark.
+  installPom(KERNEL_POM);
+  const { value: cfg, stderr } = captureStderr(() =>
+    load({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_BRIDGE_MODE: "app", EXERIS_KERNEL_VERSION: "9.9.9" }),
+  );
+  assert.equal(kernelOf(cfg).source, "source-tree");
+  assert.match(stderr, /EXERIS_KERNEL_VERSION=9\.9\.9 has no exeris-kernel-diagnostics-cli jar/);
+});
+
+test("lsp:* has no local-repository rung — the published jar is not executable", () => {
+  // exeris-platform-lsp publishes a thin jar with no Main-Class, so probing for
+  // it would produce a launch that fails at startup. The rung stays off until
+  // the companion shading ask lands upstream.
+  installJar("exeris-platform-lsp", "0.1.0", "eu/exeris/platform");
+  const dark = darkOf(loadZeroCheckout({}).lsp);
+  assert.match(dark.reason, /EXERIS_LSP_COMMAND and EXERIS_LSP_JAR are unset/);
+  assert.ok(!dark.reason.includes("local Maven repository"), `offered a rung that does not exist: ${dark.reason}`);
+  // The kernel's remedy, by contrast, does point at the local repository.
+  assert.match(darkOf(loadZeroCheckout({}).kernel).remedy, /local Maven repository/);
+});
+
+test("rung 4: the source tree is used only when the module pom is actually there", () => {
+  const docs = withDocs();
+  // An ecosystem root that predates the module must not yield a spec that only
+  // fails at spawn time.
+  assert.equal(load({ EXERIS_DOCS_ROOT: docs }).kernel.state, "unavailable");
+
+  installPom(KERNEL_POM);
+  const kernel = kernelOf(load({ EXERIS_DOCS_ROOT: docs }));
   assert.equal(kernel.source, "source-tree");
+  assert.equal(kernel.command, "mvn");
   assert.ok(kernel.args.includes("exec:java"));
-  // The CLI main class is passed explicitly (the module pom has no exec config).
   assert.ok(
     kernel.args.some((a) => a === "-Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli"),
     `expected the CLI main class in args, got ${JSON.stringify(kernel.args)}`,
   );
-  assert.ok(
-    kernel.args.some((a) => a.endsWith("exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml")),
-    `expected a pom path in args, got ${JSON.stringify(kernel.args)}`,
-  );
   assert.ok(kernel.args.some((a) => a.startsWith(work)));
 });
 
-test("EXERIS_KERNEL_COMMAND overrides the default, split on whitespace", () => {
-  const cfg = loadConfig({
-    EXERIS_DOCS_ROOT: withDocs(),
-    EXERIS_KERNEL_COMMAND: "  java   -jar   /opt/diag-cli.jar  ",
+test("rung 4 for lsp:* carries no exec.mainClass — the module pom configures it", () => {
+  installPom(LSP_POM);
+  const lsp = lspOf(load({ EXERIS_DOCS_ROOT: withDocs() }));
+  assert.equal(lsp.source, "source-tree");
+  assert.deepEqual(lsp.args.filter((a) => a.startsWith("-Dexec")), []);
+  assert.ok(lsp.args.some((a) => a.endsWith(LSP_POM)));
+});
+
+test("the ladder is ordered: command beats jar beats everything below", () => {
+  const jar = installKernelCli("0.11.0");
+  installPom(KERNEL_POM);
+  const docs = withDocs();
+
+  const all = load({
+    EXERIS_DOCS_ROOT: docs,
+    EXERIS_KERNEL_COMMAND: "custom-cli",
+    EXERIS_KERNEL_JAR: jar,
   });
-  const kernel = kernelOf(cfg);
-  assert.equal(kernel.command, "java");
-  assert.deepEqual(kernel.args, ["-jar", "/opt/diag-cli.jar"]);
-  assert.equal(kernel.source, "env-command");
+  assert.equal(kernelOf(all).source, "env-command");
+
+  const noCommand = load({ EXERIS_DOCS_ROOT: docs, EXERIS_KERNEL_JAR: jar });
+  assert.equal(kernelOf(noCommand).source, "env-jar");
 });
 
-test("a blank EXERIS_KERNEL_COMMAND falls back to the default", () => {
-  const cfg = loadConfig({ EXERIS_DOCS_ROOT: withDocs(), EXERIS_KERNEL_COMMAND: "   " });
-  assert.equal(kernelOf(cfg).command, "mvn");
-  assert.equal(kernelOf(cfg).source, "source-tree");
+test("contributor mode prefers the source tree; app mode prefers the published jar", () => {
+  // The one place mode changes behaviour rather than describing it. Someone
+  // with a checkout is working ON that tree — answering kernel:* from a
+  // released jar would report code they are not editing, and nothing in the
+  // answer would say so.
+  const jar = installKernelCli("0.11.0");
+  installPom(KERNEL_POM);
+  const docs = withDocs();
+
+  assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs })).source, "source-tree");
+  assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "app" })).source, "m2");
+
+  // Preference, not gating: the second rung still fires when the first cannot.
+  const kernel = kernelOf(loadZeroCheckout({ EXERIS_BRIDGE_MODE: "contributor" }));
+  assert.equal(kernel.source, "m2");
+  assert.deepEqual(kernel.args, ["--enable-preview", "-jar", jar]);
 });
 
-test("kernel:* goes dark with no command and no ecosystem checkout to build from", () => {
-  const dark = darkOf(loadZeroCheckout({}).kernel);
-  assert.match(dark.reason, /exeris-kernel-diagnostics-cli/);
-  assert.match(dark.reason, /EXERIS_KERNEL_COMMAND is unset/);
-  assert.match(dark.remedy, /EXERIS_KERNEL_COMMAND/);
+test("JAVA_HOME selects the java binary for jar launches", () => {
+  const jar = installJar("exeris-kernel-diagnostics-cli", "0.11.0");
+  const kernel = kernelOf(load({ EXERIS_KERNEL_JAR: jar, JAVA_HOME: "/opt/jdk25" }));
+  assert.equal(kernel.command, join("/opt/jdk25", "bin", "java"));
+
+  const plain = kernelOf(load({ EXERIS_KERNEL_JAR: jar, JAVA_HOME: "   " }));
+  assert.equal(plain.command, "java");
+});
+
+test("both children go dark with nothing to launch, naming the rungs that could fire", () => {
+  const lsp = darkOf(loadZeroCheckout({}).lsp);
+  assert.match(lsp.reason, /exeris-platform-lsp/);
+  assert.match(lsp.remedy, /EXERIS_LSP_JAR/);
+  assert.match(lsp.remedy, /EXERIS_LSP_COMMAND/);
+
+  const kernel = darkOf(loadZeroCheckout({}).kernel);
+  assert.match(kernel.reason, /no exeris-kernel-diagnostics-cli jar was found in the local Maven repository/);
+  assert.match(kernel.remedy, /mvn dependency:get/);
+  assert.match(kernel.remedy, /PACKAGES_READ_TOKEN/);
+});
+
+test("a checkout that lacks the module says so, rather than blaming the checkout's absence", () => {
+  const dark = darkOf(load({ EXERIS_DOCS_ROOT: withDocs() }).lsp);
+  assert.match(dark.reason, new RegExp(`the ecosystem checkout has no ${LSP_POM.replace(/[/.]/g, "\\$&")}`));
 });
 
 // ---------------------------------------------------------------------------
@@ -301,22 +456,24 @@ test("kernel:* goes dark with no command and no ecosystem checkout to build from
 
 test("EXERIS_LSP_WORKSPACE sets the LSP workspace root; cwd is the default", () => {
   const docs = withDocs();
+  installPom(LSP_POM); // the workspace only matters once lsp:* has something to launch
   const ws = join(work, "workspace");
   mkdirSync(ws);
-  assert.equal(lspOf(loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: ws })).workspaceRoot, ws);
-  assert.equal(lspOf(loadConfig({ EXERIS_DOCS_ROOT: docs })).workspaceRoot, process.cwd());
+  assert.equal(lspOf(load({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: ws })).workspaceRoot, ws);
+  assert.equal(lspOf(load({ EXERIS_DOCS_ROOT: docs })).workspaceRoot, process.cwd());
   assert.equal(
-    lspOf(loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: "   " })).workspaceRoot,
+    lspOf(load({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: "   " })).workspaceRoot,
     process.cwd(),
   );
 });
 
 test("a missing explicit EXERIS_LSP_WORKSPACE warns on stderr but does not throw", () => {
   const docs = withDocs();
+  installPom(LSP_POM);
   const gone = missing("does-not-exist");
 
   const { value: cfg, stderr } = captureStderr(() =>
-    loadConfig({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: gone }),
+    load({ EXERIS_DOCS_ROOT: docs, EXERIS_LSP_WORKSPACE: gone }),
   );
   // The bad path is still honoured (the server will return an empty index)...
   assert.equal(lspOf(cfg).workspaceRoot, gone);
@@ -325,6 +482,6 @@ test("a missing explicit EXERIS_LSP_WORKSPACE warns on stderr but does not throw
   assert.match(stderr, /empty index/);
 
   // The default (cwd, which exists) must stay silent.
-  const { stderr: silent } = captureStderr(() => loadConfig({ EXERIS_DOCS_ROOT: docs }));
+  const { stderr: silent } = captureStderr(() => load({ EXERIS_DOCS_ROOT: docs }));
   assert.equal(silent, "");
 });

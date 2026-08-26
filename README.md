@@ -84,7 +84,20 @@ When something is dark, **`bridge:health` is the tool to call**. It reports the 
 
 `EXERIS_BRIDGE_MODE` (optional, `auto` | `contributor` | `app`, default `auto`) records which persona the environment looks like — `auto` infers it from whether an ecosystem checkout resolved. It is **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
 
-`EXERIS_LSP_COMMAND` (optional) is how the `lsp:*` family launches its `exeris-platform-lsp` child — a whitespace-separated command + args (no shell quoting; the process is exec'd directly). It defaults to `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java` (`-q` keeps Maven's own logging off the JSON-RPC stdout). The child is spawned lazily on the first `lsp:*` call and cached; its stderr is inherited into the bridge's logs. `lsp:*` calls return validated data against a running server; a server build predating the `exeris/*` slice yields a structured "update the LSP server" result rather than failing. The integration test confirms the default `exec:java` launch keeps protocol frames clean on stdout (the JVM logs to stderr), so no `exec:exec` workaround is needed.
+Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:
+
+| rung | how | `source` in `bridge:health` |
+|---|---|---|
+| 1 | `EXERIS_LSP_COMMAND` / `EXERIS_KERNEL_COMMAND` — a full command line | `env-command` |
+| 2 | `EXERIS_LSP_JAR` / `EXERIS_KERNEL_JAR` — a jar you already have | `env-jar` |
+| 3 | a published jar in your local Maven repository, by coordinate | `m2` |
+| 4 | `mvn exec:java` against the sibling module, if its pom is there | `source-tree` |
+
+Rungs 3 and 4 **swap order by mode**: in contributor mode the source tree wins, because someone with the checkout is working *on* that tree and a released jar would quietly answer for code they are not editing; in app mode the published jar wins. That is preference, not gating — whichever is second still fires when the first cannot.
+
+Rung 3 finds the local repository at `EXERIS_MAVEN_REPO`, then `<localRepository>` in `~/.m2/settings.xml`, then `~/.m2/repository`. The version is the newest **release** of the anchor artifact present there (`exeris-kernel-core` for the kernel CLI) — not the version your project's dependency graph resolves, which would require a Maven invocation on the boot path. `EXERIS_KERNEL_VERSION` pins it when those differ. Jar launches use `$JAVA_HOME/bin/java` when `JAVA_HOME` is set, else `java`; rung 1 is the escape hatch when you need something else. `lsp:*` has no rung 3 yet: the published `exeris-platform-lsp` jar carries no `Main-Class`, so probing for it would produce a launch that fails at startup.
+
+`EXERIS_LSP_COMMAND` (optional) is how the `lsp:*` family launches its `exeris-platform-lsp` child — a whitespace-separated command + args (no shell quoting; the process is exec'd directly). The source-tree rung runs `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java` (`-q` keeps Maven's own logging off the JSON-RPC stdout). The child is spawned lazily on the first `lsp:*` call and cached; its stderr is inherited into the bridge's logs. `lsp:*` calls return validated data against a running server; a server build predating the `exeris/*` slice yields a structured "update the LSP server" result rather than failing. The integration test confirms the default `exec:java` launch keeps protocol frames clean on stdout (the JVM logs to stderr), so no `exec:exec` workaround is needed.
 
 `EXERIS_LSP_WORKSPACE` (optional) is the workspace root the LSP server indexes for `@ExerisDomain` sources, sent as `rootUri` in the `initialize` handshake. It defaults to the bridge's working directory (the project it was spawned in). With no resolvable workspace the server returns an empty index, so `lsp:*` tools answer `[]`.
 
@@ -120,7 +133,8 @@ printf '%s\n' \
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
-  config/env.ts              fail-soft env resolution: modes, per-family availability, launch specs
+  config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
+  config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
   transport/
     lsp-framing.ts           LSP base-protocol (Content-Length) message codec
