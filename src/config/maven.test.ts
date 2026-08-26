@@ -157,3 +157,24 @@ test("findArtifactJar does not mistake a directory for a jar", () => {
   });
   assert.equal(findArtifactJar(repo, KERNEL_CORE, "0.11.0"), null);
 });
+
+test("comment stripping survives fragments that splice into a new comment opener", () => {
+  // For well-formed XML one pass is already exact — comments do not nest, so a
+  // non-greedy match ends where the comment genuinely ends. This covers the
+  // malformed case, where removing one comment joins two fragments into a new
+  // <!-- that a single pass would leave behind.
+  const real = dir("home", ".m2", "repository");
+  const home = homeWithSettings(
+    "<settings><!<!-- x -->-- <localRepository>/path/to/local/repo</localRepository> --></settings>",
+  );
+  assert.equal(resolveLocalRepository({ HOME: home }), real);
+});
+
+test("a real <localRepository> after a comment is still found", () => {
+  // The fixpoint loop must not eat past the comment that actually closes.
+  const repo = dir("configured");
+  const home = homeWithSettings(
+    `<settings><!-- commentary --><localRepository>${repo}</localRepository></settings>`,
+  );
+  assert.equal(resolveLocalRepository({ HOME: home }), repo);
+});

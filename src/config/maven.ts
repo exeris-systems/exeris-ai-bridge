@@ -60,6 +60,14 @@ export function resolveLocalRepository(env: NodeJS.ProcessEnv): string | null {
  * line. Matching without stripping would send every default installation to a
  * path that does not exist.
  *
+ * The strip runs to a fixpoint. For well-formed XML a single pass is already
+ * exact — comments do not nest, so the non-greedy match ends at the first
+ * `-->`, which is where the comment genuinely ends. The loop only matters for
+ * malformed input, where removing one comment can splice two fragments into a
+ * new `<!--`. This file is operator-owned local configuration rather than
+ * attacker-controlled input and its value only ever reaches a directory check,
+ * so this is robustness against a typo, not a security boundary.
+ *
  * `${user.home}` is expanded because it is overwhelmingly the form people
  * write — against the same `home` the settings file was found under, so an
  * injected HOME governs the whole resolution rather than half of it. Any other
@@ -74,7 +82,11 @@ function localRepositoryFromSettings(settingsPath: string, home: string): string
   } catch {
     return null; // no settings.xml is the common case, not an error
   }
-  const withoutComments = raw.replace(/<!--[\s\S]*?-->/g, "");
+  let withoutComments = raw;
+  for (let previous = ""; withoutComments !== previous; ) {
+    previous = withoutComments;
+    withoutComments = withoutComments.replace(/<!--[\s\S]*?-->/g, "");
+  }
   const match = /<localRepository>([^<]*)<\/localRepository>/.exec(withoutComments);
   if (match === null) return null;
   const value = match[1].trim();

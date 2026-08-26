@@ -448,7 +448,10 @@ test("both children go dark with nothing to launch, naming the rungs that could 
 
 test("a checkout that lacks the module says so, rather than blaming the checkout's absence", () => {
   const dark = darkOf(load({ EXERIS_DOCS_ROOT: withDocs() }).lsp);
-  assert.match(dark.reason, new RegExp(`the ecosystem checkout has no ${LSP_POM.replace(/[/.]/g, "\\$&")}`));
+  assert.ok(
+    dark.reason.includes(`the ecosystem checkout has no ${LSP_POM}`),
+    `expected the missing module named, got: ${dark.reason}`,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -484,4 +487,23 @@ test("a missing explicit EXERIS_LSP_WORKSPACE warns on stderr but does not throw
   // The default (cwd, which exists) must stay silent.
   const { stderr: silent } = captureStderr(() => load({ EXERIS_DOCS_ROOT: docs }));
   assert.equal(silent, "");
+});
+
+test("an unresolvable EXERIS_MAVEN_REPO warns once instead of silently disabling a rung", () => {
+  // Every other explicitly-set path here warns when it does not resolve. This
+  // one used to just switch the local-repository rung off, which looks exactly
+  // like a machine that does not have the artifact installed.
+  const gone = missing("no-such-repo");
+  const { value: cfg, stderr } = captureStderr(() =>
+    loadConfig({ EXERIS_MAVEN_REPO: gone, EXERIS_BRIDGE_MODE: "app" }, missing("no-default-docs")),
+  );
+  assert.equal(cfg.kernel.state, "unavailable");
+  assert.match(stderr, /EXERIS_MAVEN_REPO is not an existing directory/);
+  // Global to the ladder, so two probing families must not warn twice.
+  assert.equal(stderr.match(/EXERIS_MAVEN_REPO is not an existing directory/g)?.length, 1);
+});
+
+test("a resolvable EXERIS_MAVEN_REPO stays silent", () => {
+  const { stderr } = captureStderr(() => load({ EXERIS_BRIDGE_MODE: "app" }, missing("no-default-docs")));
+  assert.equal(stderr, "");
 });

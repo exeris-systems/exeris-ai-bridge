@@ -155,6 +155,7 @@ export function loadConfig(
   const docs = resolveDocsConfig(env, pinned, defaultRoot);
   const ecosystemRoot = docs.state === "available" ? docs.ecosystemRoot : null;
   const mode = pinned ?? (docs.state === "available" ? "contributor" : "app");
+  warnIfLocalRepositoryUnresolvable(env);
   const launch: LaunchContext = { env, ecosystemRoot, mode, pinned };
   return {
     mode,
@@ -172,6 +173,26 @@ interface LaunchContext {
   readonly ecosystemRoot: string | null;
   readonly mode: BridgeMode;
   readonly pinned: BridgeMode | null;
+}
+
+/**
+ * EXERIS_MAVEN_REPO is the one explicitly-set path here whose failure would
+ * otherwise be silent: an unresolvable value simply switches the local
+ * repository rung off, which is indistinguishable from a machine that does not
+ * have the artifact installed. Every other explicit path in this file already
+ * warns when it does not resolve; this closes the gap.
+ *
+ * Warned once, from here rather than per-family, because the variable is global
+ * to the ladder — two families probing must not produce two warnings.
+ */
+function warnIfLocalRepositoryUnresolvable(env: NodeJS.ProcessEnv): void {
+  const configured = env.EXERIS_MAVEN_REPO?.trim();
+  if (configured === undefined || configured.length === 0) return;
+  if (resolveLocalRepository(env) !== null) return;
+  warn(
+    `EXERIS_MAVEN_REPO is not an existing directory: ${configured} — the local ` +
+      `Maven repository rung of the launch ladder is disabled.`,
+  );
 }
 
 /**
