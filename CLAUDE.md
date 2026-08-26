@@ -46,8 +46,9 @@ Each tool family is documented in its own folder. Keep the scope tight; if a too
 | `sdk:*`    | *(planned 0.6.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
 | `build:*`  | *(planned 0.7.0)* The **user's own project**: emitted `DomainMetadata`, artefact preview, L1/L2 detach state, decoded processor diagnostics — read-only | User's project filesystem, pinned project root |
 | `caps:*`   | *(planned 0.7.0)* `cap-manifest.json` + `CompositionStamp` — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | Build-time artefacts from `exeris-tooling` |
+| `bridge:*` | The **bridge itself**, not Exeris: resolved persona mode, per-family availability with reason + remedy, child-process state. Read-only, **zero spawns**, frozen at 2 tools | This server's own boot-time state |
 
-New families require an ADR-025 amendment (or a successor ADR). Do not invent a `sku:*` family unilaterally. `sdk:*`, `build:*` and `caps:*` are authorised by the 2026-08-16 "Two Personas" amendment — `caps:*` specifically satisfies the deferred-composition clause of the 2026-06-17 cap-blind amendment. Their tools are **not yet implemented**; adding one is milestone work, not a free-for-all.
+New families require an ADR-025 amendment (or a successor ADR). Do not invent a `sku:*` family unilaterally. `sdk:*`, `build:*` and `caps:*` are authorised by the 2026-08-16 "Two Personas" amendment — `caps:*` specifically satisfies the deferred-composition clause of the 2026-06-17 cap-blind amendment. Their tools are **not yet implemented**; adding one is milestone work, not a free-for-all. `bridge:*` is authorised by the 2026-08-26 addendum and is **frozen at two tools**; it is also the one family that is never environment-gated, which is why it is excluded from the `ToolFamily` union the availability guard ranges over — "gate `bridge:*`" should stay inexpressible rather than merely discouraged.
 
 ## Two personas — who a change is for
 

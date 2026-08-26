@@ -264,3 +264,81 @@ test("correlates interleaved responses to the right request", async () => {
   assert.equal(await first, "A");
   assert.equal(await second, "B");
 });
+
+// ---------------------------------------------------------------------------
+// status() — the non-spawning view bridge:health reads (ROADMAP 0.5.0)
+
+test("status() reports not-started without spawning, then running after a request", async () => {
+  let spawns = 0;
+  const channel = new FakeChannel();
+  channel.autoResponder = (msg) => ({ jsonrpc: "2.0", id: msg.id, result: [] });
+  const client = new LspClient(SPEC, {
+    channelFactory: () => {
+      spawns++;
+      return channel;
+    },
+  });
+
+  // The whole point of the accessor: it must be safe to call before anything
+  // has started, and it must not be the thing that starts it.
+  assert.deepEqual(client.status(), { state: "not-started", closeReason: null, lastStartError: null });
+  client.status();
+  client.status();
+  assert.equal(spawns, 0, "status() must never spawn");
+
+  await client.request("exeris/domains");
+  assert.equal(client.status().state, "running");
+  assert.equal(spawns, 1);
+});
+
+test("status() reports a terminal close with its reason", async () => {
+  const channel = new FakeChannel();
+  channel.autoResponder = ackInitialize;
+  const client = new LspClient(SPEC, { channelFactory: () => channel });
+
+  const pending = client.request("exeris/domains");
+  await flush();
+  channel.emitClose({ kind: "exited", code: 1, signal: null });
+  await assert.rejects(pending, LspTransportError);
+
+  const status = client.status();
+  assert.equal(status.state, "closed");
+  assert.deepEqual(status.closeReason, { kind: "exited", code: 1, signal: null });
+});
+
+test("status() surfaces a hung handshake, which otherwise leaves no trace", async () => {
+  // A start that fails without a terminal close is deliberately retryable: it
+  // clears startPromise, so the client reads as "not-started" again. Without
+  // lastStartError that failure would be invisible to bridge:health.
+  const client = new LspClient(SPEC, {
+    channelFactory: () => new FakeChannel(), // never acks initialize
+    requestTimeoutMs: 20,
+  });
+
+  await assert.rejects(client.request("exeris/domains"), LspTransportError);
+
+  const status = client.status();
+  assert.equal(status.state, "not-started");
+  assert.equal(status.closeReason, null);
+  assert.match(status.lastStartError ?? "", /timed out after 20ms/);
+});
+
+test("a successful handshake clears a previous lastStartError", async () => {
+  let spawns = 0;
+  const client = new LspClient(SPEC, {
+    channelFactory: () => {
+      spawns++;
+      const channel = new FakeChannel();
+      channel.autoResponder =
+        spawns === 1 ? () => undefined : (msg) => ({ jsonrpc: "2.0", id: msg.id, result: "ok" });
+      return channel;
+    },
+    requestTimeoutMs: 20,
+  });
+
+  await assert.rejects(client.request("exeris/domains"), LspTransportError);
+  assert.ok(client.status().lastStartError !== null);
+
+  assert.equal(await client.request("exeris/domains"), "ok");
+  assert.deepEqual(client.status(), { state: "running", closeReason: null, lastStartError: null });
+});

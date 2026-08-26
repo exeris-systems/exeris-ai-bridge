@@ -52,6 +52,24 @@ export interface LspLaunchSpec {
 
 export type LspChannelFactory = (spec: LspLaunchSpec) => LspChannel;
 
+/**
+ * A read-only view of the child process, for bridge:health. Reading it NEVER
+ * spawns — that is the whole point: the diagnostic surface must be cheap enough
+ * that an agent can call it freely, and it must not perturb what it reports.
+ */
+export interface LspStatus {
+  readonly state: "not-started" | "starting" | "running" | "closed";
+  /** The terminal reason, when the client is permanently unusable. */
+  readonly closeReason: LspCloseReason | null;
+  /**
+   * Message of the most recent start attempt that failed WITHOUT a terminal
+   * close — an `initialize` that timed out against a hung server, say. Such a
+   * client is deliberately retryable and reads as "not-started" again, so
+   * without this the failure would leave no trace at all.
+   */
+  readonly lastStartError: string | null;
+}
+
 /** A JSON-RPC error returned by the server (e.g. method not found). */
 export class LspRequestError extends Error {
   constructor(
@@ -94,6 +112,8 @@ export class LspClient {
   private channel: LspChannel | null = null;
   private decoder = new LspMessageDecoder();
   private startPromise: Promise<void> | null = null;
+  private handshakeComplete = false;
+  private lastStartError: string | null = null;
   private closeReason: LspCloseReason | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
@@ -114,6 +134,24 @@ export class LspClient {
     return this.dispatch(method, params);
   }
 
+  /**
+   * Current transport state, without touching the child. Safe to call before
+   * any request — it reports "not-started" rather than starting anything.
+   */
+  status(): LspStatus {
+    if (this.closeReason !== null) {
+      return { state: "closed", closeReason: this.closeReason, lastStartError: this.lastStartError };
+    }
+    if (this.startPromise === null) {
+      return { state: "not-started", closeReason: null, lastStartError: this.lastStartError };
+    }
+    return {
+      state: this.handshakeComplete ? "running" : "starting",
+      closeReason: null,
+      lastStartError: this.lastStartError,
+    };
+  }
+
   /** Terminate the server and reject all in-flight requests. Idempotent. */
   dispose(): void {
     this.failPendingAndClose({ kind: "disposed" });
@@ -132,7 +170,13 @@ export class LspClient {
         // a permanently rejected startPromise, so every later request replays
         // the stale error with no re-spawn. Clear it so the next request can
         // retry. Spawn-error / exit set closeReason and are intentionally sticky.
-        if (this.closeReason === null) this.startPromise = null;
+        if (this.closeReason === null) {
+          this.startPromise = null;
+          // Retryable failures leave no other trace: closeReason stays null and
+          // status() falls back to "not-started". Record it so bridge:health can
+          // say the handshake was tried and failed.
+          this.lastStartError = err instanceof Error ? err.message : String(err);
+        }
         throw err;
       });
     }
@@ -160,6 +204,8 @@ export class LspClient {
       rootUri: root ? pathToFileURL(root).href : null,
     });
     this.notify("initialized", {});
+    this.handshakeComplete = true;
+    this.lastStartError = null;
   }
 
   private dispatch(method: string, params: unknown): Promise<unknown> {
