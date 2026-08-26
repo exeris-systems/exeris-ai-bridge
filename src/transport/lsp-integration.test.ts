@@ -7,6 +7,8 @@ import { test } from "node:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { BridgeConfig, LspConfig } from "../config/env.js";
+import { registerLspTools } from "../tools/lsp/index.js";
+import { LspClient } from "./lsp-client.js";
 
 // The transports are injected below, so config-time availability is moot —
 // every family is left dark to make that explicit: an injected client/adapter
@@ -25,9 +27,6 @@ const DARK_CONFIG: BridgeConfig = {
   lsp: NOT_UNDER_TEST,
   kernel: NOT_UNDER_TEST,
 };
-
-import { registerLspTools } from "../tools/lsp/index.js";
-import { LspClient } from "./lsp-client.js";
 
 // End-to-end integration test for the lsp:* family against a REAL
 // exeris-platform-lsp server — the one open item closing ROADMAP 0.3.0. It
