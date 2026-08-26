@@ -19,3 +19,6 @@ dist/
 
 # Per-user Claude Code settings — shared agents/commands/skills stay tracked
 .claude/settings.local.json
+
+# Local planning scratch — never committed
+*.local.md
