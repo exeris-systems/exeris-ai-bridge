@@ -220,7 +220,7 @@ test("bridge:health names the artifact version when the ladder resolved one", as
   const m2: KernelConfig = {
     state: "available",
     command: "java",
-    args: ["--enable-preview", "-jar", "/repo/exeris-kernel-diagnostics-cli-0.10.2.jar"],
+    args: ["-jar", "/repo/exeris-kernel-diagnostics-cli-0.10.2.jar"],
     source: "m2",
     artifactVersion: "0.10.2",
   };
