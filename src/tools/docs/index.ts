@@ -1,9 +1,10 @@
 import { lstatSync, readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-import type { BridgeConfig } from "../../config/env.js";
+import type { BridgeConfig, DocsConfig, DocsRoots, Unavailable } from "../../config/env.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { RegisteredTool } from "../types.js";
+import { guard } from "../unavailable.js";
 import { parseAdrIndex, type AdrEntry } from "./adr-index.js";
 
 // docs:* — surfaces the exeris-docs ADR registry, canonical narratives,
@@ -68,24 +69,32 @@ const SEARCH_MAX_BYTES_PER_FILE = 10_000_000;
 const SEARCH_MAX_TOTAL_BYTES = 50_000_000;
 const SEARCH_MAX_SNIPPET_LEN = 200;
 
+/**
+ * The docs:* family handle: the resolved roots, or the structured reason the
+ * family is dark. Every tool definition below is built either way — only the
+ * handlers are gated (see ../unavailable.ts).
+ */
+type DocsFamily = DocsConfig | Unavailable;
+
 export function registerDocsTools(config: BridgeConfig): RegisteredTool[] {
+  const docs = config.docs;
   return [
-    listAdrsTool(config),
-    getAdrTool(config),
-    getTemplateTool(config),
-    getHlaTool(config),
-    getWhitepaperTool(config),
-    searchTool(config),
-    listReposTool(config),
-    listRepoDocsTool(config),
-    getRepoDocTool(config),
+    listAdrsTool(docs),
+    getAdrTool(docs),
+    getTemplateTool(docs),
+    getHlaTool(docs),
+    getWhitepaperTool(docs),
+    searchTool(docs),
+    listReposTool(docs),
+    listRepoDocsTool(docs),
+    getRepoDocTool(docs),
   ];
 }
 
 // ---------------------------------------------------------------------------
 // docs:list_adrs
 
-function listAdrsTool(config: BridgeConfig): RegisteredTool {
+function listAdrsTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:list_adrs",
@@ -107,7 +116,7 @@ function listAdrsTool(config: BridgeConfig): RegisteredTool {
         },
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       const status =
         typeof args.status === "string" ? args.status.trim().toLowerCase() : "";
       let entries: AdrEntry[];
@@ -130,14 +139,14 @@ function listAdrsTool(config: BridgeConfig): RegisteredTool {
         );
       }
       return ok(JSON.stringify(filtered, null, 2));
-    },
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:get_adr
 
-function getAdrTool(config: BridgeConfig): RegisteredTool {
+function getAdrTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:get_adr",
@@ -158,7 +167,7 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
         required: ["number"],
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       if (typeof args.number !== "number" || !Number.isInteger(args.number)) {
         return errorResult(
           `Invalid input: 'number' must be an integer, got ${typeof args.number}`,
@@ -231,14 +240,14 @@ function getAdrTool(config: BridgeConfig): RegisteredTool {
       }
 
       return ok(body);
-    },
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:get_template
 
-function getTemplateTool(config: BridgeConfig): RegisteredTool {
+function getTemplateTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:get_template",
@@ -259,7 +268,7 @@ function getTemplateTool(config: BridgeConfig): RegisteredTool {
         required: ["kind"],
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       if (typeof args.kind !== "string" || !TEMPLATE_KINDS.includes(args.kind as TemplateKind)) {
         return errorResult(
           `Invalid input: 'kind' must be one of ${TEMPLATE_KINDS.join(", ")}, got ${JSON.stringify(args.kind)}`,
@@ -267,14 +276,14 @@ function getTemplateTool(config: BridgeConfig): RegisteredTool {
       }
       const kind = args.kind as TemplateKind;
       return readDocsFileResult(config, TEMPLATE_FILES[kind], `${kind}-TEMPLATE.md`);
-    },
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:get_hla
 
-function getHlaTool(config: BridgeConfig): RegisteredTool {
+function getHlaTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:get_hla",
@@ -283,14 +292,14 @@ function getHlaTool(config: BridgeConfig): RegisteredTool {
         "from exeris-docs. Canonical narrative of the three-tier model.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => readDocsFileResult(config, HLA_FILENAME, HLA_FILENAME),
+    handler: guard("docs", handle, async (config) => readDocsFileResult(config, HLA_FILENAME, HLA_FILENAME)),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:get_whitepaper
 
-function getWhitepaperTool(config: BridgeConfig): RegisteredTool {
+function getWhitepaperTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:get_whitepaper",
@@ -299,7 +308,9 @@ function getWhitepaperTool(config: BridgeConfig): RegisteredTool {
         "from exeris-docs.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => readDocsFileResult(config, WHITEPAPER_FILENAME, WHITEPAPER_FILENAME),
+    handler: guard("docs", handle, async (config) =>
+      readDocsFileResult(config, WHITEPAPER_FILENAME, WHITEPAPER_FILENAME),
+    ),
   };
 }
 
@@ -315,7 +326,7 @@ interface SearchHit {
   snippet: string;
 }
 
-function searchTool(config: BridgeConfig): RegisteredTool {
+function searchTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:search",
@@ -351,7 +362,7 @@ function searchTool(config: BridgeConfig): RegisteredTool {
         required: ["query"],
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       const parsed = parseSearchArgs(args);
       if ("error" in parsed) return parsed.error;
 
@@ -392,7 +403,7 @@ function searchTool(config: BridgeConfig): RegisteredTool {
           2,
         ),
       );
-    },
+    }),
   };
 }
 
@@ -434,7 +445,7 @@ function parseSearchArgs(
  * multi-GB .md (legit growth or planted) cannot OOM the Node process.
  */
 function scanSearchCandidate(
-  config: BridgeConfig,
+  config: DocsRoots,
   absPath: string,
   rel: string,
   params: SearchParams,
@@ -496,14 +507,14 @@ function appendMatchingLines(
  * Walk docsRoot recursively, returning absolute paths of `*.md` files.
  * Thin wrapper over walkMarkdownFiles bound to docsRoot.
  */
-function walkDocsRoot(config: BridgeConfig): string[] {
+function walkDocsRoot(config: DocsRoots): string[] {
   return walkMarkdownFiles(config.docsRoot, SEARCH_MAX_FILES_VISITED);
 }
 
 // ---------------------------------------------------------------------------
 // docs:list_repos
 
-function listReposTool(config: BridgeConfig): RegisteredTool {
+function listReposTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:list_repos",
@@ -513,17 +524,17 @@ function listReposTool(config: BridgeConfig): RegisteredTool {
         "`docs:list_repo_docs` and `docs:get_repo_doc`.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => {
+    handler: guard("docs", handle, async (config) => {
       const repos = discoverReposWithDocs(config);
       return ok(JSON.stringify({ count: repos.length, repos }, null, 2));
-    },
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:list_repo_docs
 
-function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
+function listRepoDocsTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:list_repo_docs",
@@ -543,7 +554,7 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
         required: ["repo"],
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
@@ -565,14 +576,14 @@ function listRepoDocsTool(config: BridgeConfig): RegisteredTool {
         .map((path) => ({ path }));
 
       return ok(JSON.stringify({ repo, count: docs.length, docs }, null, 2));
-    },
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // docs:get_repo_doc
 
-function getRepoDocTool(config: BridgeConfig): RegisteredTool {
+function getRepoDocTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
       name: "docs:get_repo_doc",
@@ -594,7 +605,7 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
         required: ["repo", "path"],
       },
     },
-    handler: async (args) => {
+    handler: guard("docs", handle, async (config, args) => {
       const repoOrErr = validateRepoName(args.repo);
       if (typeof repoOrErr !== "string") return repoOrErr;
       const repo = repoOrErr;
@@ -644,7 +655,7 @@ function getRepoDocTool(config: BridgeConfig): RegisteredTool {
           `Failed to read ${repo}/${REPO_DOCS_DIRNAME}/${trimmedPath}: ${reason}`,
         );
       }
-    },
+    }),
   };
 }
 
@@ -659,7 +670,7 @@ type RepoDocsRootResult =
  * discovery and fetch agree on what counts as a real repo — preventing
  * the agent from getting symlinked content under a misattributed name.
  */
-function resolveRepoDocsRoot(config: BridgeConfig, repo: string): RepoDocsRootResult {
+function resolveRepoDocsRoot(config: DocsRoots, repo: string): RepoDocsRootResult {
   const repoDirAbs = join(config.ecosystemRoot, repo);
   if (!isRealDirectory(repoDirAbs) || isSymlink(repoDirAbs)) {
     return {
@@ -769,7 +780,7 @@ function adrPostResolveGuard(repoDocsRoot: string, resolved: string): ReturnType
 // ---------------------------------------------------------------------------
 // Shared internals
 
-function readAdrIndex(config: BridgeConfig): AdrEntry[] {
+function readAdrIndex(config: DocsRoots): AdrEntry[] {
   const indexPath = resolveInside(config.ecosystemRoot, join(config.docsRoot, ADR_INDEX_FILENAME));
   const raw = readFileSync(indexPath, "utf8");
   return parseAdrIndex(raw);
@@ -830,7 +841,7 @@ function collectWalkEntries(
  * Deterministic order. Silent exclusion is the intent — agents should
  * never learn the existence of restricted siblings via discovery.
  */
-function discoverReposWithDocs(config: BridgeConfig): string[] {
+function discoverReposWithDocs(config: DocsRoots): string[] {
   let entries;
   try {
     entries = readdirSync(config.ecosystemRoot, { withFileTypes: true });
@@ -893,7 +904,7 @@ function validateRepoName(value: unknown):
  * the resource in the SandboxEscape branch).
  */
 function readDocsFileResult(
-  config: BridgeConfig,
+  config: DocsRoots,
   relativePath: string,
   displayName: string,
 ) {
@@ -908,7 +919,7 @@ function readDocsFileResult(
  * repo's docs/ tree (get_repo_doc).
  */
 function readSandboxedFile(
-  config: BridgeConfig,
+  config: DocsRoots,
   anchorRoot: string,
   relativePath: string,
   displayName: string,
@@ -965,7 +976,7 @@ function pad(n: number): string {
  * function with `..` prefixes, so the depth-leak is a degraded-state hint
  * for an unexpected code path, not the primary surface.
  */
-function relativizeToEcosystem(config: BridgeConfig, absPath: string): string {
+function relativizeToEcosystem(config: DocsRoots, absPath: string): string {
   const rel = relative(config.ecosystemRoot, absPath);
   if (rel === "") return ".";
   return rel;
@@ -983,7 +994,7 @@ function relativizeToEcosystem(config: BridgeConfig, absPath: string): string {
  * Defence-in-depth (regex-redact any `/path/to/file.md`) is deliberately
  * not added here; it would have false positives and a wider blast radius.
  */
-export function redactEcosystemPaths(message: string, config: BridgeConfig): string {
+export function redactEcosystemPaths(message: string, config: DocsRoots): string {
   const anchor = config.ecosystemRoot + sep;
   return message.split(anchor).join("<ecosystem>" + sep);
 }
@@ -1016,7 +1027,7 @@ export function formatSandboxStderrLine(err: SandboxEscapeError): string {
  * Side effect: writes a JSON-serialised stderr line carrying the absolute
  * paths for operator debugging. Placeholder for 0.11.0 observability.
  */
-function describeReadError(err: unknown, config: BridgeConfig, resourceName: string): string {
+function describeReadError(err: unknown, config: DocsRoots, resourceName: string): string {
   if (err instanceof SandboxEscapeError) {
     process.stderr.write(formatSandboxStderrLine(err));
     return err.resolved === null
@@ -1027,7 +1038,7 @@ function describeReadError(err: unknown, config: BridgeConfig, resourceName: str
   return `Failed to read ${resourceName}: ${redactEcosystemPaths(raw, config)}`;
 }
 
-function missingAdrContentMessage(entry: AdrEntry, config: BridgeConfig, joined: string): string {
+function missingAdrContentMessage(entry: AdrEntry, config: DocsRoots, joined: string): string {
   const hint =
     entry.visibility === "enterprise-private"
       ? "This is an enterprise-private ADR; its content may not be available in this checkout."

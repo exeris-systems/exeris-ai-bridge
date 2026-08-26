@@ -76,7 +76,11 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-`EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 15 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+
+`EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` is simply unavailable — the expected state when building an application *on* Exeris rather than working *on* Exeris.
+
+`EXERIS_BRIDGE_MODE` (optional, `auto` | `contributor` | `app`, default `auto`) records which persona the environment looks like — `auto` infers it from whether an ecosystem checkout resolved. It is **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
 
 `EXERIS_LSP_COMMAND` (optional) is how the `lsp:*` family launches its `exeris-platform-lsp` child — a whitespace-separated command + args (no shell quoting; the process is exec'd directly). It defaults to `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java` (`-q` keeps Maven's own logging off the JSON-RPC stdout). The child is spawned lazily on the first `lsp:*` call and cached; its stderr is inherited into the bridge's logs. `lsp:*` calls return validated data against a running server; a server build predating the `exeris/*` slice yields a structured "update the LSP server" result rather than failing. The integration test confirms the default `exec:java` launch keeps protocol frames clean on stdout (the JVM logs to stderr), so no `exec:exec` workaround is needed.
 
@@ -114,7 +118,7 @@ printf '%s\n' \
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
-  config/env.ts              EXERIS_DOCS_ROOT + EXERIS_LSP_COMMAND resolution, ecosystem-root derivation
+  config/env.ts              fail-soft env resolution: modes, per-family availability, launch specs
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
   transport/
     lsp-framing.ts           LSP base-protocol (Content-Length) message codec
@@ -123,6 +127,7 @@ src/
     kernel-adapter.ts        NDJSON client over a child exeris-kernel-diagnostics-cli process
   tools/
     types.ts                 Shared ToolDefinition / ToolHandler types
+    unavailable.ts           per-family availability guard for dark families
     docs/
       index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
                              HLA, whitepaper, search, per-repo docs surface)

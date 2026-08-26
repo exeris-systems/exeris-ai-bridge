@@ -48,22 +48,39 @@ function parseJson(res: CallToolResult): any {
   }
 }
 
+// The transports are injected below, so config-time availability is moot —
+// every family is left dark to make that explicit: an injected client/adapter
+// IS the transport and overrides what config resolution found (or didn't).
+const NOT_UNDER_TEST = {
+  state: "unavailable" as const,
+  reason: "not under test",
+  remedy: "not under test",
+};
+
+const DARK_CONFIG: BridgeConfig = {
+  mode: "app",
+  modeSource: "probe",
+  ecosystemRoot: null,
+  docs: NOT_UNDER_TEST,
+  lsp: NOT_UNDER_TEST,
+  kernel: NOT_UNDER_TEST,
+};
+
 test(
   "kernel:* tools return validated data from a real diagnostics CLI over NDJSON",
   { skip, timeout: REQUEST_TIMEOUT_MS + 30_000 },
   async () => {
     const tokens = command!.split(/\s+/);
-    const kernel: KernelConfig = { command: tokens[0], args: tokens.slice(1), source: "env" };
-    const config: BridgeConfig = {
-      docsRoot: "",
-      ecosystemRoot: "",
-      lsp: { command: "", args: [], source: "default", workspaceRoot: "" },
-      kernel,
+    const kernel: KernelConfig = {
+      state: "available",
+      command: tokens[0],
+      args: tokens.slice(1),
+      source: "env-command",
     };
     // Own the adapter so we can dispose() the child JVM in the finally block.
     const adapter = new KernelAdapter(kernel, { requestTimeoutMs: REQUEST_TIMEOUT_MS });
     const tools = new Map(
-      registerKernelTools(config, adapter).map((t) => [t.definition.name, t]),
+      registerKernelTools(DARK_CONFIG, adapter).map((t) => [t.definition.name, t]),
     );
 
     try {

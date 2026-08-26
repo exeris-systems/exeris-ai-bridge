@@ -1,10 +1,11 @@
-import type { BridgeConfig } from "../../config/env.js";
+import type { BridgeConfig, Unavailable } from "../../config/env.js";
 import {
   KernelAdapter,
   KernelRequestError,
   KernelTransportError,
 } from "../../transport/kernel-adapter.js";
 import type { RegisteredTool } from "../types.js";
+import { guard } from "../unavailable.js";
 import {
   KernelShapeError,
   parseBootstrapDagSnapshot,
@@ -33,17 +34,36 @@ const METHOD_LIST_PROVIDERS = "listProviders";
 const METHOD_BOOTSTRAP_DAG = "getBootstrapDag";
 const METHOD_DESCRIBE_SUBSYSTEM = "describeSubsystem";
 
+/**
+ * The kernel:* family handle: an adapter bound to a launch spec, or the
+ * structured reason the family is dark. Every tool definition below is built
+ * either way — only the handlers are gated (see ../unavailable.ts).
+ */
+type KernelFamily = { readonly state: "available"; readonly adapter: KernelAdapter } | Unavailable;
+
 export function registerKernelTools(
   config: BridgeConfig,
   adapterOverride?: KernelAdapter,
 ): RegisteredTool[] {
   // One adapter per CLI process, shared across the family. Construction is
   // cheap and does NOT spawn — the child starts lazily on the first request.
-  const adapter = adapterOverride ?? new KernelAdapter(config.kernel);
-  return [listProvidersTool(adapter), getBootstrapDagTool(adapter), describeSubsystemTool(adapter)];
+  // An injected adapter IS a transport, so it overrides config-time
+  // unavailability: the test seam must not depend on the environment.
+  const handle = resolveKernelFamily(config, adapterOverride);
+  return [listProvidersTool(handle), getBootstrapDagTool(handle), describeSubsystemTool(handle)];
 }
 
-function listProvidersTool(adapter: KernelAdapter): RegisteredTool {
+function resolveKernelFamily(config: BridgeConfig, adapterOverride?: KernelAdapter): KernelFamily {
+  if (adapterOverride !== undefined) {
+    return { state: "available", adapter: adapterOverride };
+  }
+  if (config.kernel.state === "unavailable") {
+    return config.kernel;
+  }
+  return { state: "available", adapter: new KernelAdapter(config.kernel) };
+}
+
+function listProvidersTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
       name: "kernel:list_providers",
@@ -51,12 +71,13 @@ function listProvidersTool(adapter: KernelAdapter): RegisteredTool {
         "List all SPI providers registered with the running kernel, including driver origin (community/enterprise priority).",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () =>
+    handler: guard("kernel", handle, async ({ adapter }) =>
       callKernel(adapter, METHOD_LIST_PROVIDERS, undefined, parseProvidersSnapshot),
+    ),
   };
 }
 
-function getBootstrapDagTool(adapter: KernelAdapter): RegisteredTool {
+function getBootstrapDagTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
       name: "kernel:get_bootstrap_dag",
@@ -64,12 +85,13 @@ function getBootstrapDagTool(adapter: KernelAdapter): RegisteredTool {
         "Snapshot of the kernel bootstrap dependency DAG — nodes (subsystems) with their phase, declared dependencies, and running state.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () =>
+    handler: guard("kernel", handle, async ({ adapter }) =>
       callKernel(adapter, METHOD_BOOTSTRAP_DAG, undefined, parseBootstrapDagSnapshot),
+    ),
   };
 }
 
-function describeSubsystemTool(adapter: KernelAdapter): RegisteredTool {
+function describeSubsystemTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
       name: "kernel:describe_subsystem",
@@ -83,13 +105,13 @@ function describeSubsystemTool(adapter: KernelAdapter): RegisteredTool {
         required: ["name"],
       },
     },
-    handler: async (args) => {
+    handler: guard("kernel", handle, async ({ adapter }, args) => {
       const name = args.name;
       if (typeof name !== "string" || name.trim().length === 0) {
         return errorResult("Invalid input: 'name' must be a non-empty string");
       }
       return callKernel(adapter, METHOD_DESCRIBE_SUBSYSTEM, { name }, parseSubsystemSnapshot);
-    },
+    }),
   };
 }
 

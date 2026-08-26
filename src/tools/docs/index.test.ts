@@ -6,15 +6,31 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
 
 import { SandboxEscapeError } from "../../fs/sandbox.js";
-import type { BridgeConfig } from "../../config/env.js";
+import type { BridgeConfig, DocsRoots } from "../../config/env.js";
 import { formatSandboxStderrLine, redactEcosystemPaths, registerDocsTools } from "./index.js";
 
-// docs:* handlers never touch config.lsp/config.kernel; fixed stubs keep the
-// literals type-complete without coupling these tests to transport details.
-const STUB_LSP = { command: "true", args: [] as string[], source: "default" as const, workspaceRoot: "/var/empty" };
-const STUB_KERNEL = { command: "true", args: [] as string[], source: "default" as const };
+// docs:* handlers never touch config.lsp/config.kernel — both stay dark here,
+// which also keeps these tests honest about one thing: a live docs family does
+// not depend on any other family having resolved.
+const DARK = {
+  state: "unavailable" as const,
+  reason: "not under test",
+  remedy: "not under test",
+};
+
+function contributorConfig(docsRoot: string, ecosystemRoot: string): BridgeConfig {
+  return {
+    mode: "contributor",
+    modeSource: "probe",
+    ecosystemRoot,
+    docs: { state: "available", docsRoot, ecosystemRoot },
+    lsp: DARK,
+    kernel: DARK,
+  };
+}
 
 let base: string;
+let docsRoot: string;
 let config: BridgeConfig;
 
 beforeEach(() => {
@@ -59,7 +75,8 @@ beforeEach(() => {
   writeFileSync(join(docs, "high-level-architecture.md"), "# HLA\n\nThree-tier model.\n", "utf8");
   writeFileSync(join(docs, "b2b-technical-whitepaper.md"), "# Whitepaper\n\nB2B story.\n", "utf8");
 
-  config = { docsRoot: docs, ecosystemRoot: base, lsp: STUB_LSP, kernel: STUB_KERNEL };
+  docsRoot = docs;
+  config = contributorConfig(docs, base);
 });
 
 afterEach(() => {
@@ -130,7 +147,7 @@ test("docs:list_adrs treats whitespace-only status as no-filter", async () => {
 });
 
 test("docs:list_adrs returns isError when the registry file is missing", async () => {
-  rmSync(join(config.docsRoot, "adr-index.md"));
+  rmSync(join(docsRoot, "adr-index.md"));
   const tool = tools().get("docs:list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
@@ -197,7 +214,7 @@ test("docs:get_adr rejects an empty link target without leaking docsRoot", async
   // a valid link contract), so the handler reaches the "no link in registry"
   // branch — same protection: docsRoot must not leak in the error message.
   writeFileSync(
-    join(config.docsRoot, "adr-index.md"),
+    join(docsRoot, "adr-index.md"),
     `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -213,7 +230,7 @@ test("docs:get_adr rejects an empty link target without leaking docsRoot", async
   // Either the parser-side "no link" path or a handler-side "empty target"
   // message is acceptable; what's NOT acceptable is leaking docsRoot.
   assert.match(text, /(no link in the registry|empty link target)/);
-  assert.ok(!text.includes(config.docsRoot));
+  assert.ok(!text.includes(docsRoot));
 });
 
 test("docs:get_adr error messages render paths relative to ecosystemRoot, not absolute", async () => {
@@ -222,7 +239,7 @@ test("docs:get_adr error messages render paths relative to ecosystemRoot, not ab
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
   // ecosystemRoot prefix must NOT appear in the message — paths are relativized.
-  assert.ok(!text.includes(config.ecosystemRoot));
+  assert.ok(!text.includes(base));
   // But the relative segment SHOULD still be informative.
   assert.match(text, /exeris-enterprise/);
 });
@@ -234,7 +251,7 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
   try {
     const outsideFile = join(outsideBase, "trojan.md");
     writeFileSync(outsideFile, "stolen content");
-    const linkPath = join(config.docsRoot, "adr", "ADR-099-trojan.md");
+    const linkPath = join(docsRoot, "adr", "ADR-099-trojan.md");
 
     try {
       symlinkSync(outsideFile, linkPath);
@@ -249,7 +266,7 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
     // Plant a registry entry whose link is lexically inside docsRoot but the
     // realpath escapes via the symlink.
     writeFileSync(
-      join(config.docsRoot, "adr-index.md"),
+      join(docsRoot, "adr-index.md"),
       `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -275,13 +292,13 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
 test("docs:list_adrs registry-read error does not leak ecosystemRoot in the message", async () => {
   // Force a SandboxEscape on the index path itself (delete the file so
   // resolveInside fails with SandboxEscapeError(resolved=null)).
-  rmSync(join(config.docsRoot, "adr-index.md"));
+  rmSync(join(docsRoot, "adr-index.md"));
   const tool = tools().get("docs:list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.ok(!text.includes(config.ecosystemRoot), `leaked ecosystemRoot: ${text}`);
-  assert.ok(!text.includes(config.docsRoot), `leaked docsRoot: ${text}`);
+  assert.ok(!text.includes(base), `leaked ecosystemRoot: ${text}`);
+  assert.ok(!text.includes(docsRoot), `leaked docsRoot: ${text}`);
   assert.match(text, /Failed to read adr-index.md/);
 });
 
@@ -291,9 +308,9 @@ test("docs:get_adr readFileSync error (EISDIR via directory target) does not lea
   // wire-facing string never contains ecosystemRoot. Direct
   // redactEcosystemPaths unit tests above cover the substitution mechanism
   // itself; this is a defence-in-depth smoke.
-  const target = join(config.docsRoot, "adr"); // a directory, not a file
+  const target = join(docsRoot, "adr"); // a directory, not a file
   writeFileSync(
-    join(config.docsRoot, "adr-index.md"),
+    join(docsRoot, "adr-index.md"),
     `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -308,7 +325,7 @@ test("docs:get_adr readFileSync error (EISDIR via directory target) does not lea
   const text = (res.content[0] as { text: string }).text;
   // The relativized prefix should appear; the absolute path in the trailing
   // err.message should be sanitized to <ecosystem>.
-  assert.ok(!text.includes(config.ecosystemRoot), `leaked ecosystemRoot in: ${text}`);
+  assert.ok(!text.includes(base), `leaked ecosystemRoot in: ${text}`);
   // Spot-check: tmpdir absolute paths typically start with '/' on POSIX.
   // We assert no substring of the absolute target leaked verbatim.
   assert.ok(!text.includes(target), `leaked absolute target: ${text}`);
@@ -316,7 +333,7 @@ test("docs:get_adr readFileSync error (EISDIR via directory target) does not lea
 });
 
 test("redactEcosystemPaths replaces the ecosystemRoot+sep prefix with <ecosystem>", () => {
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP, kernel: STUB_KERNEL };
+  const c: DocsRoots = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
   assert.equal(
     redactEcosystemPaths("ENOENT: open '/x/dev/exeris-docs/foo.md'", c),
     "ENOENT: open '<ecosystem>/exeris-docs/foo.md'",
@@ -328,13 +345,13 @@ test("redactEcosystemPaths does NOT over-replace when ecosystemRoot is a non-bou
   // match inside /x/development/foo. Pre-anchor substitution produced
   // "<ecosystem>elopment/foo" — both malformed AND leaked the adjacent
   // path's existence.
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP, kernel: STUB_KERNEL };
+  const c: DocsRoots = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
   const message = "ENOENT: no such file, open '/x/development/foo.md'";
   assert.equal(redactEcosystemPaths(message, c), message);
 });
 
 test("redactEcosystemPaths leaves messages with no ecosystemRoot prefix unchanged", () => {
-  const c: BridgeConfig = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev", lsp: STUB_LSP, kernel: STUB_KERNEL };
+  const c: DocsRoots = { docsRoot: "/x/dev/exeris-docs", ecosystemRoot: "/x/dev" };
   assert.equal(redactEcosystemPaths("EISDIR: illegal operation", c), "EISDIR: illegal operation");
   assert.equal(redactEcosystemPaths("adr-index.md missing", c), "adr-index.md missing");
 });
@@ -381,12 +398,12 @@ test("docs:list_adrs missing-index error never contains the ecosystem path or an
   // non-Sandbox redaction branch is exercised by redactEcosystemPaths unit
   // tests above. This test catches regressions where future error wrapping
   // accidentally interpolates a raw path through some other code path.
-  rmSync(join(config.docsRoot, "adr-index.md"));
+  rmSync(join(docsRoot, "adr-index.md"));
   const tool = tools().get("docs:list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.ok(!text.includes(config.ecosystemRoot));
+  assert.ok(!text.includes(base));
   // No '<ecosystem>elopment' or similar over-replace artefact.
   assert.doesNotMatch(text, /<ecosystem>[a-zA-Z0-9]/);
 });
@@ -397,7 +414,7 @@ test("docs:list_adrs 'Known states' message filters out empty status strings", a
   // status.state is ''. The Known-states list must NOT include the empty
   // string, which would render as ", accepted, proposed" with leading comma.
   writeFileSync(
-    join(config.docsRoot, "adr-index.md"),
+    join(docsRoot, "adr-index.md"),
     `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -424,7 +441,7 @@ test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () 
   // `/etc/passwd` target is NOT an escape — it lexically lands inside docsRoot.
   // The actual attack surface is dot-dot traversal in the target.
   writeFileSync(
-    join(config.docsRoot, "adr-index.md"),
+    join(docsRoot, "adr-index.md"),
     `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -476,12 +493,12 @@ test("docs:get_template rejects a missing or non-string kind", async () => {
 });
 
 test("docs:get_template returns isError without leaking docsRoot when the template file is missing", async () => {
-  rmSync(join(config.docsRoot, "templates", "ADR-TEMPLATE.md"));
+  rmSync(join(docsRoot, "templates", "ADR-TEMPLATE.md"));
   const tool = tools().get("docs:get_template")!;
   const res = await tool.handler({ kind: "ADR" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.ok(!text.includes(config.ecosystemRoot), `leaked ecosystemRoot: ${text}`);
+  assert.ok(!text.includes(base), `leaked ecosystemRoot: ${text}`);
   assert.match(text, /ADR-TEMPLATE.md/);
 });
 
@@ -503,12 +520,12 @@ test("docs:get_whitepaper returns the whitepaper body", async () => {
 });
 
 test("docs:get_hla returns isError without leaking ecosystemRoot when the file is missing", async () => {
-  rmSync(join(config.docsRoot, "high-level-architecture.md"));
+  rmSync(join(docsRoot, "high-level-architecture.md"));
   const tool = tools().get("docs:get_hla")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
-  assert.ok(!text.includes(config.ecosystemRoot));
+  assert.ok(!text.includes(base));
 });
 
 // ---------------------------------------------------------------------------
@@ -592,7 +609,7 @@ test("docs:search includes line number and snippet for each hit", async () => {
 // docs:list_repos / docs:list_repo_docs / docs:get_repo_doc
 
 function seedSiblingRepoFixture(name: string, files: Record<string, string>): string {
-  const repoDocs = join(config.ecosystemRoot, name, "docs");
+  const repoDocs = join(base, name, "docs");
   mkdirSync(repoDocs, { recursive: true });
   for (const [relPath, body] of Object.entries(files)) {
     const full = join(repoDocs, relPath);
@@ -606,7 +623,7 @@ test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory
   // The existing fixture only creates exeris-docs and exeris-kernel/docs/adr.
   // Add two more siblings to make the discovery non-trivial.
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK guide" });
-  mkdirSync(join(config.ecosystemRoot, "exeris-tooling"), { recursive: true }); // no docs/
+  mkdirSync(join(base, "exeris-tooling"), { recursive: true }); // no docs/
   seedSiblingRepoFixture("exeris-spring-runtime", { "overview.md": "# Spring" });
 
   const tool = tools().get("docs:list_repos")!;
@@ -627,7 +644,7 @@ test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory
 test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
   // Synthesise an empty-but-valid config to drive the empty branch.
   const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), "exeris-empty-")));
-  const altConfig: BridgeConfig = { docsRoot: emptyRoot, ecosystemRoot: emptyRoot, lsp: STUB_LSP, kernel: STUB_KERNEL };
+  const altConfig = contributorConfig(emptyRoot, emptyRoot);
   try {
     const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
     const res = await altTool.handler({});
@@ -663,7 +680,7 @@ test("docs:list_repo_docs returns isError for a non-existent repo without leakin
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
   assert.match(text, /not present as a real directory|has no real docs/);
-  assert.ok(!text.includes(config.ecosystemRoot));
+  assert.ok(!text.includes(base));
 });
 
 test("docs:list_repo_docs rejects repo names that don't match the exeris-* convention (path-traversal guard)", async () => {
@@ -720,7 +737,7 @@ test("docs:get_repo_doc cannot read cross-repo files via ../ traversal (sandbox 
   // Reviewer's scenario: get_repo_doc with repo='exeris-sdk' and path that
   // escapes to '../../exeris-kernel/pom.xml'. Pre-fix the sandbox was
   // anchored at ecosystemRoot, so containment passed and the file leaked.
-  const kernelRoot = join(config.ecosystemRoot, "exeris-kernel");
+  const kernelRoot = join(base, "exeris-kernel");
   mkdirSync(kernelRoot, { recursive: true });
   writeFileSync(join(kernelRoot, "pom.xml"), "<project>secret</project>", "utf8");
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# Guide" });
@@ -744,7 +761,7 @@ test("docs:get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", asy
   // before resolution because './adr/...' lower-startsWith('adr/') === false
   // but the POST-resolution guard catches it on the normalised relative path.
   // Plant a real ADR file in the sibling docs/adr/ directory.
-  const adrDir = join(config.ecosystemRoot, "exeris-kernel", "docs", "adr");
+  const adrDir = join(base, "exeris-kernel", "docs", "adr");
   mkdirSync(adrDir, { recursive: true });
   writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
 
@@ -755,10 +772,10 @@ test("docs:get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", asy
 });
 
 test("docs:get_repo_doc ADR-redirect catches traversal-normalised paths (foo/../adr/X.md)", async () => {
-  const adrDir = join(config.ecosystemRoot, "exeris-kernel", "docs", "adr");
+  const adrDir = join(base, "exeris-kernel", "docs", "adr");
   mkdirSync(adrDir, { recursive: true });
   writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
-  mkdirSync(join(config.ecosystemRoot, "exeris-kernel", "docs", "foo"), { recursive: true });
+  mkdirSync(join(base, "exeris-kernel", "docs", "foo"), { recursive: true });
 
   const tool = tools().get("docs:get_repo_doc")!;
   const res = await tool.handler({
@@ -819,7 +836,7 @@ test("docs:list_repo_docs includes adr.md as a regular file", async () => {
 test("docs:list_repos excludes exeris-docs itself (covered by registry tools)", async () => {
   // Plant exeris-docs/docs/ to make sure even with that present it's NOT
   // listed (the discovery filters it out by name).
-  mkdirSync(join(config.ecosystemRoot, "exeris-docs", "docs"), { recursive: true });
+  mkdirSync(join(base, "exeris-docs", "docs"), { recursive: true });
   const tool = tools().get("docs:list_repos")!;
   const res = await tool.handler({});
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -844,7 +861,7 @@ test("docs:list_repos with a non-existent ecosystemRoot actually exercises the r
   // PRNG hotspot — collision resistance is irrelevant here, but the cost
   // of swapping is zero and security-scanner noise is real.
   const fakeRoot = "/__exeris-bridge-does-not-exist-" + randomUUID() + "__";
-  const altConfig: BridgeConfig = { docsRoot: fakeRoot, ecosystemRoot: fakeRoot, lsp: STUB_LSP, kernel: STUB_KERNEL };
+  const altConfig = contributorConfig(fakeRoot, fakeRoot);
   const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
   const res = await altTool.handler({});
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -853,7 +870,7 @@ test("docs:list_repos with a non-existent ecosystemRoot actually exercises the r
 });
 
 test("docs:search returns isError when docsRoot is unreadable (no silent 'no matches')", async () => {
-  rmSync(config.docsRoot, { recursive: true, force: true });
+  rmSync(docsRoot, { recursive: true, force: true });
   const tool = tools().get("docs:search")!;
   const res = await tool.handler({ query: "anything" });
   assert.equal(res.isError, true);
@@ -865,9 +882,9 @@ test("docs:search marks truncated=true when oversize files are skipped (no false
   // size-only sparse write would be faster, but writeFileSync of a 10MB
   // string is fast enough for one test.
   const oversizeContent = "x".repeat(10_000_001);
-  writeFileSync(join(config.docsRoot, "huge.md"), oversizeContent, "utf8");
+  writeFileSync(join(docsRoot, "huge.md"), oversizeContent, "utf8");
   // Plant a small file that DOES contain the query so hits=1, not 0.
-  writeFileSync(join(config.docsRoot, "small.md"), "# small\nThe Wall here\n", "utf8");
+  writeFileSync(join(docsRoot, "small.md"), "# small\nThe Wall here\n", "utf8");
 
   const tool = tools().get("docs:search")!;
   const res = await tool.handler({ query: "The Wall" });
@@ -891,7 +908,7 @@ test("docs:get_adr writes a structured stderr line on SandboxEscape (parity with
   try {
     // Plant a registry entry whose target escapes via real ../traversal.
     writeFileSync(
-      join(config.docsRoot, "adr-index.md"),
+      join(docsRoot, "adr-index.md"),
       `## Index
 
 | # | Title | Owning repo | Scope | Visibility | Status | Link |
@@ -914,7 +931,7 @@ test("docs:search skips symlinks that escape the ecosystem (no content served)",
   try {
     const secret = join(outsideBase, "secret.md");
     writeFileSync(secret, "this is super-secret content with The Wall in it");
-    const linkPath = join(config.docsRoot, "trojan.md");
+    const linkPath = join(docsRoot, "trojan.md");
     try {
       symlinkSync(secret, linkPath);
     } catch {
@@ -940,9 +957,9 @@ test("docs:get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_do
   seedSiblingRepoFixture("exeris-kernel", {
     "subsystems/persistence.md": "# Persistence — real-target content",
   });
-  const aliasPath = join(config.ecosystemRoot, "exeris-alias");
+  const aliasPath = join(base, "exeris-alias");
   try {
-    symlinkSync(join(config.ecosystemRoot, "exeris-kernel"), aliasPath);
+    symlinkSync(join(base, "exeris-kernel"), aliasPath);
   } catch {
     t.skip("symlinkSync not permitted on this platform");
     return;
@@ -961,12 +978,12 @@ test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_re
   // Same scenario as above but the symlink is at the docs/ level
   // (e.g. exeris-cousin exists as a real dir but its docs/ points to a
   // sibling's docs tree). resolveRepoDocsRoot rejects this too.
-  const cousinDir = join(config.ecosystemRoot, "exeris-cousin");
+  const cousinDir = join(base, "exeris-cousin");
   mkdirSync(cousinDir, { recursive: true });
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK real-target guide" });
   const cousinDocsLink = join(cousinDir, "docs");
   try {
-    symlinkSync(join(config.ecosystemRoot, "exeris-sdk", "docs"), cousinDocsLink);
+    symlinkSync(join(base, "exeris-sdk", "docs"), cousinDocsLink);
   } catch {
     t.skip("symlinkSync not permitted on this platform");
     return;

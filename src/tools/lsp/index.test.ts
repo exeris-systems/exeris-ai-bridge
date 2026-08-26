@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import type { BridgeConfig } from "../../config/env.js";
+import type { BridgeConfig, LspConfig } from "../../config/env.js";
 import { encodeMessage, LspMessageDecoder } from "../../transport/lsp-framing.js";
 import {
   JSONRPC_METHOD_NOT_FOUND,
@@ -12,11 +12,27 @@ import {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerLspTools } from "./index.js";
 
+const LSP_SPEC: LspConfig = {
+  state: "available",
+  command: "lsp-stub",
+  args: [],
+  source: "source-tree",
+  workspaceRoot: "/var/empty",
+};
+
 const CONFIG: BridgeConfig = {
-  docsRoot: "/var/empty/exeris-docs-stub",
+  mode: "contributor",
+  modeSource: "probe",
   ecosystemRoot: "/var/empty",
-  lsp: { command: "lsp-stub", args: [], source: "default", workspaceRoot: "/var/empty" },
-  kernel: { command: "kernel-stub", args: [], source: "default" },
+  docs: { state: "available", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
+  lsp: LSP_SPEC,
+  kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
+};
+
+/** The same config with no launch spec for the LSP — the zero-checkout shape. */
+const DARK_CONFIG: BridgeConfig = {
+  ...CONFIG,
+  lsp: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_LSP_COMMAND (test)" },
 };
 
 /** Minimal JSON-RPC request shape the FakeChannel scripts against. */
@@ -49,7 +65,7 @@ class FakeChannel implements LspChannel {
 }
 
 function toolsWith(onCall: (msg: RpcRequest) => unknown | undefined) {
-  const client = new LspClient(CONFIG.lsp, { channelFactory: () => new FakeChannel(onCall) });
+  const client = new LspClient(LSP_SPEC, { channelFactory: () => new FakeChannel(onCall) });
   return new Map(registerLspTools(CONFIG, client).map((t) => [t.definition.name, t]));
 }
 
@@ -138,7 +154,7 @@ test("a non-method-not-found JSON-RPC error surfaces code and message", async ()
 });
 
 test("a transport failure maps to an actionable EXERIS_LSP_COMMAND hint", async () => {
-  const client = new LspClient(CONFIG.lsp, {
+  const client = new LspClient(LSP_SPEC, {
     channelFactory: () => {
       throw new Error("ENOENT");
     },
@@ -187,4 +203,30 @@ test("lsp:describe_domain forwards qualifiedName and validates the DomainDescrip
   assert.ok(!res.isError);
   assert.deepEqual(seenParams, { qualifiedName: "com.acme.Order" });
   assert.deepEqual(JSON.parse(text(res)), description);
+});
+
+test("lsp:* is dark when config resolved no launch spec", async () => {
+  const tools = new Map(registerLspTools(DARK_CONFIG).map((t) => [t.definition.name, t]));
+  for (const [name, tool] of tools) {
+    const res = await tool.handler({});
+    assert.equal(res.isError, true, name);
+    const payload = JSON.parse(text(res));
+    assert.equal(payload.error, "family_unavailable", name);
+    assert.equal(payload.family, "lsp", name);
+    assert.equal(payload.reason, "no launch spec (test)", name);
+  }
+});
+
+test("an injected client overrides config-time unavailability", async () => {
+  // The test seam must not depend on the environment: a caller that hands in a
+  // transport has, by definition, supplied what config resolution could not.
+  const client = new LspClient(LSP_SPEC, {
+    channelFactory: () =>
+      new FakeChannel((msg) =>
+        msg.method === "exeris/domains" ? { jsonrpc: "2.0", id: msg.id, result: [] } : undefined,
+      ),
+  });
+  const tools = new Map(registerLspTools(DARK_CONFIG, client).map((t) => [t.definition.name, t]));
+  const res = await tools.get("lsp:list_domains")!.handler({});
+  assert.ok(!res.isError, text(res));
 });
