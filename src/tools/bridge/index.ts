@@ -1,4 +1,11 @@
-import type { BridgeConfig, ToolFamily, Unavailable } from "../../config/env.js";
+import type {
+  BridgeConfig,
+  DocsConfig,
+  KernelConfig,
+  LspConfig,
+  ToolFamily,
+  Unavailable,
+} from "../../config/env.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
 import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
@@ -82,9 +89,9 @@ function healthTool(config: BridgeConfig, transports: BridgeTransports): Registe
         mode: config.mode,
         modeSource: config.modeSource,
         families: [
-          familyReport("docs", config.docs),
-          familyReport("lsp", config.lsp, transports.lsp?.status()),
-          familyReport("kernel", config.kernel, transports.kernel?.status()),
+          plainFamilyReport("docs", config.docs),
+          childFamilyReport("lsp", config.lsp, transports.lsp?.status()),
+          childFamilyReport("kernel", config.kernel, transports.kernel?.status()),
         ],
       }),
   };
@@ -107,28 +114,43 @@ interface TransportReport {
 }
 
 /**
- * Render one family for bridge:health.
- *
- * `transport` is `null` — not absent — for an available child-process family
- * whose instance was not handed in. That distinguishes "this family has no
- * child process" (docs:*, where the key is absent) from "it has one and we
- * cannot see it", which would otherwise look the same to an agent.
+ * A family with no child process behind it — docs:* reads the filesystem
+ * directly. The `transport` key is absent entirely, not null.
  */
-function familyReport(
+function plainFamilyReport(family: ToolFamily, config: DocsConfig | Unavailable): FamilyReport {
+  if (config.state === "unavailable") return darkFamilyReport(family, config);
+  return { family, state: "available" };
+}
+
+/**
+ * A family served by a child process: reports which ladder rung produced the
+ * launch spec, and the child's current state.
+ *
+ * `transport` is `null` — not absent — when the family resolved but no instance
+ * was handed in. That distinguishes "this family has no child process" (the
+ * absent key above) from "it has one and we cannot see it", which would
+ * otherwise read identically to an agent.
+ *
+ * Which of the two shapes a family gets is chosen at the CALL SITE, not
+ * inferred from whether its config happens to carry a `source` field. A fourth
+ * family has to say which kind it is.
+ */
+function childFamilyReport(
   family: ToolFamily,
-  config: { state: "available"; source?: string } | Unavailable,
-  transport?: LspStatus | KernelStatus,
+  config: LspConfig | KernelConfig | Unavailable,
+  transport: LspStatus | KernelStatus | undefined,
 ): FamilyReport {
-  if (config.state === "unavailable") {
-    return { family, state: "unavailable", reason: config.reason, remedy: config.remedy };
-  }
-  const report: FamilyReport = { family, state: "available" };
-  if (config.source === undefined) return report;
+  if (config.state === "unavailable") return darkFamilyReport(family, config);
   return {
-    ...report,
+    family,
+    state: "available",
     source: config.source,
     transport: transport === undefined ? null : describeTransport(transport),
   };
+}
+
+function darkFamilyReport(family: ToolFamily, config: Unavailable): FamilyReport {
+  return { family, state: "unavailable", reason: config.reason, remedy: config.remedy };
 }
 
 /**
