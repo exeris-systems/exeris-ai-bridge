@@ -11,10 +11,18 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { registerKernelTools } from "./index.js";
 
 const CONFIG: BridgeConfig = {
-  docsRoot: "/var/empty/exeris-docs-stub",
+  mode: "contributor",
+  modeSource: "probe",
   ecosystemRoot: "/var/empty",
-  lsp: { command: "lsp-stub", args: [], source: "default", workspaceRoot: "/var/empty" },
-  kernel: { command: "kernel-stub", args: [], source: "default" },
+  docs: { state: "available", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
+  lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
+  kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
+};
+
+/** The same config with no launch spec for the CLI — the zero-checkout shape. */
+const DARK_CONFIG: BridgeConfig = {
+  ...CONFIG,
+  kernel: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_KERNEL_COMMAND (test)" },
 };
 
 type RequestFn = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
@@ -60,7 +68,7 @@ test("kernel:list_providers returns the validated snapshot as pretty JSON on suc
     return PROVIDERS;
   });
   const res = await tools.get("kernel:list_providers")!.handler({});
-  assert.equal(res.isError, undefined);
+  assert.ok(!res.isError, text(res));
   assert.deepEqual(JSON.parse(text(res)), PROVIDERS);
   assert.deepEqual(calls, ["listProviders"]);
 });
@@ -126,4 +134,29 @@ test("kernel:describe_subsystem forwards name and validates the snapshot (null s
   assert.equal(res.isError, undefined);
   assert.deepEqual(seen, [{ method: "describeSubsystem", params: { name: "ghost" } }]);
   assert.equal(JSON.parse(text(res)).subsystem, null);
+});
+
+test("kernel:* is dark when config resolved no launch spec", async () => {
+  const tools = new Map(registerKernelTools(DARK_CONFIG).map((t) => [t.definition.name, t]));
+  for (const [name, tool] of tools) {
+    const res = await tool.handler({});
+    assert.equal(res.isError, true, name);
+    const payload = JSON.parse(text(res));
+    assert.equal(payload.error, "family_unavailable", name);
+    assert.equal(payload.family, "kernel", name);
+    assert.equal(payload.reason, "no launch spec (test)", name);
+  }
+});
+
+test("an injected adapter overrides config-time unavailability", async () => {
+  // The test seam must not depend on the environment: a caller that hands in a
+  // transport has, by definition, supplied what config resolution could not.
+  const tools = new Map(
+    registerKernelTools(DARK_CONFIG, stubAdapter(async () => PROVIDERS)).map((t) => [
+      t.definition.name,
+      t,
+    ]),
+  );
+  const res = await tools.get("kernel:list_providers")!.handler({});
+  assert.equal(res.isError, undefined);
 });

@@ -1,4 +1,4 @@
-import type { BridgeConfig } from "../../config/env.js";
+import type { BridgeConfig, Unavailable } from "../../config/env.js";
 import {
   JSONRPC_METHOD_NOT_FOUND,
   LspClient,
@@ -6,6 +6,7 @@ import {
   LspTransportError,
 } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
+import { guard } from "../unavailable.js";
 import {
   LspShapeError,
   parseActionSummaries,
@@ -31,25 +32,46 @@ const METHOD_LIST_DOMAINS = "exeris/domains";
 const METHOD_DESCRIBE_DOMAIN = "exeris/domainDescribe";
 const METHOD_LIST_ACTIONS = "exeris/actions";
 
+/**
+ * The lsp:* family handle: a client bound to a launch spec, or the structured
+ * reason the family is dark. Every tool definition below is built either way —
+ * only the handlers are gated (see ../unavailable.ts).
+ */
+type LspFamily = { readonly state: "available"; readonly client: LspClient } | Unavailable;
+
 export function registerLspTools(config: BridgeConfig, clientOverride?: LspClient): RegisteredTool[] {
   // One client per server process, shared across the family. Construction is
   // cheap and does NOT spawn — the child starts lazily on the first request.
-  const client = clientOverride ?? new LspClient(config.lsp);
-  return [listDomainsTool(client), describeDomainTool(client), listActionsTool(client)];
+  // An injected client IS a transport, so it overrides config-time
+  // unavailability: the test seam must not depend on the environment.
+  const handle = resolveLspFamily(config, clientOverride);
+  return [listDomainsTool(handle), describeDomainTool(handle), listActionsTool(handle)];
 }
 
-function listDomainsTool(client: LspClient): RegisteredTool {
+function resolveLspFamily(config: BridgeConfig, clientOverride?: LspClient): LspFamily {
+  if (clientOverride !== undefined) {
+    return { state: "available", client: clientOverride };
+  }
+  if (config.lsp.state === "unavailable") {
+    return config.lsp;
+  }
+  return { state: "available", client: new LspClient(config.lsp) };
+}
+
+function listDomainsTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
       name: "lsp:list_domains",
       description: "List all @ExerisDomain types known to the active LSP session.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => callLsp(client, METHOD_LIST_DOMAINS, undefined, parseDomainSummaries),
+    handler: guard("lsp", handle, async ({ client }) =>
+      callLsp(client, METHOD_LIST_DOMAINS, undefined, parseDomainSummaries),
+    ),
   };
 }
 
-function describeDomainTool(client: LspClient): RegisteredTool {
+function describeDomainTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
       name: "lsp:describe_domain",
@@ -63,24 +85,26 @@ function describeDomainTool(client: LspClient): RegisteredTool {
         required: ["qualifiedName"],
       },
     },
-    handler: async (args) => {
+    handler: guard("lsp", handle, async ({ client }, args) => {
       const qualifiedName = args.qualifiedName;
       if (typeof qualifiedName !== "string" || qualifiedName.trim().length === 0) {
         return errorResult("Invalid input: 'qualifiedName' must be a non-empty string");
       }
       return callLsp(client, METHOD_DESCRIBE_DOMAIN, { qualifiedName }, parseDomainDescription);
-    },
+    }),
   };
 }
 
-function listActionsTool(client: LspClient): RegisteredTool {
+function listActionsTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
       name: "lsp:list_actions",
       description: "List all @Action methods across the workspace, with their owning @ExerisDomain.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: async () => callLsp(client, METHOD_LIST_ACTIONS, undefined, parseActionSummaries),
+    handler: guard("lsp", handle, async ({ client }) =>
+      callLsp(client, METHOD_LIST_ACTIONS, undefined, parseActionSummaries),
+    ),
   };
 }
 

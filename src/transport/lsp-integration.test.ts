@@ -6,9 +6,27 @@ import { test } from "node:test";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-import type { LspConfig } from "../config/env.js";
+import type { BridgeConfig, LspConfig } from "../config/env.js";
 import { registerLspTools } from "../tools/lsp/index.js";
 import { LspClient } from "./lsp-client.js";
+
+// The transports are injected below, so config-time availability is moot —
+// every family is left dark to make that explicit: an injected client/adapter
+// IS the transport and overrides what config resolution found (or didn't).
+const NOT_UNDER_TEST = {
+  state: "unavailable" as const,
+  reason: "not under test",
+  remedy: "not under test",
+};
+
+const DARK_CONFIG: BridgeConfig = {
+  mode: "app",
+  modeSource: "probe",
+  ecosystemRoot: null,
+  docs: NOT_UNDER_TEST,
+  lsp: NOT_UNDER_TEST,
+  kernel: NOT_UNDER_TEST,
+};
 
 // End-to-end integration test for the lsp:* family against a REAL
 // exeris-platform-lsp server — the one open item closing ROADMAP 0.3.0. It
@@ -82,24 +100,16 @@ test(
 
     const tokens = command!.split(/\s+/);
     const config: LspConfig = {
+      state: "available",
       command: tokens[0],
       args: tokens.slice(1),
-      source: "env",
+      source: "env-command",
       workspaceRoot: workspace,
     };
     // Own the client so we can dispose() the child JVM in the finally block.
     const client = new LspClient(config, { requestTimeoutMs: REQUEST_TIMEOUT_MS });
     const tools = new Map(
-      registerLspTools(
-        {
-          docsRoot: "",
-          ecosystemRoot: "",
-          lsp: config,
-          // registerLspTools never reads config.kernel; a stub keeps the type complete.
-          kernel: { command: "true", args: [], source: "default" },
-        },
-        client,
-      ).map((t) => [
+      registerLspTools(DARK_CONFIG, client).map((t) => [
         t.definition.name,
         t,
       ]),
