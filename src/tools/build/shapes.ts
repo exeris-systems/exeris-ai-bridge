@@ -143,7 +143,20 @@ export function parseMetadataEnvelope(value: unknown, fileName: string): Metadat
  * it. It is here so that the common mistake gets a sentence about names instead
  * of a sentence about sandbox escapes, and so that a traversal attempt never
  * reaches path resolution at all.
+ *
+ * Unicode-aware, approximating `Character.isJavaIdentifierStart/Part`: letters,
+ * letter numbers, currency symbols (`$`), connecting punctuation (`_`), then
+ * digits and combining marks. An ASCII-only safelist would have been simpler,
+ * and would have refused a legal entity name outright — `build:*` exists for
+ * application developers generally, and identifiers outside `[A-Za-z]` are both
+ * legal in the JLS and ordinary in a codebase that is not written in English.
+ * A refusal there would be this bridge's bug, not the project's.
+ *
+ * Deliberately NARROWER than the JLS in one place: format characters
+ * (`\p{Cf}`) are excluded even though Java ignores them inside identifiers.
+ * They cannot traverse a path, but they can make one displayed name render as
+ * another, and nothing legitimate needs them in a type name.
  */
 export function isJavaSimpleName(name: string): boolean {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
+  return /^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Nd}\p{Mn}\p{Mc}]*$/u.test(name);
 }

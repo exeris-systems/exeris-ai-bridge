@@ -114,7 +114,25 @@ test("isJavaSimpleName accepts simple names and refuses anything path-shaped", (
   for (const ok of ["Station", "_Internal", "$Generated", "Station2"]) {
     assert.equal(isJavaSimpleName(ok), true, ok);
   }
-  for (const bad of ["../secret", "com.example.Station", "Station.json", "a/b", "a\\b", "", "2Fast", "Sta tion"]) {
+  for (const bad of ["../secret", "com.example.Station", "Station.json", "a/b", "a\\b", "", "2Fast", "Sta tion", ".", ".."]) {
     assert.equal(isJavaSimpleName(bad), false, bad);
   }
+});
+
+// build:* exists for application developers generally, and an identifier
+// outside [A-Za-z] is both legal in the JLS and ordinary in a codebase not
+// written in English. Refusing one would be this bridge's bug, not the
+// project's — an ASCII-only safelist would have been simpler and wrong.
+test("a legal non-ASCII Java identifier is a name, not a refusal", () => {
+  for (const ok of ["Stacja", "Stację", "Übersicht", "駅", "Ђорђе"]) {
+    assert.equal(isJavaSimpleName(ok), true, ok);
+  }
+});
+
+// Narrower than the JLS on purpose: Java ignores format characters inside an
+// identifier, but a right-to-left override makes one displayed name render as
+// another, and no type name needs one.
+test("format characters are refused even though Java would ignore them", () => {
+  assert.equal(isJavaSimpleName("Sta\u202Etion"), false);
+  assert.equal(isJavaSimpleName("Sta\u200Dtion"), false);
 });
