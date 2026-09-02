@@ -91,6 +91,30 @@ test("every tool name is one family, one hyphen, then snake_case", () => {
   }
 });
 
+// A description is agent-facing text served by tools/list, so a tool name inside
+// one is a live pointer, not prose. The 0.5.1 rename reached every registered
+// `name` and missed several descriptions, which left the exact failure the
+// rename fixes — a name that resolves to nothing — relocated one field over.
+// Both halves matter: a colon form is dead on arrival, and a hyphen form is only
+// as good as the tool still existing.
+test("tool descriptions point only at tools that exist", () => {
+  const tools = registerAll(stubConfig).map((t) => t.definition);
+  const registered = new Set(tools.map((t) => t.name));
+
+  for (const { name, description } of tools) {
+    assert.ok(description, `${name} has no description`);
+    const colon = description.match(/\b(?:docs|lsp|kernel|bridge|sdk|build|caps):[a-z_]+/g) ?? [];
+    assert.deepEqual(colon, [], `${name} description uses the pre-0.5.1 colon form: ${colon.join(", ")}`);
+
+    // Backtick-delimited, because that is how this codebase writes a tool name
+    // and because bare prose is not a reference: "docs-root-relative path" is
+    // English, not a pointer at a `docs-root` tool.
+    for (const [, ref] of description.matchAll(/`((?:docs|lsp|kernel|bridge)-[a-z_]+)`/g)) {
+      assert.ok(registered.has(ref), `${name} description points at ${ref}, which is not registered`);
+    }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // zero-checkout composition (ADR-025 two-personas amendment)
 

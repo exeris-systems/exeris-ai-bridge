@@ -521,7 +521,7 @@ function listReposTool(handle: DocsFamily): RegisteredTool {
       description:
         "List sibling Exeris repos under the ecosystem root that publish a " +
         "`docs/` directory. Returned names are usable as `repo` input to " +
-        "`docs:list_repo_docs` and `docs:get_repo_doc`.",
+        "`docs-list_repo_docs` and `docs-get_repo_doc`.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: guard("docs", handle, async (config) => {
@@ -541,8 +541,8 @@ function listRepoDocsTool(handle: DocsFamily): RegisteredTool {
       description:
         "List markdown documents under `<repo>/docs/**` for an Exeris " +
         "sibling repo. The `adr/` subdirectory is excluded — those are " +
-        "the registry's territory and reachable via `docs:list_adrs` / " +
-        "`docs:get_adr`. Use `docs:list_repos` to discover valid repo names.",
+        "the registry's territory and reachable via `docs-list_adrs` / " +
+        "`docs-get_adr`. Use `docs-list_repos` to discover valid repo names.",
       inputSchema: {
         type: "object",
         properties: {
@@ -589,7 +589,7 @@ function getRepoDocTool(handle: DocsFamily): RegisteredTool {
       name: "docs-get_repo_doc",
       description:
         "Fetch a specific markdown document from `<repo>/docs/<path>`. " +
-        "Use `docs:list_repo_docs` to discover valid paths.",
+        "Use `docs-list_repo_docs` to discover valid paths.",
       inputSchema: {
         type: "object",
         properties: {
@@ -666,7 +666,7 @@ type RepoDocsRootResult =
 /**
  * Validate that `<ecosystemRoot>/<repo>/docs` exists as a real directory
  * (not a symlink at either level) and sandbox-resolve it inside the
- * ecosystem. Shared by `docs:list_repo_docs` and `docs:get_repo_doc` so
+ * ecosystem. Shared by `docs-list_repo_docs` and `docs-get_repo_doc` so
  * discovery and fetch agree on what counts as a real repo — preventing
  * the agent from getting symlinked content under a misattributed name.
  */

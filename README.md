@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.5.0 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (3 tools, bound to the `KernelDiagnostics` SPI over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
 
 What 0.5.0 adds is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
 
@@ -136,7 +136,7 @@ The published package carries a small read-only corpus so an application develop
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.5.0", "entryCount": 0, "sourceArtifacts": [] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.5.1", "entryCount": 0, "sourceArtifacts": [] }
 ```
 
 At 0.5.0 the bundle ships with **zero entries** on purpose: this milestone builds the mechanism — manifest, loader, integrity check, packaging — and the `sdk:*` family fills it with the annotation catalog and AST schema at 0.6.0. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
@@ -164,7 +164,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 17 tool definitions (9 `docs:*`, 3 `lsp:*`, 3 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 18 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
