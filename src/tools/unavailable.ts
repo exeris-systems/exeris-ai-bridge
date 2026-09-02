@@ -61,7 +61,7 @@ export function unavailableResult(family: ToolFamily, status: Unavailable): Call
           {
             error: "family_unavailable",
             family,
-            message: `The ${family}:* tool family is not available in this environment.`,
+            message: `The ${family}-* tool family is not available in this environment.`,
             reason: status.reason,
             remedy: status.remedy,
           },

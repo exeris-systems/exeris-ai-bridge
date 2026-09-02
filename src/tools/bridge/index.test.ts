@@ -101,15 +101,15 @@ async function call(
 // ---------------------------------------------------------------------------
 // registration
 
-test("registerBridgeTools registers exactly bridge:version and bridge:health", () => {
+test("registerBridgeTools registers exactly bridge-version and bridge-health", () => {
   const names = registerBridgeTools(LIVE).map((t) => t.definition.name);
-  assert.deepEqual(names.sort((a, b) => a.localeCompare(b)), ["bridge:health", "bridge:version"]);
+  assert.deepEqual(names.sort((a, b) => a.localeCompare(b)), ["bridge-health", "bridge-version"]);
 });
 
-test("bridge:* answers on a config where every other family is dark", async () => {
+test("bridge-* answers on a config where every other family is dark", async () => {
   // The family that explains the others cannot itself be one of the others.
   // It has no external dependency to resolve, so it is never gated.
-  for (const name of ["bridge:version", "bridge:health"]) {
+  for (const name of ["bridge-version", "bridge-health"]) {
     await call(ZERO_CHECKOUT, name);
   }
 });
@@ -117,8 +117,8 @@ test("bridge:* answers on a config where every other family is dark", async () =
 // ---------------------------------------------------------------------------
 // bridge:version
 
-test("bridge:version identifies the build and the resolved mode", async () => {
-  const body = await call(LIVE, "bridge:version");
+test("bridge-version identifies the build and the resolved mode", async () => {
+  const body = await call(LIVE, "bridge-version");
   assert.equal(body.name, "exeris-ai-bridge");
   assert.equal(body.version, getServerVersion());
   assert.equal(body.node, process.version);
@@ -126,8 +126,8 @@ test("bridge:version identifies the build and the resolved mode", async () => {
   assert.equal(body.modeSource, "probe");
 });
 
-test("bridge:version reports a pinned mode as env-sourced", async () => {
-  const body = await call({ ...ZERO_CHECKOUT, mode: "contributor", modeSource: "env" }, "bridge:version");
+test("bridge-version reports a pinned mode as env-sourced", async () => {
+  const body = await call({ ...ZERO_CHECKOUT, mode: "contributor", modeSource: "env" }, "bridge-version");
   assert.equal(body.mode, "contributor");
   assert.equal(body.modeSource, "env");
 });
@@ -135,8 +135,8 @@ test("bridge:version reports a pinned mode as env-sourced", async () => {
 // ---------------------------------------------------------------------------
 // bridge:health
 
-test("bridge:health reports every dark family with its reason and remedy", async () => {
-  const body = await call(ZERO_CHECKOUT, "bridge:health");
+test("bridge-health reports every dark family with its reason and remedy", async () => {
+  const body = await call(ZERO_CHECKOUT, "bridge-health");
   assert.equal(body.mode, "app");
   assert.deepEqual(
     body.families,
@@ -148,7 +148,7 @@ test("bridge:health reports every dark family with its reason and remedy", async
   );
 });
 
-test("bridge:health reports the launch source and child state of a live family", async () => {
+test("bridge-health reports the launch source and child state of a live family", async () => {
   let spawns = 0;
   const lsp = new LspClient(LSP_SPEC, {
     channelFactory: () => {
@@ -163,7 +163,7 @@ test("bridge:health reports the launch source and child state of a live family",
     },
   });
 
-  const body = await call(LIVE, "bridge:health", { lsp, kernel });
+  const body = await call(LIVE, "bridge-health", { lsp, kernel });
 
   // docs:* has no child process at all, so it carries no transport key.
   assert.deepEqual(body.families[0], { family: "docs", state: "available" });
@@ -183,17 +183,17 @@ test("bridge:health reports the launch source and child state of a live family",
   assert.equal(spawns, 0, "bridge:health must never spawn a child process");
 });
 
-test("bridge:health distinguishes 'no child process' from 'child not visible'", async () => {
+test("bridge-health distinguishes 'no child process' from 'child not visible'", async () => {
   // docs:* omits the key; a child-process family whose instance was not handed
   // in reports null. Collapsing the two would tell an agent that lsp:* has no
   // process, which is false.
-  const body = await call(LIVE, "bridge:health");
+  const body = await call(LIVE, "bridge-health");
   assert.equal("transport" in body.families[0], false);
   assert.equal(body.families[1].transport, null);
   assert.equal(body.families[2].transport, null);
 });
 
-test("bridge:health renders a terminal close without leaking the launch command", async () => {
+test("bridge-health renders a terminal close without leaking the launch command", async () => {
   const channel = new SilentLspChannel();
   const spec: LspConfig = { ...LSP_SPEC, args: ["--secret-arg"], source: "env-command" };
   const lsp = new LspClient(spec, { channelFactory: () => channel });
@@ -203,7 +203,7 @@ test("bridge:health renders a terminal close without leaking the launch command"
   channel.kill({ kind: "exited", code: 3, signal: null });
   await assert.rejects(pending, LspTransportError);
 
-  const res = await tools({ ...LIVE, lsp: spec }, { lsp }).get("bridge:health")!.handler({});
+  const res = await tools({ ...LIVE, lsp: spec }, { lsp }).get("bridge-health")!.handler({});
   const text = (res.content[0] as { text: string }).text;
   assert.equal(payload(res).families[1].transport.lastError, "exited (code=3, signal=none)");
 
@@ -213,7 +213,7 @@ test("bridge:health renders a terminal close without leaking the launch command"
   assert.ok(!text.includes("--secret-arg"), `leaked the launch command: ${text}`);
 });
 
-test("bridge:health names the artifact version when the ladder resolved one", async () => {
+test("bridge-health names the artifact version when the ladder resolved one", async () => {
   // Only the local-repository rung resolves a version. "kernel:* is live" and
   // "kernel:* is live against 0.10.2 while your project builds 0.11.0" are
   // different claims, and only the second one is diagnosable.
@@ -224,29 +224,29 @@ test("bridge:health names the artifact version when the ladder resolved one", as
     source: "m2",
     artifactVersion: "0.10.2",
   };
-  const body = await call({ ...LIVE, kernel: m2 }, "bridge:health");
+  const body = await call({ ...LIVE, kernel: m2 }, "bridge-health");
   assert.equal(body.families[2].source, "m2");
   assert.equal(body.families[2].artifactVersion, "0.10.2");
 
   // A rung that resolves no version must not report one at all.
-  const plain = await call(LIVE, "bridge:health");
+  const plain = await call(LIVE, "bridge-health");
   assert.equal("artifactVersion" in plain.families[2], false);
 });
 
 // ---------------------------------------------------------------------------
 // bundled reference data
 
-test("bridge:version reports an absent bundle as a first-class state", async () => {
+test("bridge-version reports an absent bundle as a first-class state", async () => {
   // Absent is the ordinary state of a bridge run from a source checkout, and
   // the first thing to check when the reference surfaces know nothing. Omitting
   // it would make that question unanswerable from the tool surface.
-  const body = await call(LIVE, "bridge:version");
+  const body = await call(LIVE, "bridge-version");
   assert.equal(body.bundle.state, "unavailable");
   assert.equal(body.bundle.reason, "no bundle (test)");
   assert.equal(body.bundle.remedy, "generate one (test)");
 });
 
-test("bridge:version reports an empty bundle as present, not missing", async () => {
+test("bridge-version reports an empty bundle as present, not missing", async () => {
   // 0.5.0 ships exactly this: the mechanism, with content arriving in 0.6.0.
   const bundle: BundleState = {
     state: "available",
@@ -254,13 +254,13 @@ test("bridge:version reports an empty bundle as present, not missing", async () 
     bridgeVersion: "0.5.0",
     entries: [],
   };
-  const body = await call(LIVE, "bridge:version", undefined, bundle);
+  const body = await call(LIVE, "bridge-version", undefined, bundle);
   assert.equal(body.bundle.state, "available");
   assert.equal(body.bundle.entryCount, 0);
   assert.deepEqual(body.bundle.sourceArtifacts, []);
 });
 
-test("bridge:version names the upstream releases the bundled data came from", async () => {
+test("bridge-version names the upstream releases the bundled data came from", async () => {
   // Which release an answer reflects is the question a version tool exists to
   // answer; a file count alone cannot.
   const entry = (id: string, sourceArtifact: string) => ({
@@ -280,7 +280,7 @@ test("bridge:version names the upstream releases the bundled data came from", as
       entry("scoping", "eu.exeris:exeris-sdk-annotations:0.10.0"),
     ],
   };
-  const body = await call(LIVE, "bridge:version", undefined, bundle);
+  const body = await call(LIVE, "bridge-version", undefined, bundle);
   assert.equal(body.bundle.entryCount, 3);
   // Deduplicated and ordered — three entries from two artifacts.
   assert.deepEqual(body.bundle.sourceArtifacts, [

@@ -61,7 +61,7 @@ function resolveLspFamily(config: BridgeConfig, clientOverride?: LspClient): Lsp
 function listDomainsTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
-      name: "lsp:list_domains",
+      name: "lsp-list_domains",
       description: "List all @ExerisDomain types known to the active LSP session.",
       inputSchema: { type: "object", properties: {} },
     },
@@ -74,7 +74,7 @@ function listDomainsTool(handle: LspFamily): RegisteredTool {
 function describeDomainTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
-      name: "lsp:describe_domain",
+      name: "lsp-describe_domain",
       description:
         "Return the source-model description of an @ExerisDomain type: fields, actions, generated artefacts.",
       inputSchema: {
@@ -98,7 +98,7 @@ function describeDomainTool(handle: LspFamily): RegisteredTool {
 function listActionsTool(handle: LspFamily): RegisteredTool {
   return {
     definition: {
-      name: "lsp:list_actions",
+      name: "lsp-list_actions",
       description: "List all @Action methods across the workspace, with their owning @ExerisDomain.",
       inputSchema: { type: "object", properties: {} },
     },

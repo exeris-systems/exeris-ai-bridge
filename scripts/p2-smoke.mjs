@@ -220,7 +220,7 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
     assert.equal(report.state, "unavailable", `${family}:* resolved on a machine that has nothing to resolve it from`);
     assert.ok(report.reason?.length > 0, `${family}:* is dark without a reason`);
     assert.ok(report.remedy?.length > 0, `${family}:* is dark without a remedy`);
-    // reason/remedy are agent-facing and bridge:health relays them verbatim;
+    // reason/remedy are agent-facing and bridge-health relays them verbatim;
     // machine paths belong on stderr. Checking against the paths this run
     // actually used catches a leak without guessing at what one looks like.
     for (const secret of [scratch, tmpdir()]) {
@@ -232,7 +232,7 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
   // A dark family answers on the wire, rather than failing at spawn time with a
   // transport error that cannot say what to do about it.
   for (const [name, result] of calls) {
-    const family = name.split(":")[0];
+    const family = name.split("-")[0];
     assert.equal(result.isError, true, `${name} did not report an error`);
     const payload = JSON.parse(result.content[0].text);
     assert.equal(payload.error, "family_unavailable", `${name} failed some other way: ${result.content[0].text}`);
@@ -262,12 +262,12 @@ function assertSurfaceInvariant(dark, lit) {
   assert.ok(dark.tools.length >= 2, "expected a non-trivial tool surface");
   const names = dark.tools.map((t) => t.name);
   assert.deepEqual(
-    names.filter((n) => n.startsWith("bridge:")).sort((a, b) => a.localeCompare(b)),
-    ["bridge:health", "bridge:version"],
+    names.filter((n) => n.startsWith("bridge-")).sort((a, b) => a.localeCompare(b)),
+    ["bridge-health", "bridge-version"],
     "bridge:* is frozen at two tools by the ADR-025 2026-08-26 addendum",
   );
   for (const family of ["docs", "lsp", "kernel"]) {
-    assert.ok(names.some((n) => n.startsWith(`${family}:`)), `${family}:* vanished from tools/list`);
+    assert.ok(names.some((n) => n.startsWith(`${family}-`)), `${family}:* vanished from tools/list`);
   }
 }
 
@@ -276,7 +276,7 @@ function assertLadderResolves({ health }) {
   const kernel = health.families.find((f) => f.family === "kernel");
   assert.equal(kernel.state, "available", "EXERIS_KERNEL_COMMAND did not light kernel:*");
   assert.equal(kernel.source, "env-command");
-  // Constructed, never spawned: bridge:health is a zero-spawn surface, so the
+  // Constructed, never spawned: bridge-health is a zero-spawn surface, so the
   // child must still be idle after it has been reported on.
   assert.equal(kernel.transport.state, "not-started");
 }
@@ -312,13 +312,13 @@ async function interrogate(project, home, extraEnv) {
     client.notify("notifications/initialized", {});
 
     const { tools } = await client.request("tools/list", {});
-    const version = await client.callJson("bridge:version");
-    const health = await client.callJson("bridge:health");
+    const version = await client.callJson("bridge-version");
+    const health = await client.callJson("bridge-health");
 
     // One gated tool per family, to see the dark path on the wire. All of them
     // is server.test.ts's job; this is about the transport, not the coverage.
     const calls = [];
-    for (const name of ["docs:list_adrs", "lsp:list_domains", "kernel:list_providers"]) {
+    for (const name of ["docs-list_adrs", "lsp-list_domains", "kernel-list_providers"]) {
       calls.push([name, await client.request("tools/call", { name, arguments: {} })]);
     }
 

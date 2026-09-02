@@ -66,7 +66,7 @@ function resolveKernelFamily(config: BridgeConfig, adapterOverride?: KernelAdapt
 function listProvidersTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
-      name: "kernel:list_providers",
+      name: "kernel-list_providers",
       description:
         "List all SPI providers registered with the running kernel, including driver origin (community/enterprise priority).",
       inputSchema: { type: "object", properties: {} },
@@ -80,7 +80,7 @@ function listProvidersTool(handle: KernelFamily): RegisteredTool {
 function getBootstrapDagTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
-      name: "kernel:get_bootstrap_dag",
+      name: "kernel-get_bootstrap_dag",
       description:
         "Snapshot of the kernel bootstrap dependency DAG — nodes (subsystems) with their phase, declared dependencies, and running state.",
       inputSchema: { type: "object", properties: {} },
@@ -94,7 +94,7 @@ function getBootstrapDagTool(handle: KernelFamily): RegisteredTool {
 function describeSubsystemTool(handle: KernelFamily): RegisteredTool {
   return {
     definition: {
-      name: "kernel:describe_subsystem",
+      name: "kernel-describe_subsystem",
       description:
         "Detail for a single kernel subsystem by name (e.g. memory, crypto, persistence, graph, transport, events, flow, http, security).",
       inputSchema: {
