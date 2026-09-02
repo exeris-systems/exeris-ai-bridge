@@ -84,7 +84,7 @@ test(
     );
 
     try {
-      const providers = parseJson(await tools.get("kernel:list_providers")!.handler({}));
+      const providers = parseJson(await tools.get("kernel-list_providers")!.handler({}));
       assert.equal(providers.schemaVersion, "1.0");
       assert.ok(Array.isArray(providers.providers) && providers.providers.length >= 1);
       // listProviders enumerates one Community provider per SPI domain; the core
@@ -95,7 +95,7 @@ test(
         `expected core spiTypes among providers, got ${JSON.stringify(spiTypes)}`,
       );
 
-      const dag = parseJson(await tools.get("kernel:get_bootstrap_dag")!.handler({}));
+      const dag = parseJson(await tools.get("kernel-get_bootstrap_dag")!.handler({}));
       assert.equal(dag.schemaVersion, "1.0");
       assert.ok(Array.isArray(dag.nodes) && dag.nodes.length >= 1);
       const node = dag.nodes[0];
@@ -106,14 +106,14 @@ test(
       // describe_subsystem on a name we know exists (taken from the live DAG) —
       // it must echo the request and return a matching descriptor.
       const detail = parseJson(
-        await tools.get("kernel:describe_subsystem")!.handler({ name: node.name }),
+        await tools.get("kernel-describe_subsystem")!.handler({ name: node.name }),
       );
       assert.equal(detail.requestedName, node.name);
       assert.equal(detail.subsystem?.name, node.name);
 
       // A name that cannot exist resolves to a clean null, not an error.
       const missing = parseJson(
-        await tools.get("kernel:describe_subsystem")!.handler({ name: "__no_such_subsystem__" }),
+        await tools.get("kernel-describe_subsystem")!.handler({ name: "__no_such_subsystem__" }),
       );
       assert.equal(missing.subsystem, null);
     } finally {

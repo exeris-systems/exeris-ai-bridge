@@ -40,7 +40,7 @@ function registerAll(config: BridgeConfig) {
 
 /** bridge:* is the self-diagnostic family; it is never environment-gated. */
 function isGated(name: string): boolean {
-  return !name.startsWith("bridge:");
+  return !name.startsWith("bridge-");
 }
 
 test("docs registry exposes at least one tool", () => {
@@ -62,16 +62,56 @@ test("tool names are unique across all three families", () => {
 
 test("every tool name is prefixed with its family", () => {
   for (const t of registerDocsTools(stubConfig)) {
-    assert.match(t.definition.name, /^docs:/);
+    assert.match(t.definition.name, /^docs-/);
   }
   for (const t of registerLspTools(stubConfig)) {
-    assert.match(t.definition.name, /^lsp:/);
+    assert.match(t.definition.name, /^lsp-/);
   }
   for (const t of registerKernelTools(stubConfig)) {
-    assert.match(t.definition.name, /^kernel:/);
+    assert.match(t.definition.name, /^kernel-/);
   }
   for (const t of registerBridgeTools(stubConfig)) {
-    assert.match(t.definition.name, /^bridge:/);
+    assert.match(t.definition.name, /^bridge-/);
+  }
+});
+
+// The reason the surface is `family-tool` and not `family:tool`: MCP clients do
+// not reliably resolve a `:` inside a tool name, and the failure is silent — the
+// server registers, `tools/list` looks right, and every call misses. A colon is
+// therefore not a style question here, so this pins the whole surface to the
+// conservative charset rather than trusting the per-family prefix tests above to
+// notice one creeping back in.
+test("every tool name is one family, one hyphen, then snake_case", () => {
+  for (const name of registerAll(stubConfig).map((t) => t.definition.name)) {
+    assert.match(name, /^[a-z]+-[a-z_]+$/, name);
+    // Split-on-first-hyphen is how the tests and the smoke test recover the
+    // family key; a second hyphen would still match a laxer pattern and then
+    // silently recover the wrong half.
+    assert.equal(name.split("-").length, 2, `${name} has more than one hyphen`);
+  }
+});
+
+// A description is agent-facing text served by tools/list, so a tool name inside
+// one is a live pointer, not prose. The 0.5.1 rename reached every registered
+// `name` and missed several descriptions, which left the exact failure the
+// rename fixes — a name that resolves to nothing — relocated one field over.
+// Both halves matter: a colon form is dead on arrival, and a hyphen form is only
+// as good as the tool still existing.
+test("tool descriptions point only at tools that exist", () => {
+  const tools = registerAll(stubConfig).map((t) => t.definition);
+  const registered = new Set(tools.map((t) => t.name));
+
+  for (const { name, description } of tools) {
+    assert.ok(description, `${name} has no description`);
+    const colon = description.match(/\b(?:docs|lsp|kernel|bridge|sdk|build|caps):[a-z_]+/g) ?? [];
+    assert.deepEqual(colon, [], `${name} description uses the pre-0.5.1 colon form: ${colon.join(", ")}`);
+
+    // Backtick-delimited, because that is how this codebase writes a tool name
+    // and because bare prose is not a reference: "docs-root-relative path" is
+    // English, not a pointer at a `docs-root` tool.
+    for (const [, ref] of description.matchAll(/`((?:docs|lsp|kernel|bridge)-[a-z_]+)`/g)) {
+      assert.ok(registered.has(ref), `${name} description points at ${ref}, which is not registered`);
+    }
   }
 });
 
@@ -94,7 +134,7 @@ test("every tool in a dark family returns the structured reason and remedy", asy
   // here and fail some other way.
   for (const tool of registerAll(zeroCheckoutConfig).filter((t) => isGated(t.definition.name))) {
     const name = tool.definition.name;
-    const family = name.split(":")[0];
+    const family = name.split("-")[0];
     const res = await tool.handler({});
     assert.equal(res.isError, true, name);
     const payload = JSON.parse((res.content[0] as { text: string }).text);

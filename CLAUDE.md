@@ -28,6 +28,7 @@ These can be overridden with explicit justification, but the default is the path
 4. **Filesystem reads are sandboxed to known roots.** The `docs:*` family reads `../exeris-docs/`; the bundled reference corpus reads `<packageRoot>/data/`. Never accept an absolute path from the agent and read it — always resolve relative to a pinned root, and verify the resolved path stays inside that root. This applies to paths *we* generate too: the bundle manifest is ours, but it is still a file on disk that a later step could rewrite, so entry paths are sandbox-checked like any other.
 5. **`data/` is generated, never committed.** `prepack` runs `scripts/vendor-reference-data.mjs`, which rebuilds the bundle from released upstream artifacts and verifies every digest. Do not hand-edit `data/`, do not commit it, and do not add placeholder content to it — an empty manifest is a valid, honest state, and a missing bundle is the normal case when running from source.
 6. **JSON-RPC to LSP, JSON-over-stdio to kernel adapter.** Don't invent new wire formats. The LSP server already speaks JSON-RPC; the kernel adapter uses newline-delimited JSON over stdio per the `KernelDiagnostics` contract (ADR-025 2026-06-25 amendment).
+7. **Tool names are `family-tool` on the wire; `family:*` stays the prose name for a family in docs.** MCP clients do not reliably resolve a `:` inside a tool name, so the registered name is `docs-get_adr`, not `docs:get_adr`. The family prefix stays load-bearing by convention rather than by construction: `guard()` is handed its `ToolFamily` explicitly, and it is the tests that split the registered name on the first `-` and assert the halves agree with the family the handler was bound to. So a tool name is exactly one family, one hyphen, then `snake_case` — a second hyphen would silently split into the wrong family key. A test holds the whole surface to `^[a-z]+-[a-z_]+$`; do not weaken it to accommodate a name that wants a second hyphen. The `family:*` spelling is for *documentation* — this file, `README.md`, `ROADMAP.md`, ADR-025 — where it names a family as a concept. Strings the **agent** reads at runtime use the wire form instead (`unavailableResult` says `docs-*`), because the agent's only handle on a family is the tool names it can actually see in `tools/list`.
 
 ## Scoped bans
 
@@ -43,7 +44,7 @@ Each tool family is documented in its own folder. Keep the scope tight; if a too
 |:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
 | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
-| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail — read-only (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
+| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail, resolved JVM ergonomics — read-only, one tool per `KernelDiagnostics` method (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
 | `sdk:*`    | *(planned 0.6.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
 | `build:*`  | *(planned 0.7.0)* The **user's own project**: emitted `DomainMetadata`, artefact preview, L1/L2 detach state, decoded processor diagnostics — read-only | User's project filesystem, pinned project root |
 | `caps:*`   | *(planned 0.7.0)* `cap-manifest.json` + `CompositionStamp` — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | Build-time artefacts from `exeris-tooling` |
@@ -64,16 +65,16 @@ This is enforced, not merely stated: `scripts/p2-smoke.mjs` (CI job `p2-smoke`, 
 
 ## Preview, never write
 
-Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp:preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.
+Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp-preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.
 
-No tool handler may write into the user's project. If you find yourself reaching for `fs.writeFile` against a project path, stop: that is `lsp:apply_mutation`, it is deliberately deferred past 1.0, and it needs a further amendment first.
+No tool handler may write into the user's project. If you find yourself reaching for `fs.writeFile` against a project path, stop: that is `lsp-apply_mutation`, it is deliberately deferred past 1.0, and it needs a further amendment first.
 
 ## When to consult cross-repo ADRs
 
 - **ADR-006** — every PR that adds a dependency or extends `kernel:*` tooling.
 - **ADR-020** — every PR that adds or changes documentation cross-references.
 - **ADR-023** — when someone proposes changing the license or wrapping this in commercial terms.
-- **ADR-024** — its 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel **cap-blind**. `kernel:*` MUST NOT surface capability composition (there is no `kernel:list_capabilities`). Any future composition surface sources from `exeris-tooling` build-time artefacts (`cap-manifest.json` + composition manifest) and/or the `exeris-platform` composition runtime, and needs its own ADR-025 amendment first. See ADR-025 §"`kernel:*` Is Cap-Blind".
+- **ADR-024** — its 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel **cap-blind**. `kernel:*` MUST NOT surface capability composition (there is no `kernel-list_capabilities`). Any future composition surface sources from `exeris-tooling` build-time artefacts (`cap-manifest.json` + composition manifest) and/or the `exeris-platform` composition runtime, and needs its own ADR-025 amendment first. See ADR-025 §"`kernel:*` Is Cap-Blind".
 - **ADR-025** — every architectural change. This is the founding ADR; treat amendments to it like amendments to a constitution.
 
 ## Documentation precedence

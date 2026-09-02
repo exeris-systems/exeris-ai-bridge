@@ -116,7 +116,7 @@ test(
     );
 
     try {
-      const domains = parseJson(await tools.get("lsp:list_domains")!.handler({}));
+      const domains = parseJson(await tools.get("lsp-list_domains")!.handler({}));
       assert.deepEqual(domains, [
         {
           qualifiedName: "com.example.shop.Order",
@@ -130,7 +130,7 @@ test(
       assert.match(domains[0].sourcePath, /Order\.java$/);
 
       const description = parseJson(
-        await tools.get("lsp:describe_domain")!.handler({ qualifiedName: "com.example.shop.Order" }),
+        await tools.get("lsp-describe_domain")!.handler({ qualifiedName: "com.example.shop.Order" }),
       );
       assert.equal(description.qualifiedName, "com.example.shop.Order");
       const fieldNames = description.fields.map((f: { name: string }) => f.name);
@@ -145,7 +145,7 @@ test(
       );
       assert.ok(description.artefacts.includes("rest") && description.artefacts.includes("graphql"));
 
-      const actions = parseJson(await tools.get("lsp:list_actions")!.handler({}));
+      const actions = parseJson(await tools.get("lsp-list_actions")!.handler({}));
       assert.equal(actions.length, 1);
       assert.equal(actions[0].owningDomain, "com.example.shop.Order");
       assert.equal(actions[0].name, "submit");

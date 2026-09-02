@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { loadConfig, type BridgeConfig } from "./config/env.js";
+import { buildInstructions } from "./instructions.js";
 import { loadBundle } from "./data/bundle.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
 
   const server = new Server(
     { name: SERVER_NAME, version: getServerVersion() },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {} }, instructions: buildInstructions(config) },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({

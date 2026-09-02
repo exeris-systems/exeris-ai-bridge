@@ -89,19 +89,19 @@ function tools() {
 
 test("registerDocsTools registers all nine docs:* tools", () => {
   const t = tools();
-  assert.ok(t.has("docs:list_adrs"));
-  assert.ok(t.has("docs:get_adr"));
-  assert.ok(t.has("docs:get_template"));
-  assert.ok(t.has("docs:get_hla"));
-  assert.ok(t.has("docs:get_whitepaper"));
-  assert.ok(t.has("docs:search"));
-  assert.ok(t.has("docs:list_repos"));
-  assert.ok(t.has("docs:list_repo_docs"));
-  assert.ok(t.has("docs:get_repo_doc"));
+  assert.ok(t.has("docs-list_adrs"));
+  assert.ok(t.has("docs-get_adr"));
+  assert.ok(t.has("docs-get_template"));
+  assert.ok(t.has("docs-get_hla"));
+  assert.ok(t.has("docs-get_whitepaper"));
+  assert.ok(t.has("docs-search"));
+  assert.ok(t.has("docs-list_repos"));
+  assert.ok(t.has("docs-list_repo_docs"));
+  assert.ok(t.has("docs-get_repo_doc"));
 });
 
-test("docs:list_adrs returns every entry from the registry as JSON text", async () => {
-  const tool = tools().get("docs:list_adrs")!;
+test("docs-list_adrs returns every entry from the registry as JSON text", async () => {
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -112,16 +112,16 @@ test("docs:list_adrs returns every entry from the registry as JSON text", async 
   );
 });
 
-test("docs:list_adrs filters by status (case-insensitive)", async () => {
-  const tool = tools().get("docs:list_adrs")!;
+test("docs-list_adrs filters by status (case-insensitive)", async () => {
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({ status: "ACCEPTED" });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.equal(payload.length, 3);
   assert.ok(payload.every((e: { status: { state: string } }) => e.status.state === "accepted"));
 });
 
-test("docs:list_adrs returns isError when status filter matches no entries in a non-empty registry", async () => {
-  const tool = tools().get("docs:list_adrs")!;
+test("docs-list_adrs returns isError when status filter matches no entries in a non-empty registry", async () => {
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({ status: "withdrawn" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -130,75 +130,75 @@ test("docs:list_adrs returns isError when status filter matches no entries in a 
   assert.match(text, /Known states/);
 });
 
-test("docs:list_adrs trims whitespace in the status filter before comparing", async () => {
-  const tool = tools().get("docs:list_adrs")!;
+test("docs-list_adrs trims whitespace in the status filter before comparing", async () => {
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({ status: "  accepted  " });
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.equal(payload.length, 3);
 });
 
-test("docs:list_adrs treats whitespace-only status as no-filter", async () => {
-  const tool = tools().get("docs:list_adrs")!;
+test("docs-list_adrs treats whitespace-only status as no-filter", async () => {
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({ status: "   " });
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.equal(payload.length, 5);
 });
 
-test("docs:list_adrs returns isError when the registry file is missing", async () => {
+test("docs-list_adrs returns isError when the registry file is missing", async () => {
   rmSync(join(docsRoot, "adr-index.md"));
-  const tool = tools().get("docs:list_adrs")!;
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /Failed to read adr-index.md/);
 });
 
-test("docs:get_adr returns the markdown body for an own-repo ADR", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr returns the markdown body for an own-repo ADR", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 1 });
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# ADR-001 Local A/);
 });
 
-test("docs:get_adr resolves cross-repo links via the ecosystem sandbox", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr resolves cross-repo links via the ecosystem sandbox", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 7 });
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# ADR-007 Cross-repo/);
 });
 
-test("docs:get_adr returns isError for an ADR not in the registry", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr returns isError for an ADR not in the registry", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 999 });
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /ADR-999 is not in the registry/);
 });
 
-test("docs:get_adr returns isError for a reserved ADR with no link", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr returns isError for a reserved ADR with no link", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 31 });
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /has no link in the registry/);
 });
 
-test("docs:get_adr returns isError with enterprise-private hint when content is missing", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr returns isError with enterprise-private hint when content is missing", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 16 });
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /enterprise-private/);
 });
 
-test("docs:get_adr rejects non-integer input", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr rejects non-integer input", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res1 = await tool.handler({ number: "001" });
   const res2 = await tool.handler({ number: 1.5 });
   assert.equal(res1.isError, true);
   assert.equal(res2.isError, true);
 });
 
-test("docs:get_adr rejects zero and negative numbers with a clean error (not 'ADR-0-1')", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr rejects zero and negative numbers with a clean error (not 'ADR-0-1')", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res0 = await tool.handler({ number: 0 });
   const resNeg = await tool.handler({ number: -1 });
   assert.equal(res0.isError, true);
@@ -209,7 +209,7 @@ test("docs:get_adr rejects zero and negative numbers with a clean error (not 'AD
   assert.doesNotMatch((resNeg.content[0] as { text: string }).text, /ADR-/);
 });
 
-test("docs:get_adr rejects an empty link target without leaking docsRoot", async () => {
+test("docs-get_adr rejects an empty link target without leaking docsRoot", async () => {
   // `[empty]()` parses to link=null at the parser layer (empty target is not
   // a valid link contract), so the handler reaches the "no link in registry"
   // branch — same protection: docsRoot must not leak in the error message.
@@ -223,7 +223,7 @@ test("docs:get_adr rejects an empty link target without leaking docsRoot", async
 `,
     "utf8",
   );
-  const tool = tools().get("docs:get_adr")!;
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 50 });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -233,8 +233,8 @@ test("docs:get_adr rejects an empty link target without leaking docsRoot", async
   assert.ok(!text.includes(docsRoot));
 });
 
-test("docs:get_adr error messages render paths relative to ecosystemRoot, not absolute", async () => {
-  const tool = tools().get("docs:get_adr")!;
+test("docs-get_adr error messages render paths relative to ecosystemRoot, not absolute", async () => {
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 16 }); // enterprise-private, file missing
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -244,7 +244,7 @@ test("docs:get_adr error messages render paths relative to ecosystemRoot, not ab
   assert.match(text, /exeris-enterprise/);
 });
 
-test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'missing content')", async (t) => {
+test("docs-get_adr surfaces real sandbox escape via symlink (not masked as 'missing content')", async (t) => {
   // Whole setup runs inside try/finally so a partial failure (mkdtemp
   // succeeds, writeFileSync fails) still cleans up outsideBase.
   const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-outside-")));
@@ -276,7 +276,7 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
       "utf8",
     );
 
-    const tool = tools().get("docs:get_adr")!;
+    const tool = tools().get("docs-get_adr")!;
     const res = await tool.handler({ number: 99 });
     assert.equal(res.isError, true);
     const text = (res.content[0] as { text: string }).text;
@@ -289,11 +289,11 @@ test("docs:get_adr surfaces real sandbox escape via symlink (not masked as 'miss
   }
 });
 
-test("docs:list_adrs registry-read error does not leak ecosystemRoot in the message", async () => {
+test("docs-list_adrs registry-read error does not leak ecosystemRoot in the message", async () => {
   // Force a SandboxEscape on the index path itself (delete the file so
   // resolveInside fails with SandboxEscapeError(resolved=null)).
   rmSync(join(docsRoot, "adr-index.md"));
-  const tool = tools().get("docs:list_adrs")!;
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -302,7 +302,7 @@ test("docs:list_adrs registry-read error does not leak ecosystemRoot in the mess
   assert.match(text, /Failed to read adr-index.md/);
 });
 
-test("docs:get_adr readFileSync error (EISDIR via directory target) does not leak ecosystemRoot", async () => {
+test("docs-get_adr readFileSync error (EISDIR via directory target) does not leak ecosystemRoot", async () => {
   // Outcome-level audit: regardless of which error type Node raises (EISDIR
   // here carries no path in the message; EACCES would carry one), the
   // wire-facing string never contains ecosystemRoot. Direct
@@ -319,7 +319,7 @@ test("docs:get_adr readFileSync error (EISDIR via directory target) does not lea
 `,
     "utf8",
   );
-  const tool = tools().get("docs:get_adr")!;
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 77 });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -393,13 +393,13 @@ test("formatSandboxStderrLine neutralises control chars in agent-reachable field
   assert.match(parsed.candidate, /forged log line/);
 });
 
-test("docs:list_adrs missing-index error never contains the ecosystem path or an over-replace artefact", async () => {
+test("docs-list_adrs missing-index error never contains the ecosystem path or an over-replace artefact", async () => {
   // Outcome smoke: the SandboxError branch is path-free by design; the
   // non-Sandbox redaction branch is exercised by redactEcosystemPaths unit
   // tests above. This test catches regressions where future error wrapping
   // accidentally interpolates a raw path through some other code path.
   rmSync(join(docsRoot, "adr-index.md"));
-  const tool = tools().get("docs:list_adrs")!;
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -408,7 +408,7 @@ test("docs:list_adrs missing-index error never contains the ecosystem path or an
   assert.doesNotMatch(text, /<ecosystem>[a-zA-Z0-9]/);
 });
 
-test("docs:list_adrs 'Known states' message filters out empty status strings", async () => {
+test("docs-list_adrs 'Known states' message filters out empty status strings", async () => {
   // Plant a row with an intentionally-blank status cell. parseRow doesn't
   // reject it (only numberPadded is regex-validated), so the entry's
   // status.state is ''. The Known-states list must NOT include the empty
@@ -424,7 +424,7 @@ test("docs:list_adrs 'Known states' message filters out empty status strings", a
 `,
     "utf8",
   );
-  const tool = tools().get("docs:list_adrs")!;
+  const tool = tools().get("docs-list_adrs")!;
   const res = await tool.handler({ status: "withdrawn" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -435,7 +435,7 @@ test("docs:list_adrs 'Known states' message filters out empty status strings", a
   assert.match(text, /accepted/);
 });
 
-test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () => {
+test("docs-get_adr rejects a link that escapes the ecosystem sandbox", async () => {
   // Real escape: enough ../ to climb above ecosystemRoot (= base = /tmp/...).
   // POSIX `path.join` neutralizes a leading `/` in the target, so an absolute
   // `/etc/passwd` target is NOT an escape — it lexically lands inside docsRoot.
@@ -450,7 +450,7 @@ test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () 
 `,
     "utf8",
   );
-  const tool = tools().get("docs:get_adr")!;
+  const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 99 });
   assert.equal(res.isError, true);
   assert.match(
@@ -460,41 +460,41 @@ test("docs:get_adr rejects a link that escapes the ecosystem sandbox", async () 
 });
 
 // ---------------------------------------------------------------------------
-// docs:get_template
+// docs-get_template
 
-test("docs:get_template returns the ADR template body", async () => {
-  const tool = tools().get("docs:get_template")!;
+test("docs-get_template returns the ADR template body", async () => {
+  const tool = tools().get("docs-get_template")!;
   const res = await tool.handler({ kind: "ADR" });
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# ADR-NNN TEMPLATE/);
 });
 
-test("docs:get_template returns the RFC and RESEARCH templates", async () => {
-  const tool = tools().get("docs:get_template")!;
+test("docs-get_template returns the RFC and RESEARCH templates", async () => {
+  const tool = tools().get("docs-get_template")!;
   const rfc = await tool.handler({ kind: "RFC" });
   const research = await tool.handler({ kind: "RESEARCH" });
   assert.match((rfc.content[0] as { text: string }).text, /^# RFC TEMPLATE/);
   assert.match((research.content[0] as { text: string }).text, /^# RESEARCH TEMPLATE/);
 });
 
-test("docs:get_template rejects an unknown kind with a clean message", async () => {
-  const tool = tools().get("docs:get_template")!;
+test("docs-get_template rejects an unknown kind with a clean message", async () => {
+  const tool = tools().get("docs-get_template")!;
   const res = await tool.handler({ kind: "PRD" });
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /'kind' must be one of ADR, RFC, RESEARCH/);
 });
 
-test("docs:get_template rejects a missing or non-string kind", async () => {
-  const tool = tools().get("docs:get_template")!;
+test("docs-get_template rejects a missing or non-string kind", async () => {
+  const tool = tools().get("docs-get_template")!;
   const res1 = await tool.handler({});
   const res2 = await tool.handler({ kind: 42 });
   assert.equal(res1.isError, true);
   assert.equal(res2.isError, true);
 });
 
-test("docs:get_template returns isError without leaking docsRoot when the template file is missing", async () => {
+test("docs-get_template returns isError without leaking docsRoot when the template file is missing", async () => {
   rmSync(join(docsRoot, "templates", "ADR-TEMPLATE.md"));
-  const tool = tools().get("docs:get_template")!;
+  const tool = tools().get("docs-get_template")!;
   const res = await tool.handler({ kind: "ADR" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -503,25 +503,25 @@ test("docs:get_template returns isError without leaking docsRoot when the templa
 });
 
 // ---------------------------------------------------------------------------
-// docs:get_hla + docs:get_whitepaper
+// docs-get_hla + docs-get_whitepaper
 
-test("docs:get_hla returns the high-level-architecture body", async () => {
-  const tool = tools().get("docs:get_hla")!;
+test("docs-get_hla returns the high-level-architecture body", async () => {
+  const tool = tools().get("docs-get_hla")!;
   const res = await tool.handler({});
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# HLA/);
 });
 
-test("docs:get_whitepaper returns the whitepaper body", async () => {
-  const tool = tools().get("docs:get_whitepaper")!;
+test("docs-get_whitepaper returns the whitepaper body", async () => {
+  const tool = tools().get("docs-get_whitepaper")!;
   const res = await tool.handler({});
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# Whitepaper/);
 });
 
-test("docs:get_hla returns isError without leaking ecosystemRoot when the file is missing", async () => {
+test("docs-get_hla returns isError without leaking ecosystemRoot when the file is missing", async () => {
   rmSync(join(docsRoot, "high-level-architecture.md"));
-  const tool = tools().get("docs:get_hla")!;
+  const tool = tools().get("docs-get_hla")!;
   const res = await tool.handler({});
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -529,10 +529,10 @@ test("docs:get_hla returns isError without leaking ecosystemRoot when the file i
 });
 
 // ---------------------------------------------------------------------------
-// docs:search
+// docs-search
 
-test("docs:search finds a literal substring across the docs tree", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search finds a literal substring across the docs tree", async () => {
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "The Wall" });
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -540,8 +540,8 @@ test("docs:search finds a literal substring across the docs tree", async () => {
   assert.ok(payload.hits.some((h: { path: string }) => h.path.endsWith("ADR-001-local-a.md")));
 });
 
-test("docs:search is case-insensitive", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search is case-insensitive", async () => {
+  const tool = tools().get("docs-search")!;
   const upper = await tool.handler({ query: "THE WALL" });
   const lower = await tool.handler({ query: "the wall" });
   const upperHits = JSON.parse((upper.content[0] as { text: string }).text).hitCount;
@@ -550,8 +550,8 @@ test("docs:search is case-insensitive", async () => {
   assert.ok(upperHits >= 1);
 });
 
-test("docs:search pathFilter narrows the file set", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search pathFilter narrows the file set", async () => {
+  const tool = tools().get("docs-search")!;
   // 'Body' appears in both ADR-001 and ADR-002 in the fixture.
   const allRes = await tool.handler({ query: "Body" });
   const allHits = JSON.parse((allRes.content[0] as { text: string }).text);
@@ -561,16 +561,16 @@ test("docs:search pathFilter narrows the file set", async () => {
   assert.ok(filteredHits.hits.every((h: { path: string }) => h.path.includes("ADR-001")));
 });
 
-test("docs:search respects maxResults and reports truncated=true when capped", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search respects maxResults and reports truncated=true when capped", async () => {
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "Body", maxResults: 1 });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.equal(payload.hitCount, 1);
   assert.equal(payload.truncated, true);
 });
 
-test("docs:search clamps maxResults above the hard cap", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search clamps maxResults above the hard cap", async () => {
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "Body", maxResults: 999_999 });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   // 200 is the cap; the query won't produce 200 hits but maxResults in the
@@ -578,16 +578,16 @@ test("docs:search clamps maxResults above the hard cap", async () => {
   assert.equal(payload.maxResults, 200);
 });
 
-test("docs:search rejects an empty or whitespace-only query", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search rejects an empty or whitespace-only query", async () => {
+  const tool = tools().get("docs-search")!;
   const empty = await tool.handler({ query: "" });
   const blank = await tool.handler({ query: "   " });
   assert.equal(empty.isError, true);
   assert.equal(blank.isError, true);
 });
 
-test("docs:search returns hits=[] when nothing matches but request was valid", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search returns hits=[] when nothing matches but request was valid", async () => {
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "x-x-x-no-such-token-x-x-x" });
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -595,8 +595,8 @@ test("docs:search returns hits=[] when nothing matches but request was valid", a
   assert.deepEqual(payload.hits, []);
 });
 
-test("docs:search includes line number and snippet for each hit", async () => {
-  const tool = tools().get("docs:search")!;
+test("docs-search includes line number and snippet for each hit", async () => {
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "The Wall" });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   const hit = payload.hits[0];
@@ -606,7 +606,7 @@ test("docs:search includes line number and snippet for each hit", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// docs:list_repos / docs:list_repo_docs / docs:get_repo_doc
+// docs-list_repos / docs-list_repo_docs / docs-get_repo_doc
 
 function seedSiblingRepoFixture(name: string, files: Record<string, string>): string {
   const repoDocs = join(base, name, "docs");
@@ -619,14 +619,14 @@ function seedSiblingRepoFixture(name: string, files: Record<string, string>): st
   return repoDocs;
 }
 
-test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory", async () => {
+test("docs-list_repos returns sibling exeris-* repos that have a docs/ directory", async () => {
   // The existing fixture only creates exeris-docs and exeris-kernel/docs/adr.
   // Add two more siblings to make the discovery non-trivial.
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK guide" });
   mkdirSync(join(base, "exeris-tooling"), { recursive: true }); // no docs/
   seedSiblingRepoFixture("exeris-spring-runtime", { "overview.md": "# Spring" });
 
-  const tool = tools().get("docs:list_repos")!;
+  const tool = tools().get("docs-list_repos")!;
   const res = await tool.handler({});
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -641,12 +641,12 @@ test("docs:list_repos returns sibling exeris-* repos that have a docs/ directory
   assert.deepEqual([...payload.repos].sort((a: string, b: string) => a.localeCompare(b)), payload.repos);
 });
 
-test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
+test("docs-list_repos handles an ecosystemRoot it cannot read by returning []", async () => {
   // Synthesise an empty-but-valid config to drive the empty branch.
   const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), "exeris-empty-")));
   const altConfig = contributorConfig(emptyRoot, emptyRoot);
   try {
-    const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
+    const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs-list_repos")!;
     const res = await altTool.handler({});
     const payload = JSON.parse((res.content[0] as { text: string }).text);
     assert.equal(payload.count, 0);
@@ -656,14 +656,14 @@ test("docs:list_repos handles an ecosystemRoot it cannot read by returning []", 
   }
 });
 
-test("docs:list_repo_docs lists *.md files excluding the adr/ subtree", async () => {
+test("docs-list_repo_docs lists *.md files excluding the adr/ subtree", async () => {
   seedSiblingRepoFixture("exeris-sdk", {
     "guide.md": "# Guide",
     "subsystems/persistence.md": "# Persistence",
     "subsystems/transport.md": "# Transport",
     "adr/ADR-100-fake.md": "# Should be excluded",
   });
-  const tool = tools().get("docs:list_repo_docs")!;
+  const tool = tools().get("docs-list_repo_docs")!;
   const res = await tool.handler({ repo: "exeris-sdk" });
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -674,8 +674,8 @@ test("docs:list_repo_docs lists *.md files excluding the adr/ subtree", async ()
   assert.ok(!paths.some((p: string) => p.startsWith("adr/")));
 });
 
-test("docs:list_repo_docs returns isError for a non-existent repo without leaking ecosystemRoot", async () => {
-  const tool = tools().get("docs:list_repo_docs")!;
+test("docs-list_repo_docs returns isError for a non-existent repo without leaking ecosystemRoot", async () => {
+  const tool = tools().get("docs-list_repo_docs")!;
   const res = await tool.handler({ repo: "exeris-nonexistent" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -683,8 +683,8 @@ test("docs:list_repo_docs returns isError for a non-existent repo without leakin
   assert.ok(!text.includes(base));
 });
 
-test("docs:list_repo_docs rejects repo names that don't match the exeris-* convention (path-traversal guard)", async () => {
-  const tool = tools().get("docs:list_repo_docs")!;
+test("docs-list_repo_docs rejects repo names that don't match the exeris-* convention (path-traversal guard)", async () => {
+  const tool = tools().get("docs-list_repo_docs")!;
   const cases = ["", "../etc", "/abs/path", "Exeris-Kernel", "node_modules", "exeris-", "exeris-_underscore"];
   for (const repo of cases) {
     const res = await tool.handler({ repo });
@@ -693,26 +693,26 @@ test("docs:list_repo_docs rejects repo names that don't match the exeris-* conve
   }
 });
 
-test("docs:get_repo_doc returns the body of a doc under <repo>/docs/<path>", async () => {
+test("docs-get_repo_doc returns the body of a doc under <repo>/docs/<path>", async () => {
   seedSiblingRepoFixture("exeris-sdk", {
     "subsystems/persistence.md": "# Persistence subsystem\n\nDetails here.",
   });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-sdk", path: "subsystems/persistence.md" });
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# Persistence subsystem/);
 });
 
-test("docs:get_repo_doc rejects an ADR path with a redirection hint to docs:get_adr", async () => {
-  const tool = tools().get("docs:get_repo_doc")!;
+test("docs-get_repo_doc rejects an ADR path with a redirection hint to docs-get_adr", async () => {
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-kernel", path: "adr/ADR-007.md" });
   assert.equal(res.isError, true);
-  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+  assert.match((res.content[0] as { text: string }).text, /use docs-get_adr/);
 });
 
-test("docs:get_repo_doc rejects path traversal in the 'path' argument", async () => {
+test("docs-get_repo_doc rejects path traversal in the 'path' argument", async () => {
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# Guide" });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-sdk", path: "../../../etc/passwd" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -720,8 +720,8 @@ test("docs:get_repo_doc rejects path traversal in the 'path' argument", async ()
   assert.ok(!text.includes("/etc/passwd") || /sandbox|not found/.test(text));
 });
 
-test("docs:get_repo_doc rejects malformed inputs", async () => {
-  const tool = tools().get("docs:get_repo_doc")!;
+test("docs-get_repo_doc rejects malformed inputs", async () => {
+  const tool = tools().get("docs-get_repo_doc")!;
   const r1 = await tool.handler({ repo: "exeris-sdk" });
   const r2 = await tool.handler({ repo: "exeris-sdk", path: "" });
   const r3 = await tool.handler({ repo: "exeris-sdk", path: "   " });
@@ -732,7 +732,7 @@ test("docs:get_repo_doc rejects malformed inputs", async () => {
   assert.equal(r4.isError, true);
 });
 
-test("docs:get_repo_doc cannot read cross-repo files via ../ traversal (sandbox at <repo>/docs, not ecosystemRoot)", async () => {
+test("docs-get_repo_doc cannot read cross-repo files via ../ traversal (sandbox at <repo>/docs, not ecosystemRoot)", async () => {
   // Plant a file in a DIFFERENT sibling repo's checkout (not in docs/).
   // Reviewer's scenario: get_repo_doc with repo='exeris-sdk' and path that
   // escapes to '../../exeris-kernel/pom.xml'. Pre-fix the sandbox was
@@ -742,7 +742,7 @@ test("docs:get_repo_doc cannot read cross-repo files via ../ traversal (sandbox 
   writeFileSync(join(kernelRoot, "pom.xml"), "<project>secret</project>", "utf8");
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# Guide" });
 
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({
     repo: "exeris-sdk",
     path: "../../exeris-kernel/pom.xml",
@@ -754,7 +754,7 @@ test("docs:get_repo_doc cannot read cross-repo files via ../ traversal (sandbox 
   assert.ok(!text.includes("<project>"));
 });
 
-test("docs:get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", async () => {
+test("docs-get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", async () => {
   // Reviewer's scenario: literal startsWith('adr/') is false for './adr/...',
   // path.join would normalise it back, and the ADR file would leak past the
   // registry-only contract. The fast-path lowercase check catches this
@@ -765,58 +765,58 @@ test("docs:get_repo_doc ADR-redirect catches normalised paths (./adr/X.md)", asy
   mkdirSync(adrDir, { recursive: true });
   writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
 
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-kernel", path: "./adr/ADR-007.md" });
   assert.equal(res.isError, true);
-  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+  assert.match((res.content[0] as { text: string }).text, /use docs-get_adr/);
 });
 
-test("docs:get_repo_doc ADR-redirect catches traversal-normalised paths (foo/../adr/X.md)", async () => {
+test("docs-get_repo_doc ADR-redirect catches traversal-normalised paths (foo/../adr/X.md)", async () => {
   const adrDir = join(base, "exeris-kernel", "docs", "adr");
   mkdirSync(adrDir, { recursive: true });
   writeFileSync(join(adrDir, "ADR-007.md"), "# secret ADR", "utf8");
   mkdirSync(join(base, "exeris-kernel", "docs", "foo"), { recursive: true });
 
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({
     repo: "exeris-kernel",
     path: "foo/../adr/ADR-007.md",
   });
   assert.equal(res.isError, true);
-  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+  assert.match((res.content[0] as { text: string }).text, /use docs-get_adr/);
 });
 
-test("docs:get_repo_doc fast-path catches case-insensitive ADR prefix (ADR/...)", async () => {
+test("docs-get_repo_doc fast-path catches case-insensitive ADR prefix (ADR/...)", async () => {
   // On case-insensitive FS (macOS/Windows), 'ADR/...' resolves to 'adr/...'.
   // The lowercase fast-path catches the input shape directly; the
   // post-resolution guard would also catch the normalised path on those
   // platforms. On Linux (case-sensitive) the file genuinely doesn't exist
   // at 'ADR/...' — fast-path still redirects so the agent gets the hint
   // instead of "not found".
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-kernel", path: "ADR/ADR-007.md" });
   assert.equal(res.isError, true);
-  assert.match((res.content[0] as { text: string }).text, /use docs:get_adr/);
+  assert.match((res.content[0] as { text: string }).text, /use docs-get_adr/);
 });
 
-test("docs:get_repo_doc serves a legitimate top-level adr.md meta-doc (not an ADR record)", async () => {
+test("docs-get_repo_doc serves a legitimate top-level adr.md meta-doc (not an ADR record)", async () => {
   // Reviewer's scenario: `adr.md` is a meta-doc about ADRs, NOT an ADR
   // record. The earlier overly-strict exclusion blocked it entirely.
   // Now it's reachable.
   seedSiblingRepoFixture("exeris-sdk", { "adr.md": "# How we use ADRs in the SDK\n" });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-sdk", path: "adr.md" });
   assert.equal(res.isError, undefined);
   assert.match((res.content[0] as { text: string }).text, /^# How we use ADRs/);
 });
 
-test("docs:list_repo_docs includes adr-adjacent dirs (adr-drafts/, adr-extras/) — those are NOT registry content", async () => {
+test("docs-list_repo_docs includes adr-adjacent dirs (adr-drafts/, adr-extras/) — those are NOT registry content", async () => {
   seedSiblingRepoFixture("exeris-sdk", {
     "adr-drafts/wip-ADR-110.md": "# Draft",
     "adr-extras/historical.md": "# Notes",
     "adr/ADR-100.md": "# Should be excluded (registry)",
   });
-  const tool = tools().get("docs:list_repo_docs")!;
+  const tool = tools().get("docs-list_repo_docs")!;
   const res = await tool.handler({ repo: "exeris-sdk" });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   const paths = payload.docs.map((d: { path: string }) => d.path);
@@ -825,26 +825,26 @@ test("docs:list_repo_docs includes adr-adjacent dirs (adr-drafts/, adr-extras/) 
   assert.ok(!paths.some((p: string) => p.startsWith("adr/")));
 });
 
-test("docs:list_repo_docs includes adr.md as a regular file", async () => {
+test("docs-list_repo_docs includes adr.md as a regular file", async () => {
   seedSiblingRepoFixture("exeris-sdk", { "adr.md": "# Meta-doc" });
-  const tool = tools().get("docs:list_repo_docs")!;
+  const tool = tools().get("docs-list_repo_docs")!;
   const res = await tool.handler({ repo: "exeris-sdk" });
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.ok(payload.docs.some((d: { path: string }) => d.path === "adr.md"));
 });
 
-test("docs:list_repos excludes exeris-docs itself (covered by registry tools)", async () => {
+test("docs-list_repos excludes exeris-docs itself (covered by registry tools)", async () => {
   // Plant exeris-docs/docs/ to make sure even with that present it's NOT
   // listed (the discovery filters it out by name).
   mkdirSync(join(base, "exeris-docs", "docs"), { recursive: true });
-  const tool = tools().get("docs:list_repos")!;
+  const tool = tools().get("docs-list_repos")!;
   const res = await tool.handler({});
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.ok(!payload.repos.includes("exeris-docs"));
 });
 
-test("docs:get_repo_doc rejects repo='exeris-docs' with a hint to use registry tools", async () => {
-  const tool = tools().get("docs:get_repo_doc")!;
+test("docs-get_repo_doc rejects repo='exeris-docs' with a hint to use registry tools", async () => {
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-docs", path: "high-level-architecture.md" });
   assert.equal(res.isError, true);
   assert.match(
@@ -853,7 +853,7 @@ test("docs:get_repo_doc rejects repo='exeris-docs' with a hint to use registry t
   );
 });
 
-test("docs:list_repos with a non-existent ecosystemRoot actually exercises the readdirSync catch", async () => {
+test("docs-list_repos with a non-existent ecosystemRoot actually exercises the readdirSync catch", async () => {
   // Reviewer's #15: the previous test used a real-but-empty tmpdir, which
   // doesn't throw — it returns []. To genuinely exercise the try/catch we
   // need readdirSync to fail. A long unique path that definitely doesn't
@@ -862,22 +862,22 @@ test("docs:list_repos with a non-existent ecosystemRoot actually exercises the r
   // of swapping is zero and security-scanner noise is real.
   const fakeRoot = "/__exeris-bridge-does-not-exist-" + randomUUID() + "__";
   const altConfig = contributorConfig(fakeRoot, fakeRoot);
-  const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs:list_repos")!;
+  const altTool = registerDocsTools(altConfig).find((t) => t.definition.name === "docs-list_repos")!;
   const res = await altTool.handler({});
   const payload = JSON.parse((res.content[0] as { text: string }).text);
   assert.equal(payload.count, 0);
   assert.deepEqual(payload.repos, []);
 });
 
-test("docs:search returns isError when docsRoot is unreadable (no silent 'no matches')", async () => {
+test("docs-search returns isError when docsRoot is unreadable (no silent 'no matches')", async () => {
   rmSync(docsRoot, { recursive: true, force: true });
-  const tool = tools().get("docs:search")!;
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "anything" });
   assert.equal(res.isError, true);
   assert.match((res.content[0] as { text: string }).text, /not a readable directory|EXERIS_DOCS_ROOT/);
 });
 
-test("docs:search marks truncated=true when oversize files are skipped (no false 'all matches returned')", async () => {
+test("docs-search marks truncated=true when oversize files are skipped (no false 'all matches returned')", async () => {
   // Plant a file just over SEARCH_MAX_BYTES_PER_FILE (10MB). Use a
   // size-only sparse write would be faster, but writeFileSync of a 10MB
   // string is fast enough for one test.
@@ -886,7 +886,7 @@ test("docs:search marks truncated=true when oversize files are skipped (no false
   // Plant a small file that DOES contain the query so hits=1, not 0.
   writeFileSync(join(docsRoot, "small.md"), "# small\nThe Wall here\n", "utf8");
 
-  const tool = tools().get("docs:search")!;
+  const tool = tools().get("docs-search")!;
   const res = await tool.handler({ query: "The Wall" });
   const text = (res.content[0] as { text: string }).text;
   const payload = JSON.parse(text);
@@ -894,7 +894,7 @@ test("docs:search marks truncated=true when oversize files are skipped (no false
   assert.equal(payload.truncated, true, `expected truncated:true when oversize files skipped, payload: ${text}`);
 });
 
-test("docs:get_adr writes a structured stderr line on SandboxEscape (parity with other handlers)", async () => {
+test("docs-get_adr writes a structured stderr line on SandboxEscape (parity with other handlers)", async () => {
   // Capture stderr writes to verify formatSandboxStderrLine fires from the
   // get_adr inline catch — earlier this path was the only sandbox-error
   // surface without operator-debug output, even though it's the most
@@ -917,7 +917,7 @@ test("docs:get_adr writes a structured stderr line on SandboxEscape (parity with
 `,
       "utf8",
     );
-    const tool = tools().get("docs:get_adr")!;
+    const tool = tools().get("docs-get_adr")!;
     await tool.handler({ number: 99 });
   } finally {
     (process.stderr as unknown as { write: typeof originalWrite }).write = originalWrite;
@@ -926,7 +926,7 @@ test("docs:get_adr writes a structured stderr line on SandboxEscape (parity with
   assert.ok(sandboxLines.length >= 1, `expected SandboxEscape stderr line, captured: ${JSON.stringify(captured)}`);
 });
 
-test("docs:search skips symlinks that escape the ecosystem (no content served)", async (t) => {
+test("docs-search skips symlinks that escape the ecosystem (no content served)", async (t) => {
   const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-outside-search-")));
   try {
     const secret = join(outsideBase, "secret.md");
@@ -938,7 +938,7 @@ test("docs:search skips symlinks that escape the ecosystem (no content served)",
       t.skip("symlinkSync not permitted on this platform");
       return;
     }
-    const tool = tools().get("docs:search")!;
+    const tool = tools().get("docs-search")!;
     const res = await tool.handler({ query: "super-secret" });
     const payload = JSON.parse((res.content[0] as { text: string }).text);
     assert.equal(payload.hitCount, 0);
@@ -948,7 +948,7 @@ test("docs:search skips symlinks that escape the ecosystem (no content served)",
   }
 });
 
-test("docs:get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_docs — no misattributed content)", async (t) => {
+test("docs-get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_docs — no misattributed content)", async (t) => {
   // Reviewer's re-review finding #1: list_repo_docs explicitly rejects
   // symlinked repo dirs, but get_repo_doc previously served their content
   // under the symlinked name. Closed in 8511bb0 via the shared
@@ -964,7 +964,7 @@ test("docs:get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_do
     t.skip("symlinkSync not permitted on this platform");
     return;
   }
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-alias", path: "subsystems/persistence.md" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -974,7 +974,7 @@ test("docs:get_repo_doc rejects a symlinked <repo> dir (parity with list_repo_do
   assert.ok(!text.includes("real-target content"));
 });
 
-test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_repo_docs)", async (t) => {
+test("docs-get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_repo_docs)", async (t) => {
   // Same scenario as above but the symlink is at the docs/ level
   // (e.g. exeris-cousin exists as a real dir but its docs/ points to a
   // sibling's docs tree). resolveRepoDocsRoot rejects this too.
@@ -988,7 +988,7 @@ test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_re
     t.skip("symlinkSync not permitted on this platform");
     return;
   }
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-cousin", path: "guide.md" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -1005,7 +1005,7 @@ test("docs:get_repo_doc rejects a symlinked <repo>/docs dir (parity with list_re
 // MUST be rejected by both per-repo handlers with a hint pointing at the
 // future exeris-ai-bridge-enterprise repo (per ADR-020 / ADR-018 split).
 
-test("docs:list_repos silently excludes enterprise-tier siblings (ADR-025 fully-public scope)", async () => {
+test("docs-list_repos silently excludes enterprise-tier siblings (ADR-025 fully-public scope)", async () => {
   // Plant docs/ in each restricted shape so discovery cannot find them by
   // accident of "no docs/ subdirectory". They must be excluded by NAME.
   seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "# private" });
@@ -1015,7 +1015,7 @@ test("docs:list_repos silently excludes enterprise-tier siblings (ADR-025 fully-
   // Sanity baseline: a plain public sibling that SHOULD appear.
   seedSiblingRepoFixture("exeris-sdk", { "guide.md": "# SDK" });
 
-  const tool = tools().get("docs:list_repos")!;
+  const tool = tools().get("docs-list_repos")!;
   const res = await tool.handler({});
   assert.equal(res.isError, undefined);
   const payload = JSON.parse((res.content[0] as { text: string }).text);
@@ -1033,9 +1033,9 @@ test("docs:list_repos silently excludes enterprise-tier siblings (ADR-025 fully-
   }
 });
 
-test("docs:get_repo_doc rejects *-enterprise siblings with ADR-025 hint (no content served)", async () => {
+test("docs-get_repo_doc rejects *-enterprise siblings with ADR-025 hint (no content served)", async () => {
   seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "private contents marker-A" });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-kernel-enterprise", path: "HTTP3-TEST-PLAN.md" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -1046,9 +1046,9 @@ test("docs:get_repo_doc rejects *-enterprise siblings with ADR-025 hint (no cont
   assert.ok(!text.includes("marker-A"));
 });
 
-test("docs:get_repo_doc rejects enterprise-* siblings (interior segment match)", async () => {
+test("docs-get_repo_doc rejects enterprise-* siblings (interior segment match)", async () => {
   seedSiblingRepoFixture("exeris-enterprise-observability", { "decoder.md": "private contents marker-B" });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-enterprise-observability", path: "decoder.md" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -1056,9 +1056,9 @@ test("docs:get_repo_doc rejects enterprise-* siblings (interior segment match)",
   assert.ok(!text.includes("marker-B"));
 });
 
-test("docs:get_repo_doc rejects exeris-business (private decision registry)", async () => {
+test("docs-get_repo_doc rejects exeris-business (private decision registry)", async () => {
   seedSiblingRepoFixture("exeris-business", { "decisions.md": "private contents marker-C" });
-  const tool = tools().get("docs:get_repo_doc")!;
+  const tool = tools().get("docs-get_repo_doc")!;
   const res = await tool.handler({ repo: "exeris-business", path: "decisions.md" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;
@@ -1066,9 +1066,9 @@ test("docs:get_repo_doc rejects exeris-business (private decision registry)", as
   assert.ok(!text.includes("marker-C"));
 });
 
-test("docs:list_repo_docs rejects enterprise-tier siblings parity with get_repo_doc", async () => {
+test("docs-list_repo_docs rejects enterprise-tier siblings parity with get_repo_doc", async () => {
   seedSiblingRepoFixture("exeris-kernel-enterprise", { "HTTP3-TEST-PLAN.md": "private contents marker-D" });
-  const tool = tools().get("docs:list_repo_docs")!;
+  const tool = tools().get("docs-list_repo_docs")!;
   const res = await tool.handler({ repo: "exeris-kernel-enterprise" });
   assert.equal(res.isError, true);
   const text = (res.content[0] as { text: string }).text;

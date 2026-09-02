@@ -53,7 +53,7 @@ export function registerBridgeTools(
 function versionTool(config: BridgeConfig, bundle: BundleState): RegisteredTool {
   return {
     definition: {
-      name: "bridge:version",
+      name: "bridge-version",
       description:
         "Identify this MCP server: package name and version, the Node runtime it " +
         "is running on, which persona mode it resolved to, and what bundled " +
@@ -103,7 +103,7 @@ function describeBundle(bundle: BundleState): unknown {
 function healthTool(config: BridgeConfig, transports: BridgeTransports): RegisteredTool {
   return {
     definition: {
-      name: "bridge:health",
+      name: "bridge-health",
       description:
         "Report which tool families can serve requests and why the others cannot. " +
         "Each family carries its state and, when unavailable, the reason and the " +

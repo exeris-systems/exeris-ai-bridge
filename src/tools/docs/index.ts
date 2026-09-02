@@ -97,7 +97,7 @@ export function registerDocsTools(config: BridgeConfig): RegisteredTool[] {
 function listAdrsTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:list_adrs",
+      name: "docs-list_adrs",
       description:
         "List all ADRs from the Exeris ecosystem registry. Each entry " +
         "carries number, title, owning repo, scope, visibility, status, " +
@@ -149,7 +149,7 @@ function listAdrsTool(handle: DocsFamily): RegisteredTool {
 function getAdrTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:get_adr",
+      name: "docs-get_adr",
       description:
         "Fetch the full markdown body of a specific ADR by number. " +
         "Resolves the link from the registry against the ecosystem root, " +
@@ -250,7 +250,7 @@ function getAdrTool(handle: DocsFamily): RegisteredTool {
 function getTemplateTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:get_template",
+      name: "docs-get_template",
       description:
         "Fetch one of the canonical decision-doc templates from " +
         "exeris-docs/templates/. Three kinds: ADR (decision made), " +
@@ -286,7 +286,7 @@ function getTemplateTool(handle: DocsFamily): RegisteredTool {
 function getHlaTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:get_hla",
+      name: "docs-get_hla",
       description:
         "Fetch the High-Level Architecture document (high-level-architecture.md) " +
         "from exeris-docs. Canonical narrative of the three-tier model.",
@@ -302,7 +302,7 @@ function getHlaTool(handle: DocsFamily): RegisteredTool {
 function getWhitepaperTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:get_whitepaper",
+      name: "docs-get_whitepaper",
       description:
         "Fetch the B2B technical whitepaper (b2b-technical-whitepaper.md) " +
         "from exeris-docs.",
@@ -329,7 +329,7 @@ interface SearchHit {
 function searchTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:search",
+      name: "docs-search",
       description:
         "Search exeris-docs for a literal substring (case-insensitive). " +
         "Returns the path, line number, and snippet of each match, capped " +
@@ -517,11 +517,11 @@ function walkDocsRoot(config: DocsRoots): string[] {
 function listReposTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:list_repos",
+      name: "docs-list_repos",
       description:
         "List sibling Exeris repos under the ecosystem root that publish a " +
         "`docs/` directory. Returned names are usable as `repo` input to " +
-        "`docs:list_repo_docs` and `docs:get_repo_doc`.",
+        "`docs-list_repo_docs` and `docs-get_repo_doc`.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: guard("docs", handle, async (config) => {
@@ -537,12 +537,12 @@ function listReposTool(handle: DocsFamily): RegisteredTool {
 function listRepoDocsTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:list_repo_docs",
+      name: "docs-list_repo_docs",
       description:
         "List markdown documents under `<repo>/docs/**` for an Exeris " +
         "sibling repo. The `adr/` subdirectory is excluded — those are " +
-        "the registry's territory and reachable via `docs:list_adrs` / " +
-        "`docs:get_adr`. Use `docs:list_repos` to discover valid repo names.",
+        "the registry's territory and reachable via `docs-list_adrs` / " +
+        "`docs-get_adr`. Use `docs-list_repos` to discover valid repo names.",
       inputSchema: {
         type: "object",
         properties: {
@@ -586,10 +586,10 @@ function listRepoDocsTool(handle: DocsFamily): RegisteredTool {
 function getRepoDocTool(handle: DocsFamily): RegisteredTool {
   return {
     definition: {
-      name: "docs:get_repo_doc",
+      name: "docs-get_repo_doc",
       description:
         "Fetch a specific markdown document from `<repo>/docs/<path>`. " +
-        "Use `docs:list_repo_docs` to discover valid paths.",
+        "Use `docs-list_repo_docs` to discover valid paths.",
       inputSchema: {
         type: "object",
         properties: {
@@ -666,7 +666,7 @@ type RepoDocsRootResult =
 /**
  * Validate that `<ecosystemRoot>/<repo>/docs` exists as a real directory
  * (not a symlink at either level) and sandbox-resolve it inside the
- * ecosystem. Shared by `docs:list_repo_docs` and `docs:get_repo_doc` so
+ * ecosystem. Shared by `docs-list_repo_docs` and `docs-get_repo_doc` so
  * discovery and fetch agree on what counts as a real repo — preventing
  * the agent from getting symlinked content under a misattributed name.
  */
@@ -725,8 +725,8 @@ function rejectRestrictedRepo(repo: string, toolSuffix: string): ReturnType<type
     case "docs-self":
       return errorResult(
         `'${REPO_NAME_DOCS_SELF}' is covered by the registry-tier tools ` +
-          `(docs:list_adrs, docs:get_adr, docs:get_hla, docs:get_whitepaper, docs:get_template). ` +
-          `Use those instead of docs:${toolSuffix}.`,
+          `(docs-list_adrs, docs-get_adr, docs-get_hla, docs-get_whitepaper, docs-get_template). ` +
+          `Use those instead of docs-${toolSuffix}.`,
       );
     case "enterprise":
       return errorResult(
@@ -754,7 +754,7 @@ function adrFastPathError(trimmedPath: string): ReturnType<typeof errorResult> |
     lower.startsWith(REPO_DOCS_ADR_SUBDIR + sep)
   ) {
     return errorResult(
-      `'${trimmedPath}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+      `'${trimmedPath}' is an ADR path; use docs-get_adr with the ADR number instead.`,
     );
   }
   return null;
@@ -771,7 +771,7 @@ function adrPostResolveGuard(repoDocsRoot: string, resolved: string): ReturnType
   const lowerRel = relFromRepoDocs.toLowerCase();
   if (lowerRel === REPO_DOCS_ADR_SUBDIR || lowerRel.startsWith(REPO_DOCS_ADR_SUBDIR + sep)) {
     return errorResult(
-      `'${relFromRepoDocs}' is an ADR path; use docs:get_adr with the ADR number instead.`,
+      `'${relFromRepoDocs}' is an ADR path; use docs-get_adr with the ADR number instead.`,
     );
   }
   return null;

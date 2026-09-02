@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.5.0 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (3 tools, bound to the `KernelDiagnostics` SPI over NDJSON — read-only and cap-blind by construction, so no `kernel:list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
 
 What 0.5.0 adds is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
 
@@ -95,9 +95,13 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 17 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 18 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
 
-When something is dark, **`bridge:health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge:version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge:health`.
+**Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
+
+**The server also ships `instructions`.** MCP delivers them in the `initialize` response, so the client can put them in front of the model *before* it calls anything — which is the only point at which a wrong architectural assumption is still cheap. They stay a route rather than a cheat sheet: what this server is, that every tool is a read, which family answers which question, the state each family resolved to in this session, and one correction that an agent trained mostly on Spring needs first — Exeris has no Spring context, no DI container, and no JPA or Hibernate anywhere in the kernel, SDK or build tooling. Framework facts themselves stay in the documents the tools serve; copied into the instructions they would be a second, unversioned copy that drifts.
+
+When something is dark, **`bridge-health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge-version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge-health`.
 
 `EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` is simply unavailable — the expected state when building an application *on* Exeris rather than working *on* Exeris.
 
@@ -105,7 +109,7 @@ When something is dark, **`bridge:health` is the tool to call**. It reports the 
 
 Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:
 
-| rung | how | `source` in `bridge:health` |
+| rung | how | `source` in `bridge-health` |
 |---|---|---|
 | 1 | `EXERIS_LSP_COMMAND` / `EXERIS_KERNEL_COMMAND` — a full command line | `env-command` |
 | 2 | `EXERIS_LSP_JAR` / `EXERIS_KERNEL_JAR` — a jar you already have | `env-jar` |
@@ -128,11 +132,11 @@ Rung 3 finds the local repository at `EXERIS_MAVEN_REPO`, then `<localRepository
 
 The published package carries a small read-only corpus so an application developer with **no ecosystem checkout and no network** still gets grounded answers. It is generated at pack time by `scripts/vendor-reference-data.mjs`, and `data/` is deliberately **not committed** — which means a bridge run from a source checkout has no bundle, and reports that plainly rather than pretending.
 
-`bridge:version` reports which state you are in:
+`bridge-version` reports which state you are in:
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.5.0", "entryCount": 0, "sourceArtifacts": [] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.5.1", "entryCount": 0, "sourceArtifacts": [] }
 ```
 
 At 0.5.0 the bundle ships with **zero entries** on purpose: this milestone builds the mechanism — manifest, loader, integrity check, packaging — and the `sdk:*` family fills it with the annotation catalog and AST schema at 0.6.0. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
@@ -145,9 +149,9 @@ Once wired in, the bridge answers ecosystem-introspection questions directly fro
 
 | Agent intent | Tool call | Returns |
 |:---|:---|:---|
-| Enumerate the registry | `docs:list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
-| Read the decision in full | `docs:get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
-| Find every mention | `docs:search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
+| Enumerate the registry | `docs-list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
+| Read the decision in full | `docs-get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
+| Find every mention | `docs-search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
 
 You can drive the same handshake without an agent — pipe newline-delimited JSON-RPC straight at the stdio server:
 
@@ -156,17 +160,18 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.0.0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"docs:get_adr","arguments":{"number":24}}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"docs-get_adr","arguments":{"number":24}}}' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 17 tool definitions (9 `docs:*`, 3 `lsp:*`, 3 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs:get_adr` returns the ADR-024 body.
+`tools/list` advertises all 18 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
+  instructions.ts            the `initialize` instructions handed to the model at connect time
   config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
   config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
@@ -182,13 +187,15 @@ src/
       index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
                              HLA, whitepaper, search, per-repo docs surface)
       adr-index.ts           parser for exeris-docs/adr-index.md
-    lsp/index.ts             lsp:list_domains, lsp:describe_domain, lsp:list_actions — LSP proxy
+    lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions — LSP proxy
                              (Phase 3b: bound to the exeris/* slice, shape-validated)
     lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription / ActionSummary)
-    kernel/index.ts          kernel:list_providers, kernel:get_bootstrap_dag, kernel:describe_subsystem
-                             — KernelDiagnostics proxy over NDJSON (cap-blind — no list_capabilities)
-    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/Subsystem)
-    bridge/index.ts          bridge:version, bridge:health — the bridge's own diagnostic
+    kernel/index.ts          kernel-list_providers, kernel-get_bootstrap_dag, kernel-describe_subsystem,
+                             kernel-get_jvm_ergonomics — KernelDiagnostics proxy over NDJSON, one tool
+                             per SPI method (cap-blind — no list_capabilities)
+    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
+                             Subsystem/RuntimeErgonomics)
+    bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
                              surface (never gated, never spawns)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,
                              per-entry SHA-256 verification, sandboxed to data/

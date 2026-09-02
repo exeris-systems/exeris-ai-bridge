@@ -31,7 +31,7 @@ export type BridgeMode = "contributor" | "app";
 
 /**
  * Which rung of the launch ladder produced a child's spec. Ordered by
- * precedence, first hit wins, and `bridge:health` reports which one fired:
+ * precedence, first hit wins, and `bridge-health` reports which one fired:
  *
  *   env-command  EXERIS_*_COMMAND — a full command line; the escape hatch
  *   env-jar      EXERIS_*_JAR     — a jar this machine already has
@@ -50,7 +50,7 @@ export type ToolFamily = "docs" | "lsp" | "kernel";
  * A family that cannot serve requests in this environment.
  *
  * Both strings are agent-facing — every tool in a dark family returns them,
- * and `bridge:health` lists them — so NEITHER may embed an absolute path.
+ * and `bridge-health` lists them — so NEITHER may embed an absolute path.
  * Operator paths go to stderr, never onto the wire. This is the same
  * discipline SandboxEscapeError follows by keeping paths out of `.message`.
  */
