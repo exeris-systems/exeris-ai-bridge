@@ -194,7 +194,7 @@ function assertZeroCheckout(project, home) {
   );
 }
 
-function assertBootsDark({ initialize, tools, version, health, calls, capless, stderr }) {
+function assertBootsDark({ initialize, tools, version, health, calls, capless, unbuilt, stderr }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
   assert.equal(
     initialize.serverInfo.version,
@@ -260,6 +260,11 @@ function assertBootsDark({ initialize, tools, version, health, calls, capless, s
   assert.equal(caplessPayload.present, false, "a project with no cap-manifest.json must answer present:false");
   assert.deepEqual(caplessPayload.modules, []);
 
+  assert.ok(!unbuilt.isError, `build-list_domains errored on an unbuilt project: ${unbuilt.content[0].text}`);
+  const unbuiltPayload = JSON.parse(unbuilt.content[0].text);
+  assert.equal(unbuiltPayload.present, false, "an unbuilt project must answer present:false");
+  assert.match(unbuiltPayload.remedy, /mvn compile/);
+
   assert.match(
     stderr,
     /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable build=available caps=available$/m,
@@ -286,7 +291,7 @@ function assertSurfaceInvariant(dark, lit) {
     ["bridge-health", "bridge-version"],
     "bridge:* is frozen at two tools by the ADR-025 2026-08-26 addendum",
   );
-  for (const family of ["docs", "lsp", "kernel", "caps"]) {
+  for (const family of ["docs", "lsp", "kernel", "build", "caps"]) {
     assert.ok(names.some((n) => n.startsWith(`${family}-`)), `${family}:* vanished from tools/list`);
   }
 }
@@ -352,8 +357,17 @@ async function interrogate(project, home, extraEnv) {
       arguments: {},
     });
 
+    // The scratch project has a pom and one @ExerisDomain source, and is never
+    // compiled here — so target/classes/exeris-metadata does not exist. That is
+    // the "you have not built this yet" branch, and it must read as state with
+    // a next step rather than as a broken family.
+    const unbuilt = await client.request("tools/call", {
+      name: "build-list_domains",
+      arguments: {},
+    });
+
     assert.equal(child.exitCode, null, "the server exited during the session");
-    return { initialize, tools, version, health, calls, capless, stderr: client.stderr };
+    return { initialize, tools, version, health, calls, capless, unbuilt, stderr: client.stderr };
   } finally {
     client.dispose();
   }
