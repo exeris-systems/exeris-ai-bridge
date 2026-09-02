@@ -44,7 +44,7 @@ Each tool family is documented in its own folder. Keep the scope tight; if a too
 |:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
 | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
-| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail — read-only (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
+| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail, resolved JVM ergonomics — read-only, one tool per `KernelDiagnostics` method (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
 | `sdk:*`    | *(planned 0.6.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
 | `build:*`  | *(planned 0.7.0)* The **user's own project**: emitted `DomainMetadata`, artefact preview, L1/L2 detach state, decoded processor diagnostics — read-only | User's project filesystem, pinned project root |
 | `caps:*`   | *(planned 0.7.0)* `cap-manifest.json` + `CompositionStamp` — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | Build-time artefacts from `exeris-tooling` |

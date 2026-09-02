@@ -60,6 +60,37 @@ export interface SubsystemSnapshot {
 }
 
 /**
+ * What the JVM actually resolved at startup, as opposed to what the flags asked
+ * for: heap sizing, the GC that won selection, and the container limits the JVM
+ * saw (or did not).
+ *
+ * Every Optional field on the source record serialises as JSON `null` rather
+ * than an absent key, which the CLI documents explicitly — so `null` here means
+ * "the kernel could not determine this", never "the bridge dropped it".
+ *
+ * `getJvmErgonomics` is a DEFAULT method on the SPI: a kernel that does not
+ * implement it answers `RuntimeErgonomicsSnapshot.unknown()`, which is a valid
+ * response carrying `gcName: "unknown"` and `-1` byte counts rather than an
+ * error. The tool re-emits that as-is and flags it; see `index.ts`.
+ */
+export interface RuntimeErgonomicsSnapshot {
+  schemaVersion: string;
+  capturedAt: string;
+  gcName: string;
+  heapMaxBytes: number;
+  heapCommittedBytes: number;
+  availableProcessors: number;
+  cpuQuotaMicros: number | null;
+  cpuPeriodMicros: number | null;
+  memoryMaxBytes: number | null;
+  cpusetEffective: string | null;
+  largePagesEnabled: boolean | null;
+  transparentHugePages: boolean | null;
+  classDataSharingActive: boolean | null;
+  aotCacheActive: boolean | null;
+}
+
+/**
  * Thrown when a diagnostics response does not match the contract above. The
  * caller maps this onto an `isError` tool result rather than letting a
  * malformed payload crash the handler.
@@ -120,6 +151,20 @@ function asNullableString(value: unknown, path: string): string | null {
     return null;
   }
   return asString(value, path);
+}
+
+function asNullableNumber(value: unknown, path: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return asNumber(value, path);
+}
+
+function asNullableBoolean(value: unknown, path: string): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return asBoolean(value, path);
 }
 
 function asNumber(value: unknown, path: string): number {
@@ -215,5 +260,27 @@ function parseSubsystemDescriptor(value: unknown, path: string): SubsystemDescri
     dependsOn: asStringArray(o.dependsOn, `${path}.dependsOn`),
     running: asBoolean(o.running, `${path}.running`),
     optional: asBoolean(o.optional, `${path}.optional`),
+  };
+}
+
+/** Validate a `getJvmErgonomics` response into a canonical RuntimeErgonomicsSnapshot. */
+export function parseRuntimeErgonomicsSnapshot(result: unknown): RuntimeErgonomicsSnapshot {
+  const o = asObject(result, "runtimeErgonomicsSnapshot");
+  const at = (field: string): string => `runtimeErgonomicsSnapshot.${field}`;
+  return {
+    schemaVersion: parseSchemaVersion(o.schemaVersion, at("schemaVersion")),
+    capturedAt: asString(o.capturedAt, at("capturedAt")),
+    gcName: asString(o.gcName, at("gcName")),
+    heapMaxBytes: asNumber(o.heapMaxBytes, at("heapMaxBytes")),
+    heapCommittedBytes: asNumber(o.heapCommittedBytes, at("heapCommittedBytes")),
+    availableProcessors: asNumber(o.availableProcessors, at("availableProcessors")),
+    cpuQuotaMicros: asNullableNumber(o.cpuQuotaMicros, at("cpuQuotaMicros")),
+    cpuPeriodMicros: asNullableNumber(o.cpuPeriodMicros, at("cpuPeriodMicros")),
+    memoryMaxBytes: asNullableNumber(o.memoryMaxBytes, at("memoryMaxBytes")),
+    cpusetEffective: asNullableString(o.cpusetEffective, at("cpusetEffective")),
+    largePagesEnabled: asNullableBoolean(o.largePagesEnabled, at("largePagesEnabled")),
+    transparentHugePages: asNullableBoolean(o.transparentHugePages, at("transparentHugePages")),
+    classDataSharingActive: asNullableBoolean(o.classDataSharingActive, at("classDataSharingActive")),
+    aotCacheActive: asNullableBoolean(o.aotCacheActive, at("aotCacheActive")),
   };
 }

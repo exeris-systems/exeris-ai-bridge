@@ -50,13 +50,14 @@ const PROVIDERS = {
   ],
 };
 
-test("registerKernelTools registers all three kernel-* tools", () => {
+test("registerKernelTools registers one tool per KernelDiagnostics method", () => {
   const names = registerKernelTools(CONFIG, stubAdapter(async () => ({})))
     .map((t) => t.definition.name)
     .sort();
   assert.deepEqual(names, [
     "kernel-describe_subsystem",
     "kernel-get_bootstrap_dag",
+    "kernel-get_jvm_ergonomics",
     "kernel-list_providers",
   ]);
 });
@@ -159,4 +160,57 @@ test("an injected adapter overrides config-time unavailability", async () => {
   );
   const res = await tools.get("kernel-list_providers")!.handler({});
   assert.equal(res.isError, undefined);
+});
+
+
+const ERGONOMICS = {
+  schemaVersion: "1.0",
+  capturedAt: "2026-09-02T09:15:00Z",
+  gcName: "G1 Young Generation",
+  heapMaxBytes: 8589934592,
+  heapCommittedBytes: 536870912,
+  availableProcessors: 8,
+  cpuQuotaMicros: 200000,
+  cpuPeriodMicros: 100000,
+  memoryMaxBytes: 2147483648,
+  cpusetEffective: "0-3",
+  largePagesEnabled: false,
+  transparentHugePages: true,
+  classDataSharingActive: true,
+  aotCacheActive: false,
+};
+
+test("kernel-get_jvm_ergonomics calls getJvmErgonomics and returns the validated snapshot", async () => {
+  const calls: string[] = [];
+  const tools = toolsWith(async (method) => {
+    calls.push(method);
+    return ERGONOMICS;
+  });
+  const res = await tools.get("kernel-get_jvm_ergonomics")!.handler({});
+  assert.ok(!res.isError, text(res));
+  assert.deepEqual(JSON.parse(text(res)), ERGONOMICS);
+  assert.deepEqual(calls, ["getJvmErgonomics"]);
+});
+
+// A kernel older than the method answers KernelRequestError rather than a
+// snapshot. That is a normal outcome to relay, not a bridge fault — the SPI
+// default only covers kernels that HAVE the method and no implementation.
+test("kernel-get_jvm_ergonomics reports a kernel that does not know the method", async () => {
+  const tools = toolsWith(async () => {
+    throw new KernelRequestError("unknown method: getJvmErgonomics");
+  });
+  const res = await tools.get("kernel-get_jvm_ergonomics")!.handler({});
+  assert.equal(res.isError, true);
+  assert.match(text(res), /was rejected: unknown method/);
+});
+
+test("kernel-get_jvm_ergonomics is dark with the rest of the family", async () => {
+  const tools = new Map(
+    registerKernelTools(DARK_CONFIG).map((t) => [t.definition.name, t]),
+  );
+  const res = await tools.get("kernel-get_jvm_ergonomics")!.handler({});
+  assert.equal(res.isError, true);
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.error, "family_unavailable");
+  assert.equal(payload.family, "kernel");
 });

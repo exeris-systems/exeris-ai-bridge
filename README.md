@@ -95,9 +95,11 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 17 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 18 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
 
-**Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, `bridge-health` still reports per-family state under its family key, and the count is unchanged.
+**Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
+
+**The server also ships `instructions`.** MCP delivers them in the `initialize` response, so the client can put them in front of the model *before* it calls anything — which is the only point at which a wrong architectural assumption is still cheap. They stay a route rather than a cheat sheet: what this server is, that every tool is a read, which family answers which question, the state each family resolved to in this session, and one correction that an agent trained mostly on Spring needs first — Exeris has no Spring context, no DI container, and no JPA or Hibernate anywhere in the kernel, SDK or build tooling. Framework facts themselves stay in the documents the tools serve; copied into the instructions they would be a second, unversioned copy that drifts.
 
 When something is dark, **`bridge-health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge-version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge-health`.
 
@@ -169,6 +171,7 @@ printf '%s\n' \
 ```
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
+  instructions.ts            the `initialize` instructions handed to the model at connect time
   config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
   config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
@@ -187,9 +190,11 @@ src/
     lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions — LSP proxy
                              (Phase 3b: bound to the exeris/* slice, shape-validated)
     lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription / ActionSummary)
-    kernel/index.ts          kernel-list_providers, kernel-get_bootstrap_dag, kernel-describe_subsystem
-                             — KernelDiagnostics proxy over NDJSON (cap-blind — no list_capabilities)
-    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/Subsystem)
+    kernel/index.ts          kernel-list_providers, kernel-get_bootstrap_dag, kernel-describe_subsystem,
+                             kernel-get_jvm_ergonomics — KernelDiagnostics proxy over NDJSON, one tool
+                             per SPI method (cap-blind — no list_capabilities)
+    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
+                             Subsystem/RuntimeErgonomics)
     bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
                              surface (never gated, never spawns)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,

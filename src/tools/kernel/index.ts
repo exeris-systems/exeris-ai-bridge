@@ -10,6 +10,7 @@ import {
   KernelShapeError,
   parseBootstrapDagSnapshot,
   parseProvidersSnapshot,
+  parseRuntimeErgonomicsSnapshot,
   parseSubsystemSnapshot,
 } from "./shapes.js";
 
@@ -33,6 +34,7 @@ import {
 const METHOD_LIST_PROVIDERS = "listProviders";
 const METHOD_BOOTSTRAP_DAG = "getBootstrapDag";
 const METHOD_DESCRIBE_SUBSYSTEM = "describeSubsystem";
+const METHOD_JVM_ERGONOMICS = "getJvmErgonomics";
 
 /**
  * The kernel:* family handle: an adapter bound to a launch spec, or the
@@ -50,7 +52,12 @@ export function registerKernelTools(
   // An injected adapter IS a transport, so it overrides config-time
   // unavailability: the test seam must not depend on the environment.
   const handle = resolveKernelFamily(config, adapterOverride);
-  return [listProvidersTool(handle), getBootstrapDagTool(handle), describeSubsystemTool(handle)];
+  return [
+    listProvidersTool(handle),
+    getBootstrapDagTool(handle),
+    describeSubsystemTool(handle),
+    getJvmErgonomicsTool(handle),
+  ];
 }
 
 function resolveKernelFamily(config: BridgeConfig, adapterOverride?: KernelAdapter): KernelFamily {
@@ -87,6 +94,31 @@ function getBootstrapDagTool(handle: KernelFamily): RegisteredTool {
     },
     handler: guard("kernel", handle, async ({ adapter }) =>
       callKernel(adapter, METHOD_BOOTSTRAP_DAG, undefined, parseBootstrapDagSnapshot),
+    ),
+  };
+}
+
+/**
+ * The fourth and last method on the SPI. `listProviders` / `getBootstrapDag` /
+ * `describeSubsystem` answer "what is wired"; this one answers "what did the
+ * JVM actually decide", which is the question behind most "it is slow / it got
+ * OOM-killed in the container" reports and the one an agent otherwise guesses
+ * at from flags that may not have won.
+ *
+ * Still read-only, still cap-blind, and still nothing but a transcription of a
+ * read-only SPI record — it adds no new capability to the family, only the
+ * method the bridge had been leaving unexposed.
+ */
+function getJvmErgonomicsTool(handle: KernelFamily): RegisteredTool {
+  return {
+    definition: {
+      name: "kernel-get_jvm_ergonomics",
+      description:
+        "What the JVM running the kernel actually resolved at startup: selected GC, max/committed heap, visible processors, and the container limits it detected (cgroup CPU quota/period, memory cap, cpuset) plus large-page, CDS and AOT-cache state. Null fields mean the kernel could not determine that value. A kernel that does not implement this answers a snapshot with gcName 'unknown' and -1 byte counts.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    handler: guard("kernel", handle, async ({ adapter }) =>
+      callKernel(adapter, METHOD_JVM_ERGONOMICS, undefined, parseRuntimeErgonomicsSnapshot),
     ),
   };
 }
