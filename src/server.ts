@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   const kernel = config.kernel.state === "available" ? new KernelAdapter(config.kernel) : undefined;
 
   // Read once at boot, like the config: the bundle ships inside the package and
-  // cannot change under a running server. 0.6.0's sdk:* family reads the same
+  // cannot change under a running server. 0.7.0's sdk:* family reads the same
   // instance rather than loading its own.
   const bundle = loadBundle();
 
