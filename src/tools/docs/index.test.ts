@@ -23,6 +23,7 @@ function contributorConfig(docsRoot: string, ecosystemRoot: string): BridgeConfi
     mode: "contributor",
     modeSource: "probe",
     ecosystemRoot,
+    project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
     docs: { state: "available", docsRoot, ecosystemRoot },
     lsp: DARK,
     kernel: DARK,

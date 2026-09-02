@@ -17,6 +17,7 @@ const stubConfig: BridgeConfig = {
   docs: { state: "available", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "true", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
   kernel: { state: "available", command: "true", args: [], source: "source-tree" },
+  project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
 };
 
 /** What a bare application project resolves to: no roots, no launch specs. */
@@ -27,6 +28,7 @@ const zeroCheckoutConfig: BridgeConfig = {
   docs: { state: "unavailable", reason: "docs reason", remedy: "docs remedy" },
   lsp: { state: "unavailable", reason: "lsp reason", remedy: "lsp remedy" },
   kernel: { state: "unavailable", reason: "kernel reason", remedy: "kernel remedy" },
+  project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
 };
 
 function registerAll(config: BridgeConfig) {

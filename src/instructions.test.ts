@@ -15,6 +15,7 @@ const LIT: BridgeConfig = {
   docs: { state: "available", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
   kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
+  project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
 };
 
 const DARK: BridgeConfig = {
@@ -24,6 +25,7 @@ const DARK: BridgeConfig = {
   docs: { state: "unavailable", reason: "no exeris-docs (test)", remedy: "set EXERIS_DOCS_ROOT (test)" },
   lsp: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_LSP_COMMAND (test)" },
   kernel: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_KERNEL_COMMAND (test)" },
+  project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
 };
 
 test("the instructions report the resolved state of every family", () => {

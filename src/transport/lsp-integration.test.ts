@@ -26,6 +26,7 @@ const DARK_CONFIG: BridgeConfig = {
   docs: NOT_UNDER_TEST,
   lsp: NOT_UNDER_TEST,
   kernel: NOT_UNDER_TEST,
+  project: NOT_UNDER_TEST,
 };
 
 // End-to-end integration test for the lsp:* family against a REAL

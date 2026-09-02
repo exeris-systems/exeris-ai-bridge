@@ -44,7 +44,7 @@ export type BridgeMode = "contributor" | "app";
 export type LaunchSource = "env-command" | "env-jar" | "m2" | "source-tree";
 
 /** The tool families whose availability depends on the environment. */
-export type ToolFamily = "docs" | "lsp" | "kernel";
+export type ToolFamily = "docs" | "lsp" | "kernel" | "build" | "caps";
 
 /**
  * A family that cannot serve requests in this environment.
@@ -60,6 +60,24 @@ export interface Unavailable {
   readonly reason: string;
   /** The single most useful thing the operator can do about it. */
   readonly remedy: string;
+}
+
+/**
+ * The pinned root every `build:*` and `caps:*` read is anchored on: the user's
+ * OWN project, not an ecosystem checkout. One resolution serves both families,
+ * because both answer questions about the same tree from different artefacts —
+ * `caps:*` from `src/main/generated/java/cap-manifest.json`, `build:*` from
+ * `target/classes/exeris-metadata/`.
+ *
+ * `source` records how the root was found, which is the difference between "you
+ * pointed me here" and "I guessed from where I was started" — an agent reading
+ * an unexpected answer needs to be able to tell those apart.
+ */
+export interface ProjectConfig {
+  readonly state: "available";
+  readonly projectRoot: string;
+  /** "env" — EXERIS_PROJECT_ROOT; "cwd" — the nearest pom.xml at or above cwd. */
+  readonly source: "env" | "cwd";
 }
 
 /** The two roots every docs:* read is anchored on. */
@@ -124,6 +142,13 @@ export interface BridgeConfig {
   readonly docs: DocsConfig | Unavailable;
   readonly lsp: LspConfig | Unavailable;
   readonly kernel: KernelConfig | Unavailable;
+  /**
+   * The user's own project. `build:*` and `caps:*` are both gated on this one
+   * resolution and therefore always share a state — kept as a single field
+   * rather than two identical copies, with the two family names applied where
+   * the vocabulary is agent-facing (bridge-health, the dark-family result).
+   */
+  readonly project: ProjectConfig | Unavailable;
 }
 
 const DEFAULT_DOCS_DIRNAME = "exeris-docs";
@@ -164,7 +189,89 @@ export function loadConfig(
     docs,
     lsp: resolveLspConfig(env, launch),
     kernel: resolveChildLaunch("kernel", launch),
+    project: resolveProjectConfig(env),
   };
+}
+
+/**
+ * Resolve the user's own project root for `build:*` / `caps:*`.
+ *
+ * Two rungs, and the split matters:
+ *
+ *   env  EXERIS_PROJECT_ROOT — trusted as given. It must be a real directory,
+ *        but it is NOT required to contain a pom.xml: an operator naming a root
+ *        explicitly has said what they mean, and a build layout this repo has
+ *        not anticipated is their business, not ours to veto.
+ *   cwd  the nearest pom.xml at or above the working directory. An MCP server
+ *        is spawned by the agent inside the developer's project, so cwd is the
+ *        honest default; walking up is what makes it work from a module
+ *        subdirectory and, in a multi-module build, lands on the module whose
+ *        `target/` actually holds the artefacts.
+ *
+ * Never throws — like every other family, an unresolvable root goes dark with a
+ * reason and a remedy rather than failing the boot.
+ */
+function resolveProjectConfig(env: NodeJS.ProcessEnv): ProjectConfig | Unavailable {
+  const explicit = env.EXERIS_PROJECT_ROOT?.trim();
+  if (explicit !== undefined && explicit.length > 0) {
+    const real = resolveRealDir(explicit);
+    if (real !== null) {
+      return { state: "available", projectRoot: real, source: "env" };
+    }
+    warn("EXERIS_PROJECT_ROOT is set but does not resolve to a directory: " + explicit);
+    return {
+      state: "unavailable",
+      reason: "EXERIS_PROJECT_ROOT is set but does not resolve to a directory.",
+      remedy: "Point EXERIS_PROJECT_ROOT at the root of the project you are working on, or unset it to use the nearest pom.xml at or above the working directory.",
+    };
+  }
+
+  const probed = findProjectRoot(cwdOf(env));
+  if (probed !== null) {
+    return { state: "available", projectRoot: probed, source: "cwd" };
+  }
+  return {
+    state: "unavailable",
+    reason:
+      "No Maven project was found at or above the working directory, so there is no project to report on.",
+    remedy:
+      "Start the bridge from inside your project, or set EXERIS_PROJECT_ROOT to its root.",
+  };
+}
+
+/** Injectable for tests; process.cwd() otherwise. */
+function cwdOf(env: NodeJS.ProcessEnv): string {
+  const injected = env.EXERIS_TEST_CWD?.trim();
+  return injected !== undefined && injected.length > 0 ? injected : process.cwd();
+}
+
+/**
+ * Walk up from `start` looking for a pom.xml.
+ *
+ * Bounded rather than "until the root": an unbounded climb on a machine where
+ * cwd is deep and no pom exists would stat its way to `/`, and a pom.xml found
+ * twelve levels above the working directory is not the project the developer
+ * means anyway. Stops at the filesystem root regardless.
+ */
+function findProjectRoot(start: string): string | null {
+  let dir = resolveRealDir(start);
+  for (let depth = 0; dir !== null && depth < 12; depth += 1) {
+    if (isRealFile(join(dir, "pom.xml"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = resolveRealDir(parent);
+  }
+  return null;
+}
+
+function isRealFile(path: string): boolean {
+  try {
+    return statSync(realpathSync(path)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** Everything the launch ladder needs, resolved before the children are. */

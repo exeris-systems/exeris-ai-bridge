@@ -36,6 +36,7 @@ const LIVE: BridgeConfig = {
   docs: { state: "available", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: LSP_SPEC,
   kernel: KERNEL_SPEC,
+  project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
 };
 
 const ZERO_CHECKOUT: BridgeConfig = {
@@ -43,6 +44,7 @@ const ZERO_CHECKOUT: BridgeConfig = {
   modeSource: "probe",
   ecosystemRoot: null,
   docs: dark("docs"),
+  project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
   lsp: dark("lsp"),
   kernel: dark("kernel"),
 };
@@ -144,6 +146,11 @@ test("bridge-health reports every dark family with its reason and remedy", async
       { family: "docs", state: "unavailable", reason: "docs reason", remedy: "docs remedy" },
       { family: "lsp", state: "unavailable", reason: "lsp reason", remedy: "lsp remedy" },
       { family: "kernel", state: "unavailable", reason: "kernel reason", remedy: "kernel remedy" },
+      // build:* and caps:* share one project resolution, so they are dark
+      // together and carry the same reason — two rows, because the agent's
+      // unit is the family it calls, not the config field behind it.
+      { family: "build", state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
+      { family: "caps", state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
     ],
   );
 });

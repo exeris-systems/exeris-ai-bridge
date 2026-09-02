@@ -194,7 +194,7 @@ function assertZeroCheckout(project, home) {
   );
 }
 
-function assertBootsDark({ initialize, tools, version, health, calls, stderr }) {
+function assertBootsDark({ initialize, tools, version, health, calls, capless, stderr }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
   assert.equal(
     initialize.serverInfo.version,
@@ -214,8 +214,23 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
   assert.equal(version.bundle.bridgeVersion, PKG.version);
 
   assert.equal(health.mode, "app");
-  const dark = new Map(health.families.map((f) => [f.family, f]));
-  assert.deepEqual([...dark.keys()].sort((a, b) => a.localeCompare(b)), ["docs", "kernel", "lsp"]);
+  const byFamily = new Map(health.families.map((f) => [f.family, f]));
+  assert.deepEqual(
+    [...byFamily.keys()].sort((a, b) => a.localeCompare(b)),
+    ["build", "caps", "docs", "kernel", "lsp"],
+  );
+
+  // build:* and caps:* are the P2 families, and this scratch install is the P2
+  // machine: no ecosystem, no ~/.m2, one Maven project. They are the only two
+  // that SHOULD be live here, resolved by the cwd probe finding the project's
+  // own pom.xml — so this asserts the positive case that the rest of this file
+  // cannot, and would catch a probe that silently stopped working.
+  for (const family of ["build", "caps"]) {
+    const report = byFamily.get(family);
+    assert.equal(report.state, "available", `${family}:* did not resolve from the project the server was started in`);
+  }
+
+  const dark = new Map([...byFamily].filter(([f]) => f !== "build" && f !== "caps"));
   for (const [family, report] of dark) {
     assert.equal(report.state, "unavailable", `${family}:* resolved on a machine that has nothing to resolve it from`);
     assert.ok(report.reason?.length > 0, `${family}:* is dark without a reason`);
@@ -240,9 +255,14 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
     assert.ok(payload.remedy?.length > 0);
   }
 
+  assert.ok(!capless.isError, `caps-list_capabilities errored on a cap-less project: ${capless.content[0].text}`);
+  const caplessPayload = JSON.parse(capless.content[0].text);
+  assert.equal(caplessPayload.present, false, "a project with no cap-manifest.json must answer present:false");
+  assert.deepEqual(caplessPayload.modules, []);
+
   assert.match(
     stderr,
-    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable$/m,
+    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable build=available caps=available$/m,
     `the boot summary is missing or wrong; stderr was:\n${stderr}`,
   );
 }
@@ -266,7 +286,7 @@ function assertSurfaceInvariant(dark, lit) {
     ["bridge-health", "bridge-version"],
     "bridge:* is frozen at two tools by the ADR-025 2026-08-26 addendum",
   );
-  for (const family of ["docs", "lsp", "kernel"]) {
+  for (const family of ["docs", "lsp", "kernel", "caps"]) {
     assert.ok(names.some((n) => n.startsWith(`${family}-`)), `${family}:* vanished from tools/list`);
   }
 }
@@ -322,8 +342,18 @@ async function interrogate(project, home, extraEnv) {
       calls.push([name, await client.request("tools/call", { name, arguments: {} })]);
     }
 
+    // The live counterpart: caps:* is up on this machine, and the project has
+    // no cap-manifest.json, so the contract says a clean present:false answer
+    // rather than an error. That distinction is the one an agent branches on —
+    // "you compose no capabilities" versus "something broke" — and it is worth
+    // holding on the wire, through a real install, not only in a unit test.
+    const capless = await client.request("tools/call", {
+      name: "caps-list_capabilities",
+      arguments: {},
+    });
+
     assert.equal(child.exitCode, null, "the server exited during the session");
-    return { initialize, tools, version, health, calls, stderr: client.stderr };
+    return { initialize, tools, version, health, calls, capless, stderr: client.stderr };
   } finally {
     client.dispose();
   }

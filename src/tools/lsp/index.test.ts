@@ -27,6 +27,7 @@ const CONFIG: BridgeConfig = {
   docs: { state: "available", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
   lsp: LSP_SPEC,
   kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
+  project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
 };
 
 /** The same config with no launch spec for the LSP — the zero-checkout shape. */

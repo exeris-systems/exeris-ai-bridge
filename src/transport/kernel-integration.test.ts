@@ -62,6 +62,7 @@ const DARK_CONFIG: BridgeConfig = {
   modeSource: "probe",
   ecosystemRoot: null,
   docs: NOT_UNDER_TEST,
+  project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
   lsp: NOT_UNDER_TEST,
   kernel: NOT_UNDER_TEST,
 };

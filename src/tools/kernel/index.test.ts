@@ -17,12 +17,14 @@ const CONFIG: BridgeConfig = {
   docs: { state: "available", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
   kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
+  project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
 };
 
 /** The same config with no launch spec for the CLI — the zero-checkout shape. */
 const DARK_CONFIG: BridgeConfig = {
   ...CONFIG,
   kernel: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_KERNEL_COMMAND (test)" },
+  project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
 };
 
 type RequestFn = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
