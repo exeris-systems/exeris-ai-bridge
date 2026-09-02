@@ -98,7 +98,7 @@ function pack() {
 /**
  * The application project: a Maven build with one annotated source.
  *
- * No tool reads any of this at 0.5.0 — `build:*` is 0.7.0. It is here because
+ * No tool reads any of this at 0.5.0 — `build:*` is 0.6.0. It is here because
  * the claim under test is about a machine, not a directory: the assertions
  * below state that a real project on disk lights no family and does not flip
  * the mode, which is only worth stating if a real project is present.
@@ -207,7 +207,7 @@ function assertBootsDark({ initialize, tools, version, health, calls, stderr }) 
   assert.equal(version.version, PKG.version);
 
   // The bundle ships inside the tarball, so unlike every other surface it is
-  // live on a bare machine. Zero entries is the honest 0.5.0 state; 0.6.0 fills
+  // live on a bare machine. Zero entries is the honest 0.5.0 state; 0.7.0 fills
   // it, and this assertion is what will notice when it does.
   assert.equal(version.bundle.state, "available", "the bundled reference data did not survive packaging");
   assert.equal(version.bundle.entryCount, 0);

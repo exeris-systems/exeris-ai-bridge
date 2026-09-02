@@ -10,7 +10,7 @@ import { resolveInside, SandboxEscapeError } from "../fs/sandbox.js";
 // package, so an application developer with no ecosystem checkout and no
 // network still gets grounded answers.
 //
-// 0.5.0 builds the mechanism; 0.6.0's sdk:* family fills it with content (the
+// 0.5.0 builds the mechanism; 0.7.0's sdk:* family fills it with content (the
 // annotation catalog and AST schema, generated at release time from released
 // exeris-sdk artifacts). The bundle therefore ships with ZERO entries today —
 // an empty manifest is a real, honest state, and shipping placeholder content
