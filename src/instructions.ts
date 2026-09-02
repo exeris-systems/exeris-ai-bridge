@@ -21,6 +21,7 @@ export function buildInstructions(config: BridgeConfig): string {
     `docs=${config.docs.state}`,
     `lsp=${config.lsp.state}`,
     `kernel=${config.kernel.state}`,
+    `build=${config.project.state}`,
     `caps=${config.project.state}`,
   ].join(" ");
   return `exeris-ai-bridge publishes the Exeris ecosystem to you as read-only tools. Every
@@ -44,6 +45,8 @@ Tool names are \`family-tool\`:
   lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
+  build-*   what YOUR OWN project's last build emitted — the DomainMetadata AST
+            the code generators consume, per entity
   caps-*    the capability composition of YOUR OWN project, from the build-time
             cap-manifest.json — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable

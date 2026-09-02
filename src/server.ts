@@ -10,6 +10,7 @@ import { loadConfig, type BridgeConfig } from "./config/env.js";
 import { buildInstructions } from "./instructions.js";
 import { loadBundle } from "./data/bundle.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
+import { registerBuildTools } from "./tools/build/index.js";
 import { registerCapsTools } from "./tools/caps/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
     ...registerDocsTools(config),
     ...registerLspTools(config, lsp),
     ...registerKernelTools(config, kernel),
+    ...registerBuildTools(config),
     ...registerCapsTools(config),
     ...registerBridgeTools(config, { lsp, kernel }, bundle),
   ]) {
