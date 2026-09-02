@@ -17,9 +17,12 @@ import type { BridgeConfig } from "./config/env.js";
  * and that nothing tests.
  */
 export function buildInstructions(config: BridgeConfig): string {
-  const families = (["docs", "lsp", "kernel"] as const)
-    .map((family) => `${family}=${config[family].state}`)
-    .join(" ");
+  const families = [
+    `docs=${config.docs.state}`,
+    `lsp=${config.lsp.state}`,
+    `kernel=${config.kernel.state}`,
+    `caps=${config.project.state}`,
+  ].join(" ");
   return `exeris-ai-bridge publishes the Exeris ecosystem to you as read-only tools. Every
 tool is a read. Nothing here writes a file, edits a project, or changes kernel
 state — when a change is decided, you make it with your own tools.
@@ -41,6 +44,8 @@ Tool names are \`family-tool\`:
   lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
+  caps-*    the capability composition of YOUR OWN project, from the build-time
+            cap-manifest.json — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable
 
 Resolved for this session: ${families}.

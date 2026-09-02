@@ -3,6 +3,7 @@ import type {
   DocsConfig,
   KernelConfig,
   LspConfig,
+  ProjectConfig,
   ToolFamily,
   Unavailable,
 } from "../../config/env.js";
@@ -120,6 +121,13 @@ function healthTool(config: BridgeConfig, transports: BridgeTransports): Registe
           plainFamilyReport("docs", config.docs),
           childFamilyReport("lsp", config.lsp, transports.lsp?.status()),
           childFamilyReport("kernel", config.kernel, transports.kernel?.status()),
+          // Two families, one resolution: build:* and caps:* both read the
+          // user's project and are dark together. Reported separately because
+          // the agent's unit is the family — it calls caps-list_capabilities,
+          // not "the project config" — and a single merged row would leave it
+          // guessing which of its tools the state applied to.
+          plainFamilyReport("build", config.project),
+          plainFamilyReport("caps", config.project),
         ],
       }),
   };
@@ -144,10 +152,14 @@ interface TransportReport {
 }
 
 /**
- * A family with no child process behind it — docs:* reads the filesystem
- * directly. The `transport` key is absent entirely, not null.
+ * A family with no child process behind it — docs:*, build:* and caps:* all
+ * read the filesystem directly. The `transport` key is absent entirely, not
+ * null.
  */
-function plainFamilyReport(family: ToolFamily, config: DocsConfig | Unavailable): FamilyReport {
+function plainFamilyReport(
+  family: ToolFamily,
+  config: DocsConfig | ProjectConfig | Unavailable,
+): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
   return { family, state: "available" };
 }

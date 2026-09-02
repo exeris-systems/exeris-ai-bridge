@@ -506,3 +506,81 @@ test("a resolvable EXERIS_MAVEN_REPO stays silent", () => {
   const { stderr } = captureStderr(() => load({ EXERIS_BRIDGE_MODE: "app" }, missing("no-default-docs")));
   assert.equal(stderr, "");
 });
+
+// ---------------------------------------------------------------------------
+// project root — the pinned root build:* and caps:* read (ROADMAP 0.6.0)
+
+/** A directory that looks like a Maven project: the probe keys on pom.xml. */
+function project(...segments: string[]): string {
+  const dir = join(work, ...segments);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "pom.xml"), "<project/>");
+  return dir;
+}
+
+test("EXERIS_PROJECT_ROOT pins the project root and records the source", () => {
+  const root = project("app");
+  const cfg = load({ EXERIS_PROJECT_ROOT: root });
+  assert.equal(cfg.project.state, "available");
+  assert.equal((cfg.project as { source: string }).source, "env");
+});
+
+// An operator naming a root explicitly has said what they mean. Requiring a
+// pom.xml there would veto build layouts this repo has not anticipated, and
+// the explicit variable exists precisely to escape our guessing.
+test("an explicit project root need not contain a pom.xml", () => {
+  const bare = join(work, "bare");
+  mkdirSync(bare, { recursive: true });
+  const cfg = load({ EXERIS_PROJECT_ROOT: bare });
+  assert.equal(cfg.project.state, "available");
+});
+
+test("an EXERIS_PROJECT_ROOT that does not resolve is a misconfiguration, not a silent probe", () => {
+  const cfg = load({ EXERIS_PROJECT_ROOT: join(work, "not-there") });
+  assert.equal(cfg.project.state, "unavailable");
+  const dark = cfg.project as Unavailable;
+  assert.match(dark.reason, /EXERIS_PROJECT_ROOT is set but does not resolve/);
+  assert.match(dark.remedy, /EXERIS_PROJECT_ROOT/);
+});
+
+test("with no variable set, the nearest pom.xml at or above cwd wins", () => {
+  const root = project("probed");
+  const cfg = load({ EXERIS_TEST_CWD: root });
+  assert.equal(cfg.project.state, "available");
+  assert.equal((cfg.project as { source: string }).source, "cwd");
+});
+
+// Walking up is what makes the bridge usable when the agent starts it in a
+// module subdirectory — and in a multi-module build it lands on the module
+// whose own target/ holds the artefacts, not on the aggregator above it.
+test("the probe walks up from a subdirectory to the nearest pom.xml", () => {
+  const root = project("multi", "module-a");
+  const deep = join(root, "src", "main", "java");
+  mkdirSync(deep, { recursive: true });
+  const cfg = load({ EXERIS_TEST_CWD: deep });
+  assert.equal((cfg.project as { projectRoot: string }).projectRoot, root);
+});
+
+test("no pom.xml anywhere above cwd takes build:*/caps:* dark with a remedy", () => {
+  const bare = join(work, "nothing-here");
+  mkdirSync(bare, { recursive: true });
+  const cfg = load({ EXERIS_TEST_CWD: bare });
+  assert.equal(cfg.project.state, "unavailable");
+  const dark = cfg.project as Unavailable;
+  assert.match(dark.reason, /No Maven project was found/);
+  assert.match(dark.remedy, /EXERIS_PROJECT_ROOT/);
+});
+
+// The zero-checkout contract: no root of any kind may throw out of config load.
+test("an unresolvable project root never fails the boot", () => {
+  assert.doesNotThrow(() => load({ EXERIS_PROJECT_ROOT: join(work, "gone"), EXERIS_BRIDGE_MODE: "app" }));
+});
+
+// Same discipline as every other family: these strings go over the wire.
+test("neither project-dark string leaks a machine path", () => {
+  const secret = join(work, "secret-dir");
+  const cfg = load({ EXERIS_PROJECT_ROOT: secret });
+  const dark = cfg.project as Unavailable;
+  assert.equal(dark.reason.includes(secret), false);
+  assert.equal(dark.remedy.includes(secret), false);
+});

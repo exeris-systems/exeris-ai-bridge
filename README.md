@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All four tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All five tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the developer's own project), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
 
 What 0.5.0 adds is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
 
@@ -95,7 +95,7 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 18 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 20 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
 
 **Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
 
@@ -104,6 +104,8 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 When something is dark, **`bridge-health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge-version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge-health`.
 
 `EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` is simply unavailable — the expected state when building an application *on* Exeris rather than working *on* Exeris.
+
+`EXERIS_PROJECT_ROOT` points at **the developer's own project** — the tree `caps:*` (and, from the rest of 0.6.0, `build:*`) reports on. It is optional: with nothing set, the bridge walks up from its working directory to the nearest `pom.xml`, which is the right answer when an agent starts the server inside the project it is working on, and lands on the owning module rather than the aggregator in a multi-module build. Set it explicitly when the agent's working directory is somewhere else. An explicit root is taken as given and is **not** required to contain a `pom.xml` — naming it is how you escape our guessing. Reads are sandboxed to this root exactly as `docs:*` reads are sandboxed to the docs root, including for paths the bridge builds itself.
 
 `EXERIS_BRIDGE_MODE` (optional, `auto` | `contributor` | `app`, default `auto`) records which persona the environment looks like — `auto` infers it from whether an ecosystem checkout resolved. It is **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
 
@@ -164,7 +166,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 18 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 20 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 2 `caps:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
@@ -195,6 +197,10 @@ src/
                              per SPI method (cap-blind — no list_capabilities)
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
                              Subsystem/RuntimeErgonomics)
+    caps/index.ts            caps-list_capabilities, caps-describe_composition — reads the
+                             build-time cap-manifest.json of the user's own project; never
+                             re-resolves the @Requires→@Provides DAG
+    caps/shapes.ts           cap-manifest wire shapes + validators (CapManifest/Stamp/Module)
     bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
                              surface (never gated, never spawns)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,
