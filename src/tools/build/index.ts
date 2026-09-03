@@ -540,7 +540,7 @@ function notBuiltAnswer() {
 
 /** A miss the agent can act on: say what is actually there. */
 function notFoundMessage(dir: string, name: string, kind: MetadataKind): string {
-  let available: MetadataEntry[] = [];
+  let available: MetadataEntry[];
   try {
     available = readdirSync(dir)
       .map(classifyMetadataFile)

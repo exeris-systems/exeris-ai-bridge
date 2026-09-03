@@ -196,7 +196,6 @@ function assertZeroCheckout(project, home) {
 
 function assertBootsDark({
   initialize,
-  tools,
   version,
   health,
   calls,

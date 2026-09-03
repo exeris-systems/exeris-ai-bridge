@@ -30,7 +30,7 @@ class FakeChannel implements LspChannel {
   closed = false;
 
   /** Optional auto-responder invoked for every message the client sends. */
-  autoResponder: ((msg: any) => unknown | undefined) | null = null;
+  autoResponder: ((msg: any) => unknown) | null = null;
 
   write(chunk: Buffer): void {
     for (const msg of this.decoder.push(chunk)) {
@@ -58,7 +58,7 @@ class FakeChannel implements LspChannel {
 }
 
 /** Auto-responder that ACKs `initialize` and nothing else. */
-function ackInitialize(msg: any): unknown | undefined {
+function ackInitialize(msg: any): unknown {
   if (msg.method === "initialize") return { jsonrpc: "2.0", id: msg.id, result: { capabilities: {} } };
   return undefined;
 }

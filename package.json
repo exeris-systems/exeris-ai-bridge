@@ -37,6 +37,7 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "pretest": "npm run build",
     "test": "cd dist && node --test",
     "test:coverage": "c8 --reporter=lcovonly --reporter=text-summary --report-dir=coverage --exclude='**/*.test.*' npm test",
@@ -48,10 +49,14 @@
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "c8": "^12.0.0",
+    "eslint": "^10.9.1",
+    "globals": "^17.12.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.69.0"
   },
   "repository": {
     "type": "git",

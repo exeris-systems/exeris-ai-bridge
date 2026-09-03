@@ -75,22 +75,22 @@ function loadZeroCheckout(env: NodeJS.ProcessEnv): BridgeConfig {
 
 function docsOf(cfg: BridgeConfig): DocsConfig {
   assert.equal(cfg.docs.state, "available");
-  return cfg.docs as DocsConfig;
+  return cfg.docs;
 }
 
 function lspOf(cfg: BridgeConfig): LspConfig {
   assert.equal(cfg.lsp.state, "available");
-  return cfg.lsp as LspConfig;
+  return cfg.lsp;
 }
 
 function kernelOf(cfg: BridgeConfig): KernelConfig {
   assert.equal(cfg.kernel.state, "available");
-  return cfg.kernel as KernelConfig;
+  return cfg.kernel;
 }
 
 function darkOf(family: DocsConfig | LspConfig | KernelConfig | Unavailable): Unavailable {
   assert.equal(family.state, "unavailable");
-  return family as Unavailable;
+  return family;
 }
 
 /** Run `fn` with stderr captured, so warn-only diagnostics can be asserted. */
@@ -538,7 +538,7 @@ test("an explicit project root need not contain a pom.xml", () => {
 test("an EXERIS_PROJECT_ROOT that does not resolve is a misconfiguration, not a silent probe", () => {
   const cfg = load({ EXERIS_PROJECT_ROOT: join(work, "not-there") });
   assert.equal(cfg.project.state, "unavailable");
-  const dark = cfg.project as Unavailable;
+  const dark = cfg.project;
   assert.match(dark.reason, /EXERIS_PROJECT_ROOT is set but does not resolve/);
   assert.match(dark.remedy, /EXERIS_PROJECT_ROOT/);
 });
@@ -566,7 +566,7 @@ test("no pom.xml anywhere above cwd takes build:*/caps:* dark with a remedy", ()
   mkdirSync(bare, { recursive: true });
   const cfg = load({ EXERIS_TEST_CWD: bare });
   assert.equal(cfg.project.state, "unavailable");
-  const dark = cfg.project as Unavailable;
+  const dark = cfg.project;
   assert.match(dark.reason, /No Maven project was found/);
   assert.match(dark.remedy, /EXERIS_PROJECT_ROOT/);
 });
