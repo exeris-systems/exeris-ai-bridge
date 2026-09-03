@@ -7,6 +7,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
 import {
+  looksLikeExerisOutput,
+  matchDiagnostics,
+  MAX_DIAGNOSTIC_CHARS,
+} from "./diagnostics.js";
+import {
   explainArtefact,
   GENERATED_ROOT,
   GITIGNORE_ENTRY,
@@ -52,6 +57,7 @@ export function registerBuildTools(config: BridgeConfig): RegisteredTool[] {
     getDomainMetadataTool(handle),
     explainArtefactsTool(handle),
     getDetachStateTool(handle),
+    explainDiagnosticTool(handle),
   ];
 }
 
@@ -348,6 +354,72 @@ const GUIDANCE = {
   l2_detached: `These files are the developer's. Codegen does not write into ${OWNED_ROOT}, so edits are safe and permanent — and correspondingly, changing the @ExerisDomain source no longer updates them.`,
   not_generated: "Run `mvn exeris:generate` (it is bound to generate-sources, so `mvn compile` runs it too). If it produces nothing, the project declares no @ExerisDomain types, or the codegen plugin is not configured.",
 } as const;
+
+/**
+ * Decode a diagnostic the developer pasted.
+ *
+ * Gated with the rest of `build:*` even though the catalogue ships in this
+ * package and the answer needs no project on disk. Leaving one tool of a family
+ * lit while the family is dark would make `bridge-health` wrong about it, and
+ * the 1.0 contract is that a family is available or dark as a unit. The cost is
+ * near zero in practice: `build:*` lights up wherever a pom.xml sits at or
+ * above the working directory, which is exactly where a build diagnostic comes
+ * from — and where it does not, the unavailable result names the remedy.
+ */
+function explainDiagnosticTool(handle: BuildFamily): RegisteredTool {
+  return {
+    definition: {
+      name: "build-explain_diagnostic",
+      description:
+        "Decode an error or warning the Exeris build printed — an annotation-processor message, a codegen plugin failure, a capability-graph or cap-tier Wall refusal, or a missing runtime driver. Paste the diagnostic text verbatim; returns what it means, the rule behind it, and what to do. Matches on message text because the build emits no diagnostic codes, so a diagnostic it does not recognise is reported as not in the catalogue — never as not being an Exeris problem.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description:
+              "The diagnostic, pasted verbatim. A whole build log is fine — every recognised diagnostic in it is returned.",
+          },
+        },
+        required: ["text"],
+      },
+    },
+    handler: guard("build", handle, async (_project, args) => {
+      const text = args.text;
+      if (typeof text !== "string" || text.trim().length === 0) {
+        return errorResult("'text' is required and must be the diagnostic text, pasted verbatim.");
+      }
+      if (text.length > MAX_DIAGNOSTIC_CHARS) {
+        return errorResult(
+          `'text' is ${text.length} characters; the limit is ${MAX_DIAGNOSTIC_CHARS}. Paste the failing diagnostic rather than the whole build log.`,
+        );
+      }
+
+      const matches = matchDiagnostics(text);
+      if (matches.length > 0) {
+        return jsonResult({
+          recognised: true,
+          matches,
+          note:
+            "Matched on message text — the build emits no diagnostic codes, so each match echoes the fragment it keyed on. The `id` is this bridge's own label for the entry, not something the build prints.",
+        });
+      }
+
+      // Two different misses, and the difference is the whole point: one is
+      // "this is ours and we have no entry", the other is "we cannot tell". The
+      // catalogue's silence is never evidence that the problem is not Exeris's.
+      return jsonResult({
+        recognised: false,
+        matches: [],
+        reason: looksLikeExerisOutput(text)
+          ? "This looks like Exeris build output, but no catalogue entry matches it. That is a gap in this bridge's catalogue, not a verdict on the diagnostic."
+          : "Nothing in this text matches a catalogue entry, and it carries no Exeris marker either — no '[Exeris] ' prefix, no eu.exeris reference, no exeris:* goal. It may still be an Exeris problem; this tool only knows what is in its catalogue.",
+        remedy:
+          "Read the message itself: processor diagnostics carry the '[Exeris] ' prefix and name the annotation involved, and plugin failures name the goal. build-explain_artefacts shows what codegen emitted for the entity, and build-get_detach_state shows whether a file it names is generated or owned.",
+      });
+    }),
+  };
+}
 
 type ManifestResolution =
   | { kind: "ok"; entries: string[] }

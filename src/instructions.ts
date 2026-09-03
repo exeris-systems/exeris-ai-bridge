@@ -50,7 +50,8 @@ Tool names are \`family-tool\`:
             owns it. Codegen already emits the schema, handlers, services,
             repositories and OpenAPI for an entity; ask build-explain_artefacts
             before hand-writing any of them, and build-get_detach_state before
-            editing a generated file, or the next build silently discards it
+            editing a generated file, or the next build silently discards it.
+            build-explain_diagnostic decodes an error the build printed
   caps-*    the capability composition of YOUR OWN project, from the build-time
             cap-manifest.json — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable

@@ -39,6 +39,98 @@ jobs:
       - name: Test
         run: npm test
 
+  sonar:
+    # CI-based analysis, replacing SonarCloud's Automatic Analysis. The move is
+    # what makes `sonar-project.properties` take effect at all: Automatic
+    # Analysis never reads it, so the exclusions declared there had no way to
+    # apply. This follows the exeris-kernel convention of keeping the analysis
+    # configuration in the project and running the scan from CI.
+    #
+    # A separate job rather than a step in `build`, because that one is a
+    # node 20 / node 22 matrix and this must run once. Nothing depends on this
+    # job, so it cannot cascade.
+    name: SonarQube Cloud
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Checkout
+        # Full history: the scanner reads SCM blame to attribute new code, and a
+        # shallow clone makes every line look new.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the analysis token
+        # Everything the scanner does before "Create analysis" — load global
+        # settings, load project settings, resolve the ALM binding — succeeds
+        # ANONYMOUSLY on a public project. So a log that gets all the way to
+        # "Auto-configuring pull request N" and then fails with "Not authorized
+        # or project not found" has told you nothing about which of two very
+        # different things is wrong: a credential that is not valid at all, or a
+        # valid one without Execute Analysis on this project. This call splits
+        # them, and costs one request.
+        #
+        # The token goes into a curl config file rather than onto the command
+        # line, so it is never in argv. Nothing here prints it.
+        if: ${{ env.SONAR_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          printf 'user = "%s:"\n' "$SONAR_TOKEN" > "$RUNNER_TEMP/sonar-curlrc"
+          chmod 600 "$RUNNER_TEMP/sonar-curlrc"
+          valid=$(curl -sS -K "$RUNNER_TEMP/sonar-curlrc" \
+            https://sonarcloud.io/api/authentication/validate | tr -d ' \n')
+          rm -f "$RUNNER_TEMP/sonar-curlrc"
+          if [ "$valid" != '{"valid":true}' ]; then
+            echo "::error::SONAR_TOKEN is not a valid SonarQube Cloud credential" \
+                 "(the value is set but does not authenticate). Mint a new token" \
+                 "and update the secret."
+            exit 1
+          fi
+          echo "SONAR_TOKEN authenticates. If the scan below still reports" \
+               "'Not authorized or project not found', the credential is fine and" \
+               "the missing piece is the Execute Analysis permission on" \
+               "exeris-systems_exeris-ai-bridge — grant it in that project's" \
+               "Administration > Permissions, or use a token whose scope covers it."
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Test with coverage
+        # Runs here rather than in `build`, and that is the point: the scanner
+        # below imports coverage/lcov.info from this same workspace, so the
+        # report has to be produced by the job that scans. `build` is a matrix
+        # and would produce two.
+        run: npm run test:coverage
+
+      - name: Analyse
+        # Skipped when the secret is absent — a forked pull request has no
+        # organisation secret, and a missing token must not read as a failure.
+        if: ${{ env.SONAR_TOKEN != '' }}
+        # NOT continue-on-error, and the first run is why. With it, the scanner
+        # failed on an unauthorized token, produced no analysis at all, and the
+        # job still reported success — so the pull request showed a green Sonar
+        # check while carrying no quality signal whatsoever. exeris-kernel's
+        # continue-on-error is there because its analysis sits in the root job of
+        # a nine-job graph and a failure would take every merge gate down with
+        # it; nothing depends on this job, so that reason does not transfer, and
+        # what it bought here was an invisible failure. Keeping this job out of
+        # the required set is the way to make it non-blocking — silencing it is
+        # not.
+        # Pinned by SHA. Two high-severity advisories cover this action —
+        # GHSA-f79p-9c5r-xg88 (command injection, fixed in 5.3.1) and
+        # GHSA-5xq9-5g24-4g6f (argument injection, fixed in 6.0.0) — which is
+        # why exeris-kernel retired it in favour of the Maven plugin. Both are
+        # patched well below v8.2.1, and a Node project has no plugin equivalent
+        # to fall back on.
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+
   p2-smoke:
     # Everything in `build` runs against the source tree, inside an ecosystem
     # checkout, with a developer's environment — which is exactly the machine
