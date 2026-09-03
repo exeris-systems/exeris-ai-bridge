@@ -287,7 +287,8 @@ export function matchDiagnostics(text: string): DiagnosticMatch[] {
       },
     });
   }
-  return found.sort((a, b) => a.at - b.at || a.match.id.localeCompare(b.match.id)).map((f) => f.match);
+  found.sort((a, b) => a.at - b.at || a.match.id.localeCompare(b.match.id));
+  return found.map((f) => f.match);
 }
 
 function firstAnchorHit(
