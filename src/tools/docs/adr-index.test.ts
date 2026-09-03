@@ -55,8 +55,8 @@ test("parseAdrIndex extracts link display + target and URL-decodes both", () => 
 `;
   const [entry] = parseAdrIndex(withEncoded);
   assert.ok(entry.link);
-  assert.equal(entry.link!.target, "../x/ADR-003 Entity First.md");
-  assert.equal(entry.link!.display, "ADR-003 Entity");
+  assert.equal(entry.link.target, "../x/ADR-003 Entity First.md");
+  assert.equal(entry.link.display, "ADR-003 Entity");
 });
 
 test("parseAdrIndex returns link=null when the link cell has no markdown link", () => {
@@ -243,8 +243,8 @@ test("parseLink finds a real link past a leading [note] label", () => {
 `;
   const [entry] = parseAdrIndex(richCell);
   assert.ok(entry.link);
-  assert.equal(entry.link!.display, "ADR-042");
-  assert.equal(entry.link!.target, "adr/ADR-042-foo.md");
+  assert.equal(entry.link.display, "ADR-042");
+  assert.equal(entry.link.target, "adr/ADR-042-foo.md");
 });
 
 test("parseAdrIndex tolerates blank lines inside the table block by skipping them", () => {

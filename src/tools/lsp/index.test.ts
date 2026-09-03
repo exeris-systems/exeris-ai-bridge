@@ -48,7 +48,7 @@ interface RpcRequest {
 class FakeChannel implements LspChannel {
   private dataHandler: ((c: Buffer) => void) | null = null;
   private readonly decoder = new LspMessageDecoder();
-  constructor(private readonly onCall: (msg: RpcRequest) => unknown | undefined) {}
+  constructor(private readonly onCall: (msg: RpcRequest) => unknown) {}
   write(chunk: Buffer): void {
     for (const msg of this.decoder.push(chunk) as RpcRequest[]) {
       const response =
@@ -65,7 +65,7 @@ class FakeChannel implements LspChannel {
   close(): void {}
 }
 
-function toolsWith(onCall: (msg: RpcRequest) => unknown | undefined) {
+function toolsWith(onCall: (msg: RpcRequest) => unknown) {
   const client = new LspClient(LSP_SPEC, { channelFactory: () => new FakeChannel(onCall) });
   return new Map(registerLspTools(CONFIG, client).map((t) => [t.definition.name, t]));
 }

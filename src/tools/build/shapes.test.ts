@@ -65,7 +65,7 @@ test("parseMetadataEnvelope lifts the envelope and keeps the body verbatim", () 
 // model would throw away most of the answer.
 test("unknown AST fields survive rather than being dropped", () => {
   const out = parseMetadataEnvelope({ ...ENVELOPE, somethingNewInTheSdk: [1, 2] }, "Station.json");
-  assert.deepEqual((out.metadata as Record<string, unknown>).somethingNewInTheSdk, [1, 2]);
+  assert.deepEqual((out.metadata).somethingNewInTheSdk, [1, 2]);
 });
 
 // ADR-042: the digest is stamped behind the javac Compiler Tree API, and where

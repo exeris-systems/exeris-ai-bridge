@@ -68,6 +68,8 @@ Tests, and the zero-checkout check that CI runs on every PR:
 
 ```sh
 npm test                     # unit + shape tests (builds first)
+npm run test:coverage        # the same tests under c8; writes coverage/lcov.info for Sonar
+npm run lint                 # type-aware ESLint over src/ and scripts/
 npm run smoke:p2             # pack, install into a scratch dir, speak MCP to the tarball
 ```
 

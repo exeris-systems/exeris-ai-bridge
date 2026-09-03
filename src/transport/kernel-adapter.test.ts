@@ -29,7 +29,7 @@ class FakeChannel implements KernelChannel {
   closed = false;
 
   /** Optional auto-responder invoked for every request the adapter sends. */
-  autoResponder: ((msg: any) => unknown | undefined) | null = null;
+  autoResponder: ((msg: any) => unknown) | null = null;
 
   write(chunk: Buffer): void {
     for (const msg of this.decoder.push(chunk)) {

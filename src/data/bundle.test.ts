@@ -60,7 +60,7 @@ function writeManifest(entries: unknown[], overrides: Record<string, unknown> = 
 
 function available(state: BundleState): AvailableBundle {
   assert.equal(state.state, "available");
-  return state as AvailableBundle;
+  return state;
 }
 
 function unavailable(state: { state: string; reason?: string; remedy?: string }) {
