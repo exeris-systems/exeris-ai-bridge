@@ -69,12 +69,13 @@ const BUILT = {
   "README.md": "not metadata",
 };
 
-test("registerBuildTools registers exactly the four build-* tools", () => {
+test("registerBuildTools registers exactly the five build-* tools", () => {
   const names = registerBuildTools(configFor(null))
     .map((t) => t.definition.name)
     .sort();
   assert.deepEqual(names, [
     "build-explain_artefacts",
+    "build-explain_diagnostic",
     "build-get_detach_state",
     "build-get_domain_metadata",
     "build-list_domains",
@@ -207,6 +208,7 @@ test("build-* is dark when no project root resolved", async () => {
     "build-get_domain_metadata",
     "build-explain_artefacts",
     "build-get_detach_state",
+    "build-explain_diagnostic",
   ]) {
     const res = await tools.get(name)!.handler({ name: "Station" });
     assert.equal(res.isError, true, name);
@@ -403,4 +405,63 @@ test("a generated root symlinked outside the project is refused", async () => {
     assert.equal(res.isError, true, name);
     assert.match(text(res), /sandbox escape/, name);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Slice 6d — decoding what the build printed.
+// ---------------------------------------------------------------------------
+
+test("build-explain_diagnostic decodes a processor message", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] @ExerisDomain.dataScope = DataScope.UNIVERSE is reserved and is refused here rather than half-emitted.",
+  });
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, true);
+  assert.equal(payload.matches[0].id, "processor/universe-tier-reserved");
+  assert.equal(payload.matches[0].severity, "error");
+  assert.equal(payload.matches[0].reference, "ADR-059");
+});
+
+// The catalogue not having an entry says nothing about the diagnostic. Turning
+// that into "not an Exeris problem" would send the developer looking in the
+// wrong place, which is worse than admitting the gap.
+test("an unmatched Exeris diagnostic is reported as a catalogue gap", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] some diagnostic added to the processor after this catalogue was written",
+  });
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, false);
+  assert.match(payload.reason, /gap in this bridge's catalogue, not a verdict/);
+});
+
+test("text with no Exeris marker still does not get told it is not Exeris's", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({ text: "error: cannot find symbol" });
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, false);
+  assert.match(payload.reason, /It may still be an Exeris problem/);
+});
+
+test("an empty or oversized paste is refused with a sentence about the paste", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const empty = await tools.get("build-explain_diagnostic")!.handler({ text: "   " });
+  assert.equal(empty.isError, true);
+  assert.match(text(empty), /pasted verbatim/);
+
+  const huge = await tools.get("build-explain_diagnostic")!.handler({ text: "x".repeat(64_001) });
+  assert.equal(huge.isError, true);
+  assert.match(text(huge), /rather than the whole build log/);
+});
+
+// The catalogue ships in this package, so the answer needs nothing on disk —
+// but a family is available or dark as a unit, and a lit tool inside a dark
+// family would make bridge-health wrong about it.
+test("build-explain_diagnostic is dark with the rest of its family", async () => {
+  const res = await toolsFor(null).get("build-explain_diagnostic")!.handler({ text: "[Exeris] anything" });
+  assert.equal(res.isError, true);
+  assert.equal(JSON.parse(text(res)).family, "build");
 });

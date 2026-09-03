@@ -204,6 +204,7 @@ function assertBootsDark({
   unbuilt,
   ungenerated,
   detach,
+  diagnostic,
   stderr,
 }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
@@ -288,6 +289,11 @@ function assertBootsDark({
   const detachPayload = JSON.parse(detach.content[0].text);
   assert.equal(detachPayload.state, "not_generated");
   assert.deepEqual(detachPayload.roots, []);
+
+  assert.ok(!diagnostic.isError, `build-explain_diagnostic errored: ${diagnostic.content[0].text}`);
+  const diagnosticPayload = JSON.parse(diagnostic.content[0].text);
+  assert.equal(diagnosticPayload.recognised, true, "the diagnostic catalogue did not survive packaging");
+  assert.equal(diagnosticPayload.matches[0].id, "processor/universe-tier-reserved");
 
   assert.match(
     stderr,
@@ -403,6 +409,17 @@ async function interrogate(project, home, extraEnv) {
       arguments: {},
     });
 
+    // The one build:* answer that needs nothing on disk — the catalogue ships
+    // in the package. It is exactly what a P2 install must not lose: a
+    // developer with a build failure has a paste before they have anything
+    // else, and a vendoring or packaging slip would take it out silently.
+    const diagnostic = await client.request("tools/call", {
+      name: "build-explain_diagnostic",
+      arguments: {
+        text: "[Exeris] @ExerisDomain.dataScope = DataScope.UNIVERSE is reserved and is refused here",
+      },
+    });
+
     assert.equal(child.exitCode, null, "the server exited during the session");
     return {
       initialize,
@@ -414,6 +431,7 @@ async function interrogate(project, home, extraEnv) {
       unbuilt,
       ungenerated,
       detach,
+      diagnostic,
       stderr: client.stderr,
     };
   } finally {

@@ -1,6 +1,6 @@
 {
   "name": "@exeris/ai-bridge",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Model Context Protocol server exposing Exeris ecosystem surfaces (Studio/LSP, docs/ADR registry, kernel introspection) to AI agents.",
   "license": "Apache-2.0",
   "type": "module",
