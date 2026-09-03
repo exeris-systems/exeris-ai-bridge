@@ -46,7 +46,11 @@ Tool names are \`family-tool\`:
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
   build-*   what YOUR OWN project's last build emitted — the DomainMetadata AST
-            the code generators consume, per entity
+            the code generators consume, plus the generated tree itself and who
+            owns it. Codegen already emits the schema, handlers, services,
+            repositories and OpenAPI for an entity; ask build-explain_artefacts
+            before hand-writing any of them, and build-get_detach_state before
+            editing a generated file, or the next build silently discards it
   caps-*    the capability composition of YOUR OWN project, from the build-time
             cap-manifest.json — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable

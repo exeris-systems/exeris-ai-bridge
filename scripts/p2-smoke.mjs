@@ -194,7 +194,18 @@ function assertZeroCheckout(project, home) {
   );
 }
 
-function assertBootsDark({ initialize, tools, version, health, calls, capless, unbuilt, stderr }) {
+function assertBootsDark({
+  initialize,
+  tools,
+  version,
+  health,
+  calls,
+  capless,
+  unbuilt,
+  ungenerated,
+  detach,
+  stderr,
+}) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
   assert.equal(
     initialize.serverInfo.version,
@@ -264,6 +275,19 @@ function assertBootsDark({ initialize, tools, version, health, calls, capless, u
   const unbuiltPayload = JSON.parse(unbuilt.content[0].text);
   assert.equal(unbuiltPayload.present, false, "an unbuilt project must answer present:false");
   assert.match(unbuiltPayload.remedy, /mvn compile/);
+
+  assert.ok(
+    !ungenerated.isError,
+    `build-explain_artefacts errored on an ungenerated project: ${ungenerated.content[0].text}`,
+  );
+  const ungeneratedPayload = JSON.parse(ungenerated.content[0].text);
+  assert.equal(ungeneratedPayload.present, false, "a project with no codegen tree must answer present:false");
+  assert.match(ungeneratedPayload.remedy, /mvn exeris:generate/);
+
+  assert.ok(!detach.isError, `build-get_detach_state errored: ${detach.content[0].text}`);
+  const detachPayload = JSON.parse(detach.content[0].text);
+  assert.equal(detachPayload.state, "not_generated");
+  assert.deepEqual(detachPayload.roots, []);
 
   assert.match(
     stderr,
@@ -366,8 +390,32 @@ async function interrogate(project, home, extraEnv) {
       arguments: {},
     });
 
+    // Same branch one layer out: the scratch project has never run codegen
+    // either, so there is no src/main/generated/java and nothing owns a tree.
+    // Both tools have to answer that as state, and both remedies name the
+    // command that changes it.
+    const ungenerated = await client.request("tools/call", {
+      name: "build-explain_artefacts",
+      arguments: {},
+    });
+    const detach = await client.request("tools/call", {
+      name: "build-get_detach_state",
+      arguments: {},
+    });
+
     assert.equal(child.exitCode, null, "the server exited during the session");
-    return { initialize, tools, version, health, calls, capless, unbuilt, stderr: client.stderr };
+    return {
+      initialize,
+      tools,
+      version,
+      health,
+      calls,
+      capless,
+      unbuilt,
+      ungenerated,
+      detach,
+      stderr: client.stderr,
+    };
   } finally {
     client.dispose();
   }

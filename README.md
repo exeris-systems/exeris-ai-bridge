@@ -14,7 +14,7 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All six tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `build:*` (2 tools, reading the `DomainMetadata` the developer's own build emitted), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the same project), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+**0.5.1 — zero-checkout mode: the bridge boots and answers on a machine with no ecosystem checked out.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All six tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `build:*` (4 tools, reading the `DomainMetadata` the developer's own build emitted and the codegen output tree beside it), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the same project), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
 
 What 0.5.0 adds is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
 
@@ -95,7 +95,7 @@ For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 22 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 24 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
 
 **Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
 
@@ -166,7 +166,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 22 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 2 `build:*`, 2 `caps:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 24 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 4 `build:*`, 2 `caps:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
@@ -197,10 +197,14 @@ src/
                              per SPI method (cap-blind — no list_capabilities)
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
                              Subsystem/RuntimeErgonomics)
-    build/index.ts           build-list_domains, build-get_domain_metadata — reads the
+    build/index.ts           build-list_domains, build-get_domain_metadata,
+                             build-explain_artefacts, build-get_detach_state — reads the
                              annotation processor's own output in target/classes/exeris-metadata
+                             and the codegen output tree in src/main/generated/java
     build/shapes.ts          envelope validation (schemaVersion + ADR-042 sourceDigest) and the
                              filename-prefix decoding; the AST body passes through verbatim
+    build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
+                             what drove it); reads what was emitted, never predicts it
     caps/index.ts            caps-list_capabilities, caps-describe_composition — reads the
                              build-time cap-manifest.json of the user's own project; never
                              re-resolves the @Requires→@Provides DAG
