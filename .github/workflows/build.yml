@@ -93,6 +93,22 @@ jobs:
                "exeris-systems_exeris-ai-bridge — grant it in that project's" \
                "Administration > Permissions, or use a token whose scope covers it."
 
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Test with coverage
+        # Runs here rather than in `build`, and that is the point: the scanner
+        # below imports coverage/lcov.info from this same workspace, so the
+        # report has to be produced by the job that scans. `build` is a matrix
+        # and would produce two.
+        run: npm run test:coverage
+
       - name: Analyse
         # Skipped when the secret is absent — a forked pull request has no
         # organisation secret, and a missing token must not read as a failure.
