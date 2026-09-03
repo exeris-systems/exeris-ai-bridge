@@ -65,10 +65,16 @@ jobs:
         # Skipped when the secret is absent — a forked pull request has no
         # organisation secret, and a missing token must not read as a failure.
         if: ${{ env.SONAR_TOKEN != '' }}
-        # A scanner or service outage must not block a merge. Nothing is lost by
-        # this: the quality-gate verdict arrives as SonarCloud's own check on the
-        # pull request, independently of whether this step reports success.
-        continue-on-error: true
+        # NOT continue-on-error, and the first run is why. With it, the scanner
+        # failed on an unauthorized token, produced no analysis at all, and the
+        # job still reported success — so the pull request showed a green Sonar
+        # check while carrying no quality signal whatsoever. exeris-kernel's
+        # continue-on-error is there because its analysis sits in the root job of
+        # a nine-job graph and a failure would take every merge gate down with
+        # it; nothing depends on this job, so that reason does not transfer, and
+        # what it bought here was an invisible failure. Keeping this job out of
+        # the required set is the way to make it non-blocking — silencing it is
+        # not.
         # Pinned by SHA. Two high-severity advisories cover this action —
         # GHSA-f79p-9c5r-xg88 (command injection, fixed in 5.3.1) and
         # GHSA-5xq9-5g24-4g6f (argument injection, fixed in 6.0.0) — which is
