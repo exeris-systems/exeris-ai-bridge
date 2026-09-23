@@ -1,6 +1,16 @@
+---
+title: ADR-025: AI Agent Bridge — MCP Server for Ecosystem Introspection
+type: adr
+visibility: public
+owning-repo: exeris-ai-bridge
+status: active
+slug: adr-025
+---
+
 # ADR-025: AI Agent Bridge — MCP Server for Ecosystem Introspection
 
 | Attribute       | Value                                                                                                                  |
+...
 |:----------------|:-----------------------------------------------------------------------------------------------------------------------|
 | **Status**      | **ACCEPTED** (2026-05-15)                                                                                              |
 | **Deciders**    | Arkadiusz Przychocki                                                                                                   |
