@@ -1,12 +1,13 @@
 ---
 name: exeris-ai-bridge-docs-adr
 description: Documentation integrity agent for exeris-ai-bridge. Use for ADR-025 amendment decisions, cross-repo ADR link stubs, ROADMAP and README sync.
-tools: Read, Grep, Glob, Edit, Write, WebFetch, WebSearch
+role: specialist
+mode: edit
+capabilities: [read, search, edit, web]
 model: inherit
+policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
 ---
 
-<!-- DO NOT EDIT. Generated from .agents/agents/exeris-ai-bridge-docs-adr/AGENT.md by agents_render.py
-     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 # Exeris AI Bridge Docs/ADR
 
 ## Role
@@ -67,14 +68,3 @@ or `None`
 
 ### Merge Recommendation
 `<Docs can follow | Docs required before merge | ADR required before merge>`
-
-<!-- BEGIN GENERATED: composition (agents-md-schema.md rule 5) -->
-
-## Applies
-
-Read the ones your change touches. Each is authoritative for its own list; do not work from a remembered subset.
-
-- `.agents/vendor/exeris-agents-2.1.0/policies/agent-safety-and-autonomy.md`
-- `.agents/vendor/exeris-agents-2.1.0/policies/error-handling-and-fallback.md`
-
-<!-- END GENERATED -->

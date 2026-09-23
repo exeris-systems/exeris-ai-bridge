@@ -1,0 +1,130 @@
+# Composition and delivery metadata for this repository's agent material.
+# agents-md-schema.md rules 5, 7, 8 and 12: profiles and workflows compose by reference, provider
+# directories are generated, imports are version-pinned, and what a vendor cannot do is written
+# down rather than assumed.
+#
+# The check asserts this file and the filesystem agree in BOTH directions: every name here exists,
+# and every profile, skill and workflow on disk is named here.
+version: 2
+repository: exeris-ai-bridge
+
+# The organisation bundle, pinned and vendored under .agents/vendor/. `ref` is the commit the
+# vendored tree was taken from and `sha256` is a digest over every byte of it, so a hand-edit of
+# the vendored copy is a CI failure rather than a silent local fork (rule 8). Bumping the version
+# means re-vendoring with `agents_bundle.py vendor`, not editing in place.
+imports:
+  - bundle: exeris-agents
+    version: 2.1.0
+    ref: abfdbe5336e3c29b807241b0bb00a6091cb42fea
+    sha256: sha256:7454a4e4f8682b664899225551dbf4e827e40a2c8889c989ff24e9ebdf2f960f
+
+agents:
+  - exeris-ai-bridge-router
+  - exeris-ai-bridge-architect
+  - exeris-ai-bridge-implementer
+  - exeris-ai-bridge-tool-family-discipline
+  - exeris-ai-bridge-docs-adr
+
+skills:
+  - exeris-ai-bridge-task-classifier
+  - exeris-ai-bridge-routing-planner
+  - exeris-ai-bridge-wall-process-boundary-review
+  - exeris-ai-bridge-read-only-tool-review
+  - exeris-ai-bridge-path-sandbox-review
+  - exeris-ai-bridge-tool-family-purity-review
+
+workflows:
+  - path-sandbox-check
+  - read-only-tool-check
+  - tool-family-purity
+  - wall-process-boundary-check
+
+# Repository-owned policies only, and there are none yet: the rules this repository's roles
+# enforce are stated in CLAUDE.md and ADR-025, which the profiles read directly. The shared
+# `agent-safety-and-autonomy` and `error-handling-and-fallback` come from the bundle and are
+# composed as `bundle:<name>`, so a reader can tell whose rule it is.
+policies: []
+references: []
+
+# Not adopted yet, each for a stated reason rather than by omission:
+#
+#   hooks    (rule 12) — no repository policy names an action to deny or a consequence to gate, and
+#            a hook is never the place a rule is first stated.
+#   schemas  (rule 13) — the router and the reviewing skills publish their output contracts in
+#            prose; narrowing the bundle's bases to them is open work, and until it lands no
+#            profile names an `output`.
+#   evals    (rule 14) — no scenarios exist for these profiles. Rule 14 binds a repository that
+#            ships profiles, so this is open work, not an exemption.
+hooks: null
+schemas: []
+evals: null
+
+# No nested AGENTS.md: no subtree has materially different constraints.
+nested: []
+
+renderer:
+  # One implementation, shared across repositories. It lives with the bundle, because the renderer
+  # and the semantics it renders are one contract and a pinned version has to cover both.
+  source: exeris-systems/exeris-agents
+  entrypoint: tools/agents_render.py
+  check: tools/agents_file_check.py
+  bundle: tools/agents_bundle.py
+
+adapters:
+  claude:
+    target: .claude
+    agents: .claude/agents/{name}.md
+    # One symlink PER SKILL, not one for the directory: workflows render into the same
+    # directory, so a directory-level link makes the two kinds fight over one path.
+    skills: symlink
+    workflows: .claude/skills/{name}/SKILL.md   # `commands/` is the legacy flat-file form
+  copilot:
+    target: .github
+    agents: .github/agents/{name}.agent.md
+    skills: native                        # Copilot reads .agents/skills directly
+    workflows: .github/prompts/{name}.prompt.md
+    # Deferred: a Copilot adapter needs a mapping of capabilities onto that runtime's tool names,
+    # and the bundle ships none. One written from memory would silently grant or withhold tools.
+    status: deferred
+  codex:
+    target: .codex
+    skills: native
+    status: deferred
+  gemini:
+    target: .gemini
+    skills: native
+    status: deferred
+  antigravity:
+    target: .agents
+    skills: native
+    status: deferred
+  cursor:
+    target: .cursor
+    skills: native
+    status: deferred
+
+degradations:
+  # What each runtime cannot do. An unrecorded degradation is an operator believing a capability
+  # exists on a client that never had it.
+  claude:
+    # The canonical capability vocabulary has no task-list capability, so no rendered profile is
+    # granted `TodoWrite`.
+    - no-task-list-tool
+    # A workflow renders as a user-invoked skill carrying `name` and `description` only; its
+    # `argument-hint` stays in the canonical file and is not shown by the client.
+    - workflow-argument-hint-not-rendered
+  antigravity:
+    # `--agent <name>` runs the turn with the default agent and exits 0 when the name does not
+    # resolve. Automation that selects an agent on this runtime must assert the profile was
+    # applied; the exit code does not.
+    - agent-selection-fails-silently
+  windows:
+    # .claude/skills entries are symlinks. A checkout without Developer Mode needs the copy fallback.
+    - skills-symlink-needs-copy-fallback
+
+provider-owned:
+  # Operational configuration, exempt from the generated-marker check by this list rather than by
+  # a regex (rule 7).
+  - .claude/settings.local.json
+  - .claude/README.md
+  - .github/workflows/

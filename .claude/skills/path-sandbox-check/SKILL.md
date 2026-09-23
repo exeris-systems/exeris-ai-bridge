@@ -1,8 +1,11 @@
 ---
+name: path-sandbox-check
 description: Verify that filesystem reads in `docs:*` (and any future filesystem tool) resolve under a pinned root and reject paths that escape it.
-argument-hint: PR diff or `src/tools/docs/**` change to audit
+disable-model-invocation: true
 ---
 
+<!-- DO NOT EDIT. Generated from .agents/workflows/path-sandbox-check.md by agents_render.py
+     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 Audit this change for path-sandbox discipline.
 
 Sandbox rules:
