@@ -1,3 +1,12 @@
+---
+title: "ADR-025: AI Agent Bridge — MCP Server for Ecosystem Introspection"
+type: adr
+visibility: public
+owning-repo: exeris-ai-bridge
+status: active
+slug: adr/ADR-025
+---
+
 # ADR-025: AI Agent Bridge — MCP Server for Ecosystem Introspection
 
 | Attribute       | Value                                                                                                                  |
@@ -206,7 +215,7 @@ The zero-checkout mode introduced by the "Two Personas" amendment above multipli
 - ADR-020 (Open-Core Documentation Boundary & Cross-Repo Mirror Policy) — visibility model; this ADR is `public`.
 - ADR-023 (Capability Licensing Taxonomy) — the bridge is NOT a capability; this ADR confirms that explicitly.
 - ADR-024 (Capability Composition Model, incl. the 2026-06-17 "Validation Stamp Lifecycle" amendment) — the open kernel is **cap-blind**: capability composition is emitted by `exeris-tooling` (build-time `cap-manifest.json` + validation stamp + content binding) and asserted by the `exeris-platform` composition runtime, never by the kernel. The bridge therefore does **not** surface capability composition through `kernel:*`; see the 2026-06-17 amendment below.
-- [Model Context Protocol specification](https://spec.modelcontextprotocol.io/) — the wire protocol this repo implements.
+- [Model Context Protocol specification](https://modelcontextprotocol.io/specification) — the wire protocol this repo implements.
 - `exeris-platform/exeris-platform-lsp/` — the LSP server this bridge proxies for the `lsp:*` tool family.
 
 ## Engineering Protocol
