@@ -1,3 +1,12 @@
+---
+title: CLAUDE.md — exeris-ai-bridge
+type: reference
+visibility: public
+owning-repo: exeris-ai-bridge
+status: active
+last-verified: 2026-09-23
+---
+
 # CLAUDE.md — exeris-ai-bridge
 
 Guardrails for AI assistants working inside `~/exeris-systems/exeris-ai-bridge/`. Human-facing description lives in [`README.md`](README.md); this file captures the constraints, conventions, and "what to do when" rules an AI session must respect.
@@ -29,70 +38,71 @@ These can be overridden with explicit justification, but the default is the path
 5. **`data/` is generated, never committed.** `prepack` runs `scripts/vendor-reference-data.mjs`, which rebuilds the bundle from released upstream artifacts and verifies every digest. Do not hand-edit `data/`, do not commit it, and do not add placeholder content to it — an empty manifest is a valid, honest state, and a missing bundle is the normal case when running from source.
 6. **JSON-RPC to LSP, JSON-over-stdio to kernel adapter.** Don't invent new wire formats. The LSP server already speaks JSON-RPC; the kernel adapter uses newline-delimited JSON over stdio per the `KernelDiagnostics` contract (ADR-025 2026-06-25 amendment).
 7. **Tool names are `family-tool` on the wire; `family:*` stays the prose name for a family in docs.** MCP clients do not reliably resolve a `:` inside a tool name, so the registered name is `docs-get_adr`, not `docs:get_adr`. The family prefix stays load-bearing by convention rather than by construction: `guard()` is handed its `ToolFamily` explicitly, and it is the tests that split the registered name on the first `-` and assert the halves agree with the family the handler was bound to. So a tool name is exactly one family, one hyphen, then `snake_case` — a second hyphen would silently split into the wrong family key. A test holds the whole surface to `^[a-z]+-[a-z_]+$`; do not weaken it to accommodate a name that wants a second hyphen. The `family:*` spelling is for *documentation* — this file, `README.md`, `ROADMAP.md`, ADR-025 — where it names a family as a concept. Strings the **agent** reads at runtime use the wire form instead (`unavailableResult` says `docs-*`), because the agent's only handle on a family is the tool names it can actually see in `tools/list`.
-
-## Scoped bans
-
-- **Spring, IoC containers, decorators-as-DI.** This is a Node project and it stays simple — `import` is the dependency mechanism, not a framework.
-- **`eval`, `new Function(...)`, dynamic `require` of user-controlled paths.** Agent-supplied strings reach tool handlers; never compile them as code.
-- **Bundled binary dependencies of the kernel.** This repo does not ship kernel jars. It talks to a kernel the user runs separately.
-
-## Tool family scope
-
-Each tool family is documented in its own folder. Keep the scope tight; if a tool would cross families, refactor first.
-
-| Family    | Scope                                                                                | Source                                |
-|:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
-| `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
-| `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
-| `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail, resolved JVM ergonomics — read-only, one tool per `KernelDiagnostics` method (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
-| `sdk:*`    | *(planned 0.7.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
-| `build:*`  | The **user's own project**: emitted `DomainMetadata`, the codegen output tree with a per-file explanation, L1/L2 ownership, and a decoder for the diagnostics the build printed — read-only, 0.6.0 complete. **Reads what the pipeline emitted; never predicts what it would emit** — only 2 of the 13 generators state their gate in `supports()`, the rest decide by a null sentinel inside `generate(...)`, so a prediction here would be a second implementation of eleven internal guards | `<projectRoot>/target/classes/exeris-metadata/`, `<projectRoot>/src/main/generated/java/`, and a catalogue that ships in this package |
-| `caps:*`   | `cap-manifest.json` + `CompositionStamp` for the user's own project — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | `<projectRoot>/src/main/generated/java/cap-manifest.json` |
-| `bridge:*` | The **bridge itself**, not Exeris: resolved persona mode, per-family availability with reason + remedy, child-process state. Read-only, **zero spawns**, frozen at 2 tools | This server's own boot-time state |
-
-New families require an ADR-025 amendment (or a successor ADR). Do not invent a `sku:*` family unilaterally. `sdk:*`, `build:*` and `caps:*` are authorised by the 2026-08-16 "Two Personas" amendment (their milestone numbers were reordered on 2026-09-02 — `build:*`/`caps:*` to 0.6.0, `sdk:*` to 0.7.0 — which changes scheduling only, not authorisation) — `caps:*` specifically satisfies the deferred-composition clause of the 2026-06-17 cap-blind amendment. `build:*` and `caps:*` are implemented as of 0.6.0; `sdk:*` is not, and its tools wait on the `exeris-sdk` 0.12.0 release. Adding a tool to any of them is milestone work, not a free-for-all. `bridge:*` is authorised by the 2026-08-26 addendum and is **frozen at two tools**; it is also the one family that is never environment-gated, which is why it is excluded from the `ToolFamily` union the availability guard ranges over — "gate `bridge:*`" should stay inexpressible rather than merely discouraged.
-
-## Two personas — who a change is for
-
-Per the ADR-025 2026-08-16 amendment, the bridge serves two co-equal audiences. Name which one a change serves before designing it:
-
-- **P1 — ecosystem contributor.** Works *on* Exeris, has every sibling repo checked out. Served by `docs:*` / `kernel:*` / `lsp:*`.
-- **P2 — application developer.** Builds *on* Exeris, has **no ecosystem checkout** — only a Maven dependency on `eu.exeris:*` and their own sources. Served by `sdk:*` / `build:*` / `caps:*`.
-
-**Zero-checkout is a hard requirement, not a nicety.** Any change to config resolution must keep the server booting on a machine with no `exeris-docs`, no `exeris-platform`, no `exeris-kernel` on disk. A missing root disables its family with a structured error; it never throws out of config load. `ecosystemRoot` is optional — never assume it exists.
-
-This is enforced, not merely stated: `scripts/p2-smoke.mjs` (CI job `p2-smoke`, `npm run smoke:p2` — it refuses a bare `node scripts/…` invocation) packs the real tarball, installs it into a scratch directory holding only an application project, points `HOME` at an empty directory and scrubs every `EXERIS_*` variable. **If you change config resolution, packaging (`files`, `bin`, `prepack`), or the launch ladder, run it** — the unit suite runs inside an ecosystem checkout and cannot see a zero-checkout regression. Its `assertZeroCheckout` guard exists because the test can go vacuous silently: the install-neighbour docs default resolving would make every assertion below it pass while testing nothing.
-
-## Preview, never write
-
-Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp-preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.
-
-No tool handler may write into the user's project. If you find yourself reaching for `fs.writeFile` against a project path, stop: that is `lsp-apply_mutation`, it is deliberately deferred past 1.0, and it needs a further amendment first.
-
-## When to consult cross-repo ADRs
-
-- **ADR-006** — every PR that adds a dependency or extends `kernel:*` tooling.
-- **ADR-020** — every PR that adds or changes documentation cross-references.
-- **ADR-023** — when someone proposes changing the license or wrapping this in commercial terms.
-- **ADR-024** — its 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel **cap-blind**. `kernel:*` MUST NOT surface capability composition (there is no `kernel-list_capabilities`). Any future composition surface sources from `exeris-tooling` build-time artefacts (`cap-manifest.json` + composition manifest) and/or the `exeris-platform` composition runtime, and needs its own ADR-025 amendment first. See ADR-025 §"`kernel:*` Is Cap-Blind".
-- **ADR-025** — every architectural change. This is the founding ADR; treat amendments to it like amendments to a constitution.
-
-## Documentation precedence
-
-When sources disagree:
-
-1. ADR-025 (founding decision for this repo).
-2. Cross-repo ADRs in `../exeris-docs/adr/` (ADR-006, ADR-020, ADR-023, ADR-024).
-3. The top-level `~/exeris-systems/CLAUDE.md` routing rules.
-4. This file.
-5. `README.md`.
-
-Higher source wins; lower source is a doc-drift task.
-
-## Language
-
-English everywhere — source, comments, commit messages, PR titles, ADRs, this file. Conversation with the founder happens in Polish; persisted artefacts are English.
-
-## Auto-memory
-
-Persistent memory for this workspace lives at `~/.claude/projects/-home-arkstack-exeris-systems-exeris-ai-bridge/memory/` (created lazily when first used). Per top-level `~/exeris-systems/CLAUDE.md`, when a session is opened *inside* this repo, that memory directory overrides the parent `~/.claude/projects/-home-arkstack-exeris-systems/memory/`.
+8.
+9. ## Scoped bans
+10. 
+11. - **Spring, IoC containers, decorators-as-DI.** This is a Node project and it stays simple — `import` is the dependency mechanism, not a framework.
+12. - **`eval`, `new Function(...)`, dynamic `require` of user-controlled paths.** Agent-supplied strings reach tool handlers; never compile them as code.
+13. - **Bundled binary dependencies of the kernel.** This repo does not ship kernel jars. It talks to a kernel the user runs separately.
+14. 
+15. ## Tool family scope
+16. 
+17. Each tool family is documented in its own folder. Keep the scope tight; if a tool would cross families, refactor first.
+18. 
+19. | Family    | Scope                                                                                | Source                                |
+20. |:----------|:--------------------------------------------------------------------------------------|:--------------------------------------|
+21. | `docs:*`   | ADR registry, HLA, whitepaper, templates — read-only                                  | `../exeris-docs/` filesystem          |
+22. | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only        | `exeris-platform-lsp` via JSON-RPC    |
+23. | `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail, resolved JVM ergonomics — read-only, one tool per `KernelDiagnostics` method (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
+24. | `sdk:*`    | *(planned 0.7.0)* Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema — read-only | Released `exeris-sdk` artifacts, vendored into the package at release |
+25. | `build:*`  | The **user's own project**: emitted `DomainMetadata`, the codegen output tree with a per-file explanation, L1/L2 ownership, and a decoder for the diagnostics the build printed — read-only, 0.6.0 complete. **Reads what the pipeline emitted; never predicts what it would emit** — only 2 of the 13 generators state their gate in `supports()`, the rest decide by a null sentinel inside `generate(...)`, so a prediction here would be a second implementation of eleven internal guards | `<projectRoot>/target/classes/exeris-metadata/`, `<projectRoot>/src/main/generated/java/`, and a catalogue that ships in this package |
+26. | `caps:*`   | `cap-manifest.json` + `CompositionStamp` for the user's own project — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | `<projectRoot>/src/main/generated/java/cap-manifest.json` |
+27. | `bridge:*` | The **bridge itself**, not Exeris: resolved persona mode, per-family availability with reason + remedy, child-process state. Read-only, **zero spawns**, frozen at 2 tools | This server's own boot-time state |
+28. 
+29. New families require an ADR-025 amendment (or a successor ADR). Do not invent a `sku:*` family unilaterally. `sdk:*`, `build:*` and `caps:*` are authorised by the 2026-08-16 "Two Personas" amendment (their milestone numbers were reordered on 2026-09-02 — `build:*`/`caps:*` to 0.6.0, `sdk:*` to 0.7.0 — which changes scheduling only, not authorisation) — `caps:*` specifically satisfies the deferred-composition clause of the 2026-06-17 cap-blind amendment. `build:*` and `caps:*` are implemented as of 0.6.0; `sdk:*` is not, and its tools wait on the `exeris-sdk` 0.12.0 release. Adding a tool to any of them is milestone work, not a free-for-all. `bridge:*` is authorised by the 2026-08-26 addendum and is **frozen at two tools**; it is also the one family that is never environment-gated, which is why it is excluded from the `ToolFamily` union the availability guard ranges over — "gate `bridge:*`" should stay inexpressible rather than merely discouraged.
+30. 
+31. ## Two personas — who a change is for
+32. 
+33. Per the ADR-025 2026-08-16 amendment, the bridge serves two co-equal audiences. Name which one a change serves before designing it:
+34. 
+35. - **P1 — ecosystem contributor.** Works *on* Exeris, has every sibling repo checked out. Served by `docs:*` / `kernel:*` / `lsp:*`.
+36. - **P2 — application developer.** Builds *on* Exeris, has **no ecosystem checkout** — only a Maven dependency on `eu.exeris:*` and their own sources. Served by `sdk:*` / `build:*` / `caps:*`.
+37. 
+38. **Zero-checkout is a hard requirement, not a nicety.** Any change to config resolution must keep the server booting on a machine with no `exeris-docs`, no `exeris-platform`, no `exeris-kernel` on disk. A missing root disables its family with a structured error; it never throws out of config load. `ecosystemRoot` is optional — never assume it exists.
+39. 
+40. This is enforced, not merely stated: `scripts/p2-smoke.mjs` (CI job `p2-smoke`, `npm run smoke:p2` — it refuses a bare `node scripts/…` invocation) packs the real tarball, installs it into a scratch directory holding only a minimal Maven project with one `@ExerisDomain` source, points `HOME` at an empty directory and scrubs every `EXERIS_*` variable. **If you change config resolution, packaging (`files`, `bin`, `prepack`), or the launch ladder, run it** — the unit suite runs inside an ecosystem checkout and cannot see a zero-checkout regression. Its `assertZeroCheckout` guard exists because the test can go vacuous in silence: the install-neighbour docs default resolving would make every assertion below it pass while testing nothing, and the application builds nothing on a machine with no ecosystem. A single-repo checkout is not enough.
+41. 
+42. ## Preview, never write
+43. 
+44. Hard constraint 3 forbids mutating kernel state; the 2026-06-24 amendment extended read-only across **all** families and forbids consuming `exeris/applyMutation`. The 2026-08-16 amendment keeps that intact and adds the one sanctioned path to canonical edits: `lsp-preview_mutation` consumes the read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff — the agent writes the file with its own tools.
+45. 
+46. No tool handler may write into the user's project. If you find yourself reaching for `fs.writeFile` against a project path, stop: that is `lsp-apply_mutation`, it is deliberately deferred past 1.0, and it needs a further amendment first.
+47. 
+48. ## When to consult cross-repo ADRs
+49. 
+50. - **ADR-006** — every PR that adds a dependency or extends `kernel:*` tooling.
+51. - **ADR-020** — every PR that adds or changes documentation cross-references.
+52. - **ADR-023** — when someone proposes changing the license or wrapping this in commercial terms.
+53. - **ADR-024** — its 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel **cap-blind**. `kernel:*` MUST NOT surface capability composition (there is no `kernel-list_capabilities`). Any future composition surface sources from `exeris-tooling` build-time artefacts (`cap-manifest.json` + composition manifest) and/or the `exeris-platform` composition runtime, and needs its own ADR-025 amendment first. See ADR-025 §"`kernel:*` Is Cap-Blind".
+54. - **ADR-025** — every architectural change. This is the founding ADR; treat amendments to it like amendments to a constitution.
+55. 
+56. ## Documentation precedence
+57. 
+58. When sources disagree:
+59. 
+60. 1. ADR-025 (founding decision for this repo).
+61. 2. Cross-repo ADRs in `../exeris-docs/adr/` (ADR-006, ADR-020, ADR-023, ADR-024).
+62. 3. The top-level `~/exeris-systems/CLAUDE.md` routing rules.
+63. 4. This file.
+64. 5. `README.md`.
+65. 
+66. Higher source wins; lower source is a doc-drift task.
+67. 
+68. ## Language
+69. 
+70. English everywhere — source, comments, commit messages, PR titles, ADRs, this file. Conversation with the founder happens in Polish; persisted artefacts are English.
+71. 
+72. ## Auto-memory
+73. 
+74. Persistent memory for this workspace lives at `~/.claude/projects/-home-arkstack-exeris-systems-exeris-ai-bridge/memory/` (created lazily when first used). Per top-level `~/exeris-systems/CLAUDE.md`, when a session is opened *inside* this repo, that memory directory overrides the parent `~/.claude/projects/-home-arkstack-exeris-systems/memory/`.
+75. 
