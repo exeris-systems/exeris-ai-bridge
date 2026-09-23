@@ -1,8 +1,11 @@
 ---
+name: read-only-tool-check
 description: Refuse any mutation surface in MCP tool handlers. `KernelDiagnostics` is read-only by design; `docs:*` and `lsp:*` are read-only too.
-argument-hint: PR diff or new/changed tool handler to audit
+disable-model-invocation: true
 ---
 
+<!-- DO NOT EDIT. Generated from .agents/workflows/read-only-tool-check.md by agents_render.py
+     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 Audit this tool handler for read-only discipline.
 
 Read-only rules:

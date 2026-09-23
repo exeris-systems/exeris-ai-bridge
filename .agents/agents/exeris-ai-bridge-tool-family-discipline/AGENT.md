@@ -1,12 +1,14 @@
 ---
 name: exeris-ai-bridge-tool-family-discipline
 description: Owner of the `docs:*` / `lsp:*` / `kernel:*` tool family namespacing and family scope. Use when adding/removing/renaming a tool, when a tool would cross families, or when a new family is proposed.
-tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
+role: specialist
+mode: edit
+capabilities: [read, search, edit, shell, web]
 model: inherit
+skills: [exeris-ai-bridge-tool-family-purity-review, exeris-ai-bridge-read-only-tool-review]
+policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
 ---
 
-<!-- DO NOT EDIT. Generated from .agents/agents/exeris-ai-bridge-tool-family-discipline/AGENT.md by agents_render.py
-     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 # Exeris AI Bridge Tool Family Discipline
 
 ## Role
@@ -68,21 +70,3 @@ For each finding: namespace / scope / mutation classification → why → minima
 ## Non-goals
 - Do not gate transport-internal optimization.
 - Do not block cross-family refactors that result in two well-scoped tools instead of one cross-family tool.
-
-<!-- BEGIN GENERATED: composition (agents-md-schema.md rule 5) -->
-
-## Skills
-
-Load these before working; each is the single owner of its procedure.
-
-- `.agents/skills/exeris-ai-bridge-tool-family-purity-review/SKILL.md`
-- `.agents/skills/exeris-ai-bridge-read-only-tool-review/SKILL.md`
-
-## Applies
-
-Read the ones your change touches. Each is authoritative for its own list; do not work from a remembered subset.
-
-- `.agents/vendor/exeris-agents-2.1.0/policies/agent-safety-and-autonomy.md`
-- `.agents/vendor/exeris-agents-2.1.0/policies/error-handling-and-fallback.md`
-
-<!-- END GENERATED -->

@@ -1,0 +1,43 @@
+# The issue-side footprint of issue-conventions.md rules 3 and 5, copied from
+# `caller-example/issues.yml` in exeris-systems/.github.
+#
+# It was missing, and the consequence is what blocks the review: `needs-l2-review` — the label the
+# readiness trigger waits for — does not exist in this repository, so nobody can ask for a re-review
+# after acting on findings. The rest of the taxonomy is absent for the same reason, and the labels
+# the publication applies were being created implicitly by the issues API in whatever colour it
+# chose. The sync is additive: it creates what is missing and corrects the colour and description of
+# what it owns. It deletes nothing.
+#
+# Separate from guardrails.yml because it is not pull-request-triggered and needs `issues: write`,
+# which the pull-request gates deliberately do not have.
+name: issues
+on:
+  # On this file itself, so this merge performs the first sync. Without it the taxonomy stays absent
+  # until somebody dispatches this by hand, and the publication wired up in this same pull request
+  # applies `hard-block` the first time a review blocks — which the issues API answers by creating
+  # the label implicitly, in a colour of its own, bypassing the taxonomy in the act of using it.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/issues.yml
+  schedule:
+    - cron: "17 4 * * 1"     # Monday, early. Label drift and stale evidence are not urgent.
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Report label changes without making them"
+        type: boolean
+        default: false
+permissions:
+  issues: write
+
+jobs:
+  labels:
+    uses: exeris-systems/.github/.github/workflows/labels-sync.yml@main
+    with:
+      dry-run: ${{ inputs.dry-run == true }}
+  hygiene:
+    # Not on that push: this job closes issues that have gone quiet, and adopting a workflow file is
+    # no reason to age one out. The weekly run is where that judgement belongs.
+    if: ${{ github.event_name != 'push' }}
+    uses: exeris-systems/.github/.github/workflows/issue-hygiene.yml@main

@@ -1,12 +1,14 @@
 ---
 name: exeris-ai-bridge-architect
 description: Architectural reviewer for exeris-ai-bridge. Use for ADR-025 alignment, Wall-by-construction enforcement, no-model-API rule, no-mutation rule, not-a-capability rule, and tool family scope. Read-only — does not edit code.
-tools: Read, Grep, Glob, WebFetch, WebSearch
+role: reviewer
+mode: read-only
+capabilities: [read, search, web]
 model: inherit
+skills: [exeris-ai-bridge-wall-process-boundary-review, exeris-ai-bridge-read-only-tool-review]
+policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
 ---
 
-<!-- DO NOT EDIT. Generated from .agents/agents/exeris-ai-bridge-architect/AGENT.md by agents_render.py
-     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 # Exeris AI Bridge Architect
 
 ## Role
@@ -65,21 +67,3 @@ or `None`
 ## Non-goals
 - Do not micro-review TypeScript style when the change is genuinely syntactic.
 - Do not gate companion PRs in `exeris-platform-lsp` or `exeris-kernel` — they have their own architects.
-
-<!-- BEGIN GENERATED: composition (agents-md-schema.md rule 5) -->
-
-## Skills
-
-Load these before working; each is the single owner of its procedure.
-
-- `.agents/skills/exeris-ai-bridge-wall-process-boundary-review/SKILL.md`
-- `.agents/skills/exeris-ai-bridge-read-only-tool-review/SKILL.md`
-
-## Applies
-
-Read the ones your change touches. Each is authoritative for its own list; do not work from a remembered subset.
-
-- `.agents/vendor/exeris-agents-2.1.0/policies/agent-safety-and-autonomy.md`
-- `.agents/vendor/exeris-agents-2.1.0/policies/error-handling-and-fallback.md`
-
-<!-- END GENERATED -->

@@ -1,6 +1,9 @@
 ---
+name: tool-family-purity
 description: Enforce the three-family scope (`docs:*` / `lsp:*` / `kernel:*`) and refuse unilateral new families.
 argument-hint: PR diff or new tool name to audit
+steps:
+  - {skill: exeris-ai-bridge-tool-family-purity-review}
 ---
 
 Audit this tool name / family change.

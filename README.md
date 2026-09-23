@@ -6,7 +6,7 @@
 
 - **Studio / LSP bridge** — query `@ExerisDomain` types, action signatures, codegen artefacts from a running `exeris-platform-lsp` session.
 - **Docs / ADR registry** — search and fetch ADRs, HLA, whitepaper, and templates from `exeris-docs`.
-- **Kernel introspection** — read-only inspection of a running kernel's provider registry, bootstrap/subsystem DAG, and per-subsystem detail (via the `KernelDiagnostics` SPI). Cap-blind by design: capability composition is a build-time tooling/platform surface, not a kernel one (see [ADR-024](../exeris-docs/adr/ADR-024-capability-composition-model.md) 2026-06-17 amendment and ADR-025 §"`kernel:*` Is Cap-Blind").
+- **Kernel introspection** — read-only inspection of a running kernel's provider registry, bootstrap/subsystem DAG, and per-subsystem detail (via the `KernelDiagnostics` SPI). Cap-blind by design: capability composition is a build-time tooling/platform surface, not a kernel one (see [ADR-024](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-024-capability-composition-model.md) 2026-06-17 amendment and ADR-025 §"`kernel:*` Is Cap-Blind").
 
 The repo is named *bridge*, not *mcp*: MCP is the first protocol surface, but the mission is "bridge Exeris semantic surfaces to AI agents" — adjacent integrations (Claude Skills bundles, agent-SDK adapters, future protocols) live here when they share that responsibility.
 
@@ -32,7 +32,7 @@ Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) t
 
 ## Architecture in one line
 
-The bridge is a **separate process in a separate language** from the Java kernel. This is intentional and preserves [ADR-006 (The Wall)](../exeris-docs/adr/ADR-006-spring-free-kernel-boundary.md) by construction — no AI-tooling code ever links into the kernel classpath.
+The bridge is a **separate process in a separate language** from the Java kernel. This is intentional and preserves [ADR-006 (The Wall)](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-006-spring-free-kernel-boundary.md) by construction — no AI-tooling code ever links into the kernel classpath.
 
 ```
 ┌─────────────────────┐      MCP/stdio       ┌────────────────────┐
@@ -233,10 +233,10 @@ docs/
 
 Apache License 2.0. See [LICENSE](LICENSE).
 
-This repo is consistently licensed with `exeris-kernel`, `exeris-sdk`, and `exeris-tooling`. Commercial protection of the ecosystem is enforced at the capability and SKU layer per [ADR-023](../exeris-docs/adr/ADR-023-capability-licensing-taxonomy.md), not at the agent-bridge layer.
+This repo is consistently licensed with `exeris-kernel`, `exeris-sdk`, and `exeris-tooling`. Commercial protection of the ecosystem is enforced at the capability and SKU layer per [ADR-023](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-023-capability-licensing-taxonomy.md), not at the agent-bridge layer.
 
 ## Where this repo fits
 
 This is the twentieth active sibling repository in `~/exeris-systems/`. It is **not** a Tier 2 `exeris-caps-*` capability, **not** a Tier 3 `exeris-sku-*` product, and **not** part of the Tier 1 substrate. It is developer-facing tooling — structurally closer to `exeris-tooling` than to anything else in the map.
 
-See the top-level [`~/exeris-systems/CLAUDE.md`](../CLAUDE.md) sub-repo map and the founding [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md) for the full rationale.
+See the top-level `~/exeris-systems/CLAUDE.md` sub-repo map and the founding [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md) for the full rationale.

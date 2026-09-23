@@ -1,12 +1,19 @@
 ---
 name: exeris-ai-bridge-router
 description: Entry router for exeris-ai-bridge. Use proactively for triage to classify an MCP server task (tool family / transport / cross-repo coordination / docs) and recommend a specialist agent. Invoke when the right specialist is not obvious.
-tools: Read, Grep, Glob, WebFetch, WebSearch
+role: router
+mode: read-only
+capabilities: [read, search, web]
 model: inherit
+skills: [exeris-ai-bridge-task-classifier, exeris-ai-bridge-routing-planner]
+policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+handoffs:
+  - {agent: exeris-ai-bridge-architect, when: "ADR-025 alignment, Wall by construction, tool family scope or not-a-capability is the primary risk", blocking: false}
+  - {agent: exeris-ai-bridge-implementer, when: "TS code in src/server.ts, src/tools/<family>/ or the transport layer is the primary work", blocking: false}
+  - {agent: exeris-ai-bridge-tool-family-discipline, when: "tool namespacing or family-scope boundary is the primary risk", blocking: false}
+  - {agent: exeris-ai-bridge-docs-adr, when: "an ADR-025 amendment, cross-repo link stubs or ROADMAP / README sync is the primary work", blocking: false}
 ---
 
-<!-- DO NOT EDIT. Generated from .agents/agents/exeris-ai-bridge-router/AGENT.md by agents_render.py
-     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 # Exeris AI Bridge Router
 
 ## Role
@@ -95,30 +102,3 @@ or `None`
 
 ## Non-goal
 Do not gate cross-repo coordination unilaterally — companion PRs in `exeris-platform-lsp` / `exeris-kernel` are owned by their repos.
-
-<!-- BEGIN GENERATED: composition (agents-md-schema.md rule 5) -->
-
-## Skills
-
-Load these before working; each is the single owner of its procedure.
-
-- `.agents/skills/exeris-ai-bridge-task-classifier/SKILL.md`
-- `.agents/skills/exeris-ai-bridge-routing-planner/SKILL.md`
-
-## Applies
-
-Read the ones your change touches. Each is authoritative for its own list; do not work from a remembered subset.
-
-- `.agents/vendor/exeris-agents-2.1.0/policies/agent-safety-and-autonomy.md`
-- `.agents/vendor/exeris-agents-2.1.0/policies/error-handling-and-fallback.md`
-
-## Handoffs
-
-| To | When | Blocking |
-|:--|:--|:--|
-| `exeris-ai-bridge-architect` | ADR-025 alignment, Wall by construction, tool family scope or not-a-capability is the primary risk | no |
-| `exeris-ai-bridge-implementer` | TS code in src/server.ts, src/tools/<family>/ or the transport layer is the primary work | no |
-| `exeris-ai-bridge-tool-family-discipline` | tool namespacing or family-scope boundary is the primary risk | no |
-| `exeris-ai-bridge-docs-adr` | an ADR-025 amendment, cross-repo link stubs or ROADMAP / README sync is the primary work | no |
-
-<!-- END GENERATED -->

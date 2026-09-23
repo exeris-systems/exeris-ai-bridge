@@ -1,8 +1,11 @@
 ---
+name: wall-process-boundary-check
 description: Audit a dep / transport / kernel-integration change against The Wall by construction. TS/Node process MUST NOT link Java kernel classpath.
-argument-hint: PR diff or package.json / `src/tools/kernel/**` change to audit
+disable-model-invocation: true
 ---
 
+<!-- DO NOT EDIT. Generated from .agents/workflows/wall-process-boundary-check.md by agents_render.py
+     (exeris-systems/exeris-agents; agents-md-schema.md rule 7). Edit the source. -->
 Audit this change against The Wall (ADR-006 + ADR-025).
 
 Wall rules for `exeris-ai-bridge`:
