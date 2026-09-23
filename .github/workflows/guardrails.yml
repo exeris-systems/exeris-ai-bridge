@@ -144,6 +144,10 @@ jobs:
         {"docs-lint": "${{ needs.docs.result }}",
          "commit-lint": "${{ needs.commits.result }}",
          "pr-body-check": "${{ needs.pr-body.result }}"}
+      # This repository's step of the review, and the checks the reviewer reads as its output: the
+      # compiler, the type-aware lint and the unit suite, the same three build.yml runs.
+      repo-routine: docs/repo-review-rules.md
+      repo-checks: npm ci --no-audit --no-fund && npm run typecheck && npm run lint && npm test
     secrets:
       claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       exeris_bot_app_id: ${{ secrets.EXERIS_BOT_APP_ID }}
