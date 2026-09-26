@@ -1,3 +1,12 @@
+---
+title: "CLAUDE.md — exeris-ai-bridge"
+type: reference
+visibility: public
+owning-repo: exeris-ai-bridge
+status: active
+last-verified: 2026-09-23
+---
+
 # CLAUDE.md — exeris-ai-bridge
 
 Guardrails for AI assistants working inside `~/exeris-systems/exeris-ai-bridge/`. Human-facing description lives in [`README.md`](README.md); this file captures the constraints, conventions, and "what to do when" rules an AI session must respect.
