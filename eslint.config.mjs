@@ -19,8 +19,11 @@ export default tseslint.config(
   {
     // Generated and vendored trees. `dist/` is compiler output, `data/` is the
     // reference bundle `prepack` rebuilds, `coverage/` is a report. None of the
-    // three is authored here and none is committed.
-    ignores: ["dist/**", "data/**", "coverage/**", "node_modules/**"],
+    // three is authored here and none is committed. `.guardrails/` is the
+    // organisation's review routine, checked out inside this tree by the review
+    // job before it runs `npm run lint`: another repository's files, outside
+    // the TypeScript project the type-aware rules need.
+    ignores: ["dist/**", "data/**", "coverage/**", "node_modules/**", ".guardrails/**"],
   },
 
   js.configs.recommended,
