@@ -4,7 +4,7 @@ type: roadmap
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-23
+last-verified: 2026-09-26
 ---
 
 # Exeris AI Bridge — Roadmap to 1.0.0 GA
@@ -25,12 +25,12 @@ Through 0.4.0 the roadmap served exactly one of these, without ever naming it. T
 
 **P1 — ecosystem contributor.** Works *on* Exeris: kernel, SDK, tooling, platform. Has every sibling repo checked out under `~/exeris-systems/`. Needs the ADR registry, cross-repo routing rules, kernel runtime internals. **Served by `docs:*`, `kernel:*`, and the LSP index pointed at an ecosystem repo.**
 
-**P2 — application developer.** Builds *on* Exeris — a product on top of the SDK + tooling. Has **no** ecosystem checkout: a Maven dependency on `eu.exeris:exeris-sdk-*`, the codegen plugin, and their own `@ExerisDomain` sources. Needs the annotation contract, what codegen will emit, why the build failed, and canonical entity edits. **Served by nothing today.**
+**P2 — application developer.** Builds *on* Exeris — a product on top of the SDK + tooling. Has **no** ecosystem checkout: a Maven dependency on `eu.exeris:exeris-sdk-*`, the codegen plugin, and their own `@ExerisDomain` sources. Needs the annotation contract, what codegen will emit, why the build failed, and canonical entity edits. **Served by `build:*` and `caps:*` since 0.6.0, on the zero-checkout boot 0.5.0 made possible; `sdk:*` follows at 0.7.0.**
 
-The gap is structural, not cosmetic. Three concrete pieces of evidence:
+The gap the amendment closed was structural, not cosmetic. It rested on three pieces of evidence:
 
 1. **Every planned prompt was a P1 workflow** — the pre-amendment prompt list (`review-three-tier-violations`, `draft-adr`, `route-this-task`, `wall-audit`, now at 0.9.0) contained four contributor workflows and not one entity-authoring workflow.
-2. **`loadConfig()` fail-fast makes P2 impossible.** `src/config/env.ts` resolves `EXERIS_DOCS_ROOT ?? ../exeris-docs` through `resolveExistingDir`, which throws when the directory is absent, and derives `ecosystemRoot = dirname(docsRoot)` — from which the default LSP and kernel-CLI launch specs are built as `mvn -f <ecosystemRoot>/…/pom.xml`. On a P2 machine there is no such tree, so **the server does not boot at all**.
+2. **`loadConfig()` fail-fast made P2 impossible.** `src/config/env.ts` resolves `EXERIS_DOCS_ROOT ?? ../exeris-docs` through `resolveExistingDir`, which throws when the directory is absent, and derives `ecosystemRoot = dirname(docsRoot)` — from which the default LSP and kernel-CLI launch specs are built as `mvn -f <ecosystemRoot>/…/pom.xml`. On a P2 machine there was no such tree, so **the server did not boot at all** — until 0.5.0 made every root optional.
 3. **The write vocabulary already exists and is P2-shaped.** `MutationOp` (SDK `exeris-sdk-source-model`) has nine variants — `AddField`, `RemoveField`, `RenameField`, `ChangeFieldType`, `AddRelationship`, `RemoveRelationship`, `ChangeRelationshipCardinality`, `AddAction`, `RemoveAction` — with `SourceDigest` / `BaselineTrust` for optimistic concurrency, and `exeris/applyMutation` implements idempotent write-back platform-side. The bridge is forbidden from consuming any of it (2026-06-24 amendment). That investment currently serves Studio only.
 
 **Read-only stays intact.** The bridge performs no write, in any family, through 1.0 — see 0.8.0, which delivers *preview* (a canonical diff the agent applies with its own file tools), not *apply*.
