@@ -144,6 +144,12 @@ jobs:
         {"docs-lint": "${{ needs.docs.result }}",
          "commit-lint": "${{ needs.commits.result }}",
          "pr-body-check": "${{ needs.pr-body.result }}"}
+      # THE ROUTINE IN PARTS, each part its own model run, composed into one verdict and one
+      # comment with a section per part. `pr` and `repo` run on every pull request, and the checks
+      # below run in the `repo` leg alone; `docs`, `records`, `code-docs` and `code` run only where
+      # the diff has their files, so the TypeScript is read by the part that judges code. A part
+      # that leaves no verdict makes the check red.
+      review-in-parts: true
       # This repository's step of the review, and the checks the reviewer reads as its output: the
       # compiler, the type-aware lint and the unit suite, the same three build.yml runs.
       repo-routine: docs/repo-review-rules.md
