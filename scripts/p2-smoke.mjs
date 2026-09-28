@@ -213,6 +213,7 @@ function assertBootsDark({
   sdkAst,
   sdkDescribe,
   sdkDeprecations,
+  sdkScopingRules,
   stderr,
 }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
@@ -332,6 +333,20 @@ function assertBootsDark({
       (a) => a.annotation === "ExerisDomain" && a.attribute === "tenantScoped",
     ),
   );
+
+  assert.ok(!sdkScopingRules.isError, `sdk-get_scoping_rules errored: ${sdkScopingRules.content[0].text}`);
+  const sdkScopingRulesPayload = JSON.parse(sdkScopingRules.content[0].text);
+  assert.equal(sdkScopingRulesPayload.ruleCount, 6);
+  assert.equal(sdkScopingRulesPayload.matchedRules, 6);
+  assert.equal(sdkScopingRulesPayload.versionSkew?.status, "skew_detected");
+  assert.equal(sdkScopingRulesPayload.versionSkew?.projectSdkVersion, "0.10.0");
+  assert.equal(sdkScopingRulesPayload.versionSkew?.bundledSdkVersion, sdkListPayload.sdkVersion);
+
+  // Health and list tools also report detected version skew on the P2 scratch app:
+  const sdkHealth = byFamily.get("sdk");
+  assert.equal(sdkHealth.versionSkew?.status, "skew_detected");
+  assert.equal(sdkHealth.versionSkew?.projectSdkVersion, "0.10.0");
+  assert.equal(sdkListPayload.versionSkew?.status, "skew_detected");
 
   assert.match(
     stderr,
@@ -474,6 +489,10 @@ async function interrogate(project, home, extraEnv) {
       name: "sdk-list_deprecations",
       arguments: { forRemovalOnly: true },
     });
+    const sdkScopingRules = await client.request("tools/call", {
+      name: "sdk-get_scoping_rules",
+      arguments: {},
+    });
 
     assert.equal(child.exitCode, null, "the server exited during the session");
     return {
@@ -491,6 +510,7 @@ async function interrogate(project, home, extraEnv) {
       sdkAst,
       sdkDescribe,
       sdkDeprecations,
+      sdkScopingRules,
       stderr: client.stderr,
     };
   } finally {

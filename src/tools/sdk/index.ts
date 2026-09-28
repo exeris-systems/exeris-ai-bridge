@@ -1,9 +1,11 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-import type { Unavailable } from "../../config/env.js";
+import type { ProjectConfig, Unavailable } from "../../config/env.js";
 import { isSdkAvailable, readBundleEntry, type AvailableBundle, type BundleState } from "../../data/bundle.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
+import { CANONICAL_SCOPING_RULES, findScopingRules } from "./rules.js";
+import { computeVersionSkew } from "./skew.js";
 import {
   parseAnnotationCatalog,
   parseAstSchema,
@@ -41,13 +43,28 @@ export function resolveSdkHandle(bundle: BundleState): SdkFamily {
   return { state: "available", bundle };
 }
 
-export function registerSdkTools(bundle: BundleState, rootOverride?: string): RegisteredTool[] {
+export function registerSdkTools(
+  bundle: BundleState,
+  projectOrRootOverride?: ProjectConfig | Unavailable | string,
+  rootOverride?: string,
+): RegisteredTool[] {
+  let project: ProjectConfig | Unavailable | undefined;
+  let resolvedRootOverride: string | undefined = rootOverride;
+
+  if (typeof projectOrRootOverride === "string") {
+    resolvedRootOverride = projectOrRootOverride;
+  } else if (typeof projectOrRootOverride === "object") {
+    project = projectOrRootOverride;
+  }
+
+  const projectRoot = project && project.state === "available" ? project.projectRoot : undefined;
   const handle = resolveSdkHandle(bundle);
   return [
-    listAnnotationsTool(handle, rootOverride),
-    describeAnnotationTool(handle, rootOverride),
-    listDeprecationsTool(handle, rootOverride),
-    getAstSchemaTool(handle, rootOverride),
+    listAnnotationsTool(handle, projectRoot, resolvedRootOverride),
+    describeAnnotationTool(handle, projectRoot, resolvedRootOverride),
+    getScopingRulesTool(handle, projectRoot, resolvedRootOverride),
+    listDeprecationsTool(handle, projectRoot, resolvedRootOverride),
+    getAstSchemaTool(handle, projectRoot, resolvedRootOverride),
   ];
 }
 
@@ -97,7 +114,11 @@ function loadAstSchema(
   }
 }
 
-function listAnnotationsTool(handle: SdkFamily, rootOverride?: string): RegisteredTool {
+function listAnnotationsTool(
+  handle: SdkFamily,
+  projectRoot?: string,
+  rootOverride?: string,
+): RegisteredTool {
   return {
     definition: {
       name: "sdk-list_annotations",
@@ -163,12 +184,17 @@ function listAnnotationsTool(handle: SdkFamily, rootOverride?: string): Register
         totalInCatalog: catalog.annotationCount,
         matched: summaries.length,
         annotations: summaries,
+        versionSkew: computeVersionSkew(catalog.sdkVersion, projectRoot),
       });
     }),
   };
 }
 
-function describeAnnotationTool(handle: SdkFamily, rootOverride?: string): RegisteredTool {
+function describeAnnotationTool(
+  handle: SdkFamily,
+  projectRoot?: string,
+  rootOverride?: string,
+): RegisteredTool {
   return {
     definition: {
       name: "sdk-describe_annotation",
@@ -257,12 +283,78 @@ function describeAnnotationTool(handle: SdkFamily, rootOverride?: string): Regis
               description: pkg.description ?? null,
             }
           : null,
+        versionSkew: computeVersionSkew(catalog.sdkVersion, projectRoot),
       });
     }),
   };
 }
 
-function listDeprecationsTool(handle: SdkFamily, rootOverride?: string): RegisteredTool {
+function getScopingRulesTool(
+  handle: SdkFamily,
+  projectRoot?: string,
+  rootOverride?: string,
+): RegisteredTool {
+  return {
+    definition: {
+      name: "sdk-get_scoping_rules",
+      description:
+        "Get canonical authoring contract scoping rules for Exeris SDK annotations (including @Field vs @Validation split, FieldMetadata as single AST carrier per ADR-054, derived SQL NOT NULL and API not-blank generator semantics, form lifecycle scoping, deprecations, and sibling vs nested form trap). Supports optional filtering by rule ID or query string.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          rule: {
+            type: "string",
+            description:
+              "Optional rule identifier (e.g. 'field-vs-validation-split', 'single-ast-carrier', 'derived-nullability-semantics', 'form-lifecycle-scoping', 'deprecation-fallbacks', 'nested-form-trap') or search query.",
+          },
+        },
+      },
+    },
+    handler: guard("sdk", handle, async ({ bundle }, args) => {
+      const read = readBundleEntry(bundle, "annotation-catalog", rootOverride);
+      if (read.state === "unavailable") {
+        return jsonResult(
+          { error: "bundle_entry_unavailable", reason: read.reason, remedy: read.remedy },
+          true,
+        );
+      }
+      let catalog: AnnotationCatalog;
+      try {
+        catalog = parseAnnotationCatalog(JSON.parse(read.text));
+      } catch (err) {
+        return jsonResult({ error: "malformed_catalog", message: (err as Error).message }, true);
+      }
+
+      const ruleQuery = typeof args.rule === "string" ? args.rule.trim() : undefined;
+      const matched = findScopingRules(ruleQuery);
+
+      if (ruleQuery && matched.length === 0) {
+        const known = CANONICAL_SCOPING_RULES.map((r) => r.id);
+        return jsonResult(
+          {
+            error: "rule_not_found",
+            message: `No scoping rules matched '${ruleQuery}'. Known rule IDs: ${known.join(", ")}`,
+          },
+          true,
+        );
+      }
+
+      return jsonResult({
+        sdkVersion: catalog.sdkVersion,
+        ruleCount: CANONICAL_SCOPING_RULES.length,
+        matchedRules: matched.length,
+        rules: matched,
+        versionSkew: computeVersionSkew(catalog.sdkVersion, projectRoot),
+      });
+    }),
+  };
+}
+
+function listDeprecationsTool(
+  handle: SdkFamily,
+  projectRoot?: string,
+  rootOverride?: string,
+): RegisteredTool {
   return {
     definition: {
       name: "sdk-list_deprecations",
@@ -296,11 +388,7 @@ function listDeprecationsTool(handle: SdkFamily, rootOverride?: string): Registe
 
       let annotations = catalog.annotations;
       if (pkgFilter) {
-        annotations = annotations.filter(
-          (a) =>
-            a.package.toLowerCase().includes(pkgFilter) ||
-            a.package.toLowerCase().endsWith(`.${pkgFilter}`),
-        );
+        annotations = annotations.filter((a) => a.package.toLowerCase().includes(pkgFilter));
       }
 
       const deprecatedAnnotations: Array<{
@@ -365,12 +453,17 @@ function listDeprecationsTool(handle: SdkFamily, rootOverride?: string): Registe
         totalDeprecatedAttributes: deprecatedAttributes.length,
         deprecatedAnnotations,
         deprecatedAttributes,
+        versionSkew: computeVersionSkew(catalog.sdkVersion, projectRoot),
       });
     }),
   };
 }
 
-function getAstSchemaTool(handle: SdkFamily, rootOverride?: string): RegisteredTool {
+function getAstSchemaTool(
+  handle: SdkFamily,
+  projectRoot?: string,
+  rootOverride?: string,
+): RegisteredTool {
   return {
     definition: {
       name: "sdk-get_ast_schema",
@@ -405,25 +498,18 @@ function getAstSchemaTool(handle: SdkFamily, rootOverride?: string): RegisteredT
           );
         }
         const found = schema.definitions[defName];
-        if (!found) {
-          return jsonResult(
-            {
-              error: "unknown_definition",
-              message: `Unknown AST definition '${defName}'. Known definitions: ${schema.envelope.definitions.join(", ")}`,
-            },
-            true,
-          );
-        }
         return jsonResult({
           definition: defName,
           sdkVersion: schema.envelope.sdkVersion,
           astSchemaVersion: schema.envelope.astSchemaVersion,
           schema: found,
+          versionSkew: computeVersionSkew(schema.envelope.sdkVersion, projectRoot),
         });
       }
 
       return jsonResult({
         ...schema.envelope,
+        versionSkew: computeVersionSkew(schema.envelope.sdkVersion, projectRoot),
       });
     }),
   };

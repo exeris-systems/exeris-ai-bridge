@@ -7,11 +7,12 @@ import type {
   ToolFamily,
   Unavailable,
 } from "../../config/env.js";
-import { isSdkAvailable, loadBundle, type BundleState } from "../../data/bundle.js";
+import { isSdkAvailable, loadBundle, readBundleEntry, type BundleState } from "../../data/bundle.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
 import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
 import { getServerVersion } from "../../version.js";
+import { computeVersionSkew, type VersionSkewReport } from "../sdk/skew.js";
 
 // bridge:* — the bridge's own diagnostic surface. It reports on the server
 // rather than on Exeris: which persona the environment resolved to, which
@@ -44,8 +45,9 @@ export function registerBridgeTools(
   config: BridgeConfig,
   transports: BridgeTransports = {},
   bundle: BundleState = loadBundle(),
+  rootOverride?: string,
 ): RegisteredTool[] {
-  return [versionTool(config, bundle), healthTool(config, transports, bundle)];
+  return [versionTool(config, bundle), healthTool(config, transports, bundle, rootOverride)];
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,7 @@ function healthTool(
   config: BridgeConfig,
   transports: BridgeTransports,
   bundle: BundleState,
+  rootOverride?: string,
 ): RegisteredTool {
   return {
     definition: {
@@ -132,7 +135,7 @@ function healthTool(
           // guessing which of its tools the state applied to.
           plainFamilyReport("build", config.project),
           plainFamilyReport("caps", config.project),
-          bundleFamilyReport("sdk", bundle),
+          bundleFamilyReport("sdk", bundle, config.project, rootOverride),
         ],
       }),
   };
@@ -148,6 +151,7 @@ interface FamilyReport {
   readonly reason?: string;
   readonly remedy?: string;
   readonly transport?: TransportReport | null;
+  readonly versionSkew?: VersionSkewReport;
 }
 
 interface TransportReport {
@@ -172,7 +176,12 @@ function plainFamilyReport(
 /**
  * Reports sdk availability with reason and remedy based on bundled reference data.
  */
-function bundleFamilyReport(family: ToolFamily, bundle: BundleState): FamilyReport {
+function bundleFamilyReport(
+  family: ToolFamily,
+  bundle: BundleState,
+  project?: ProjectConfig | Unavailable,
+  rootOverride?: string,
+): FamilyReport {
   if (bundle.state === "unavailable") {
     return { family, state: "unavailable", reason: bundle.reason, remedy: bundle.remedy };
   }
@@ -184,7 +193,24 @@ function bundleFamilyReport(family: ToolFamily, bundle: BundleState): FamilyRepo
       remedy: "Run npm run vendor:data to generate the bundle.",
     };
   }
-  return { family, state: "available" };
+  const projectRoot = project && project.state === "available" ? project.projectRoot : undefined;
+  const read = readBundleEntry(bundle, "annotation-catalog", rootOverride);
+  let bundledSdkVersion: string | undefined;
+  if (read.state === "available") {
+    try {
+      const parsed: unknown = JSON.parse(read.text);
+      if (typeof parsed === "object" && parsed !== null && "sdkVersion" in parsed) {
+        const version = parsed.sdkVersion;
+        if (typeof version === "string") {
+          bundledSdkVersion = version;
+        }
+      }
+    } catch {
+      // malformed catalog
+    }
+  }
+  const versionSkew = computeVersionSkew(bundledSdkVersion, projectRoot);
+  return { family, state: "available", versionSkew };
 }
 
 /**

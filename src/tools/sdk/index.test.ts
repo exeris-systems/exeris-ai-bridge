@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BundleState } from "../../data/bundle.js";
 import { registerSdkTools, resolveSdkHandle } from "./index.js";
+import { computeVersionSkew, detectProjectSdkVersion } from "./skew.js";
 
 const SAMPLE_CATALOG = {
   catalogFormat: 1,
@@ -216,13 +217,14 @@ test("resolveSdkHandle reports unavailable when bundle has no annotation-catalog
   assert.match((handle as any).reason, /no annotation catalog/);
 });
 
-test("registerSdkTools registers all four sdk-* tools", () => {
+test("registerSdkTools registers all five sdk-* tools", () => {
   const bundle = createBundle(true);
   const tools = registerSdkTools(bundle, root);
   const names = tools.map((t) => t.definition.name).sort();
   assert.deepEqual(names, [
     "sdk-describe_annotation",
     "sdk-get_ast_schema",
+    "sdk-get_scoping_rules",
     "sdk-list_annotations",
     "sdk-list_deprecations",
   ]);
@@ -428,5 +430,250 @@ test("sdk tools return family_unavailable when bundle is unavailable", async () 
     const data = payload(res);
     assert.equal(data.error, "family_unavailable");
     assert.equal(data.family, "sdk");
+  }
+});
+
+test("sdk-get_scoping_rules returns all rules without filters", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-get_scoping_rules")!;
+  const res = await tool.handler({});
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.sdkVersion, "0.12.0-SNAPSHOT");
+  assert.equal(data.ruleCount, 6);
+  assert.equal(data.matchedRules, 6);
+  assert.equal(data.rules.length, 6);
+  assert.equal(data.versionSkew.status, "unknown");
+});
+
+test("sdk-get_scoping_rules filters by rule ID", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-get_scoping_rules")!;
+  const res = await tool.handler({ rule: "field-vs-validation-split" });
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.matchedRules, 1);
+  assert.equal(data.rules[0].id, "field-vs-validation-split");
+  assert.match(data.rules[0].title, /@Field vs @Validation/);
+});
+
+test("sdk-get_scoping_rules filters by query text", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-get_scoping_rules")!;
+  const res = await tool.handler({ rule: "nested" });
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.matchedRules, 1);
+  assert.equal(data.rules[0].id, "nested-form-trap");
+});
+
+test("sdk-get_scoping_rules returns error on unknown rule query", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-get_scoping_rules")!;
+  const res = await tool.handler({ rule: "nonexistent-rule-xyz" });
+  assert.equal(res.isError, true);
+  const data = payload(res);
+  assert.equal(data.error, "rule_not_found");
+  assert.match(data.message, /Known rule IDs:/);
+});
+
+test("detectProjectSdkVersion extracts direct dependency version", () => {
+  const projectDir = join(work, "project-direct");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.10.0</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), "0.10.0");
+});
+
+test("detectProjectSdkVersion resolves properties and strips comments", () => {
+  const projectDir = join(work, "project-props");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<!-- Comment with <groupId>eu.exeris</groupId><version>9.9.9</version> -->
+<project>
+  <properties>
+    <exeris.sdk.version>0.12.0-SNAPSHOT</exeris.sdk.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>eu.exeris</groupId>
+      <artifactId>exeris-sdk-core</artifactId>
+      <version>\${exeris.sdk.version}</version>
+    </dependency>
+  </dependencies>
+</project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), "0.12.0-SNAPSHOT");
+});
+
+test("detectProjectSdkVersion returns null when parent version differs from sdk version", () => {
+  const projectDir = join(work, "project-parent");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project>
+  <parent>
+    <groupId>eu.exeris</groupId>
+    <artifactId>exeris-parent</artifactId>
+    <version>0.7.0</version>
+  </parent>
+  <dependencies>
+    <dependency>
+      <groupId>eu.exeris</groupId>
+      <artifactId>exeris-sdk-core</artifactId>
+    </dependency>
+  </dependencies>
+</project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), null);
+  const skew = computeVersionSkew("0.12.0-SNAPSHOT", projectDir);
+  assert.equal(skew.status, "unknown");
+  assert.equal(skew.projectSdkVersion, undefined);
+});
+
+test("detectProjectSdkVersion returns null for missing or non-exeris pom", () => {
+  assert.equal(detectProjectSdkVersion(undefined), null);
+  assert.equal(detectProjectSdkVersion(join(work, "does-not-exist")), null);
+
+  const projectDir = join(work, "project-other");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project><dependencies><dependency><groupId>com.other</groupId><artifactId>other-lib</artifactId><version>1.0.0</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), null);
+});
+
+test("detectProjectSdkVersion ignores non-SDK eu.exeris dependencies listed before SDK", () => {
+  const projectDir = join(work, "project-non-sdk-first");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project><dependencies>
+      <dependency><groupId>eu.exeris</groupId><artifactId>exeris-kernel-spi</artifactId><version>0.5.0</version></dependency>
+      <dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.12.0</version></dependency>
+    </dependencies></project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), "0.12.0");
+});
+
+test("detectProjectSdkVersion guards against circular property references in pom.xml", () => {
+  const projectDir = join(work, "project-cycle");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project>
+      <properties>
+        <a>\${b}</a>
+        <b>\${a}</b>
+      </properties>
+      <dependencies>
+        <dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>\${a}</version></dependency>
+      </dependencies>
+    </project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), null);
+});
+
+test("detectProjectSdkVersion returns null for undefined property reference in pom.xml", () => {
+  const projectDir = join(work, "project-undefined-prop");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project>
+      <dependencies>
+        <dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>\${exeris.sdk.version}</version></dependency>
+      </dependencies>
+    </project>`,
+    "utf8",
+  );
+  assert.equal(detectProjectSdkVersion(projectDir), null);
+  const skew = computeVersionSkew(projectDir, "0.12.0-SNAPSHOT");
+  assert.equal(skew.status, "unknown");
+});
+
+test("detectProjectSdkVersion refuses symlinked pom escaping sandbox root", () => {
+  const projectDir = join(work, "project-symlink");
+  const outsideDir = join(work, "outside-sandbox");
+  mkdirSync(projectDir, { recursive: true });
+  mkdirSync(outsideDir, { recursive: true });
+  const outsidePom = join(outsideDir, "pom.xml");
+  writeFileSync(
+    outsidePom,
+    `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.12.0</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+  symlinkSync(outsidePom, join(projectDir, "pom.xml"));
+  assert.equal(detectProjectSdkVersion(projectDir), null);
+});
+
+test("computeVersionSkew detects skew and alignment correctly", () => {
+  const projectSkew = join(work, "proj-skew");
+  mkdirSync(projectSkew, { recursive: true });
+  writeFileSync(
+    join(projectSkew, "pom.xml"),
+    `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.10.0</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+
+  const skewReport = computeVersionSkew("0.12.0-SNAPSHOT", projectSkew);
+  assert.equal(skewReport.status, "skew_detected");
+  assert.equal(skewReport.projectSdkVersion, "0.10.0");
+  assert.equal(skewReport.bundledSdkVersion, "0.12.0-SNAPSHOT");
+  assert.ok(skewReport.warning?.includes("0.10.0"));
+
+  const projectAligned = join(work, "proj-aligned");
+  mkdirSync(projectAligned, { recursive: true });
+  writeFileSync(
+    join(projectAligned, "pom.xml"),
+    `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.12.0-SNAPSHOT</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+
+  const alignedReport = computeVersionSkew("0.12.0-SNAPSHOT", projectAligned);
+  assert.equal(alignedReport.status, "aligned");
+  assert.equal(alignedReport.projectSdkVersion, "0.12.0-SNAPSHOT");
+
+  const unknownReport = computeVersionSkew("0.12.0-SNAPSHOT", undefined);
+  assert.equal(unknownReport.status, "unknown");
+});
+
+test("registerSdkTools attaches detected versionSkew across all tools", async () => {
+  const projectDir = join(work, "proj-skew-all");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "pom.xml"),
+    `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.9.0</version></dependency></dependencies></project>`,
+    "utf8",
+  );
+
+  const bundle = createBundle(true);
+  const projectConfig = {
+    state: "available" as const,
+    source: "cwd" as const,
+    projectRoot: projectDir,
+    pomXml: join(projectDir, "pom.xml"),
+  };
+  const tools = registerSdkTools(bundle, projectConfig, root);
+
+  for (const tool of tools) {
+    let args: Record<string, unknown> = {};
+    if (tool.definition.name === "sdk-describe_annotation") {
+      args = { annotation: "ExerisDomain" };
+    }
+    const res = await tool.handler(args);
+    assert.ok(!res.isError, `${tool.definition.name} failed`);
+    const data = payload(res);
+    assert.equal(data.versionSkew?.status, "skew_detected", `skew not reported on ${tool.definition.name}`);
+    assert.equal(data.versionSkew?.projectSdkVersion, "0.9.0");
   }
 });
