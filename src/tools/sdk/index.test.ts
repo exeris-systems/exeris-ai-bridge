@@ -12,10 +12,18 @@ import { registerSdkTools, resolveSdkHandle } from "./index.js";
 const SAMPLE_CATALOG = {
   catalogFormat: 1,
   sdkVersion: "0.12.0-SNAPSHOT",
-  annotationCount: 3,
+  annotationCount: 4,
   packages: [
-    { name: "eu.exeris.sdk.annotation", purpose: "Core annotations" },
-    { name: "eu.exeris.sdk.annotation.system", purpose: "System field markers" },
+    {
+      name: "eu.exeris.sdk.annotation",
+      purpose: "Core annotations",
+      description: "Root package rationale for entity authoring.",
+    },
+    {
+      name: "eu.exeris.sdk.annotation.system",
+      purpose: "System field markers",
+      description: "System fields package description.",
+    },
   ],
   annotations: [
     {
@@ -27,6 +35,7 @@ const SAMPLE_CATALOG = {
       memberValueOnly: false,
       retention: "SOURCE",
       purpose: "Exposes domain methods as API endpoints",
+      description: "Action javadoc description",
       attributes: [],
     },
     {
@@ -38,7 +47,63 @@ const SAMPLE_CATALOG = {
       memberValueOnly: false,
       retention: "SOURCE",
       purpose: "Marks an entity-first domain aggregate",
-      attributes: [],
+      description: "ExerisDomain aggregate marker.",
+      attributes: [
+        {
+          name: "module",
+          type: "String",
+          required: true,
+          purpose: "Module name",
+        },
+        {
+          name: "tenantScoped",
+          type: "boolean",
+          required: false,
+          default: "true",
+          purpose: "Deprecated tenant scope boolean",
+          deprecated: {
+            forRemoval: true,
+            since: "0.10.0",
+            replacement: "Replaced by #dataScope()",
+          },
+        },
+      ],
+    },
+    {
+      name: "Validation",
+      qualifiedName: "eu.exeris.sdk.annotation.Validation",
+      package: "eu.exeris.sdk.annotation",
+      nested: false,
+      targets: ["FIELD"],
+      memberValueOnly: false,
+      retention: "SOURCE",
+      purpose: "Declares validation constraints",
+      attributes: [
+        {
+          name: "required",
+          type: "boolean",
+          required: false,
+          default: "false",
+          purpose: "Deprecated required flag",
+          deprecated: {
+            forRemoval: true,
+            since: "0.2.0",
+            replacement: "Use Field#required() instead",
+          },
+        },
+        {
+          name: "validateOn",
+          type: "String",
+          required: false,
+          default: "ALWAYS",
+          purpose: "Deprecated lifecycle validation",
+          deprecated: {
+            forRemoval: false,
+            since: "0.2.0",
+            replacement: "Use Field#inCreate() instead",
+          },
+        },
+      ],
     },
     {
       name: "TenantId",
@@ -151,11 +216,16 @@ test("resolveSdkHandle reports unavailable when bundle has no annotation-catalog
   assert.match((handle as any).reason, /no annotation catalog/);
 });
 
-test("registerSdkTools registers sdk-list_annotations and sdk-get_ast_schema", () => {
+test("registerSdkTools registers all four sdk-* tools", () => {
   const bundle = createBundle(true);
   const tools = registerSdkTools(bundle, root);
   const names = tools.map((t) => t.definition.name).sort();
-  assert.deepEqual(names, ["sdk-get_ast_schema", "sdk-list_annotations"]);
+  assert.deepEqual(names, [
+    "sdk-describe_annotation",
+    "sdk-get_ast_schema",
+    "sdk-list_annotations",
+    "sdk-list_deprecations",
+  ]);
 });
 
 test("sdk-list_annotations returns all annotations with no filters", async () => {
@@ -164,9 +234,9 @@ test("sdk-list_annotations returns all annotations with no filters", async () =>
   const res = await tool.handler({});
   assert.ok(!res.isError);
   const data = payload(res);
-  assert.equal(data.totalInCatalog, 3);
-  assert.equal(data.matched, 3);
-  assert.equal(data.annotations.length, 3);
+  assert.equal(data.totalInCatalog, 4);
+  assert.equal(data.matched, 4);
+  assert.equal(data.annotations.length, 4);
 });
 
 test("sdk-list_annotations filters by package", async () => {
@@ -242,6 +312,107 @@ test("sdk-get_ast_schema reports error on inherited property definition names li
     assert.equal(data.error, "unknown_definition");
     assert.match(data.message, new RegExp(def));
   }
+});
+
+test("sdk-describe_annotation returns detailed metadata by simple name", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-describe_annotation")!;
+  const res = await tool.handler({ annotation: "ExerisDomain" });
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.name, "ExerisDomain");
+  assert.equal(data.qualifiedName, "eu.exeris.sdk.annotation.ExerisDomain");
+  assert.equal(data.package, "eu.exeris.sdk.annotation");
+  assert.deepEqual(data.targets, ["TYPE"]);
+  assert.equal(data.retention, "SOURCE");
+  assert.equal(data.attributes.length, 2);
+  assert.equal(data.attributes[0].name, "module");
+  assert.equal(data.attributes[0].required, true);
+  assert.equal(data.attributes[1].name, "tenantScoped");
+  assert.equal(data.attributes[1].deprecated.forRemoval, true);
+  assert.equal(data.attributes[1].deprecated.since, "0.10.0");
+  assert.match(data.attributes[1].deprecated.replacement, /#dataScope\(\)/);
+  assert.equal(data.packageSummary.name, "eu.exeris.sdk.annotation");
+  assert.match(data.packageSummary.description, /Root package rationale/);
+});
+
+test("sdk-describe_annotation finds annotation by qualified name and case-insensitively", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-describe_annotation")!;
+  const res = await tool.handler({ annotation: "eu.exeris.sdk.annotation.validation" });
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.name, "Validation");
+  assert.equal(data.attributes.length, 2);
+  assert.equal(data.attributes[0].name, "required");
+  assert.equal(data.attributes[0].deprecated.forRemoval, true);
+});
+
+test("sdk-describe_annotation returns annotation_not_found on unknown annotation with suggestions", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-describe_annotation")!;
+  const res = await tool.handler({ annotation: "exeris" });
+  assert.equal(res.isError, true);
+  const data = payload(res);
+  assert.equal(data.error, "annotation_not_found");
+  assert.match(data.message, /Unknown annotation 'exeris'/);
+  assert.match(data.message, /Did you mean: ExerisDomain\?/);
+});
+
+test("sdk-describe_annotation validates missing parameter", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-describe_annotation")!;
+  const res = await tool.handler({});
+  assert.equal(res.isError, true);
+  const data = payload(res);
+  assert.equal(data.error, "missing_parameter");
+});
+
+test("sdk-list_deprecations lists all deprecated items without filters", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-list_deprecations")!;
+  const res = await tool.handler({});
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.sdkVersion, "0.12.0-SNAPSHOT");
+  assert.equal(data.totalDeprecatedAnnotations, 0);
+  assert.equal(data.totalDeprecatedAttributes, 3);
+  assert.equal(data.deprecatedAttributes.length, 3);
+
+  const names = data.deprecatedAttributes.map((a: any) => `${a.annotation}.${a.attribute}`).sort();
+  assert.deepEqual(names, [
+    "ExerisDomain.tenantScoped",
+    "Validation.required",
+    "Validation.validateOn",
+  ]);
+});
+
+test("sdk-list_deprecations filters by forRemovalOnly", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-list_deprecations")!;
+  const res = await tool.handler({ forRemovalOnly: true });
+  assert.ok(!res.isError);
+  const data = payload(res);
+  assert.equal(data.totalDeprecatedAttributes, 2);
+  const names = data.deprecatedAttributes.map((a: any) => `${a.annotation}.${a.attribute}`).sort();
+  assert.deepEqual(names, [
+    "ExerisDomain.tenantScoped",
+    "Validation.required",
+  ]);
+});
+
+test("sdk-list_deprecations filters by package", async () => {
+  const bundle = createBundle(true);
+  const tool = registerSdkTools(bundle, root).find((t) => t.definition.name === "sdk-list_deprecations")!;
+  const resSystem = await tool.handler({ package: "system" });
+  assert.ok(!resSystem.isError);
+  const dataSystem = payload(resSystem);
+  assert.equal(dataSystem.totalDeprecatedAttributes, 0);
+
+  const resCore = await tool.handler({ package: "annotation" });
+  assert.ok(!resCore.isError);
+  const dataCore = payload(resCore);
+  assert.equal(dataCore.totalDeprecatedAttributes, 3);
 });
 
 test("sdk tools return family_unavailable when bundle is unavailable", async () => {
