@@ -151,6 +151,7 @@ test("bridge-health reports every dark family with its reason and remedy", async
       // unit is the family it calls, not the config field behind it.
       { family: "build", state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
       { family: "caps", state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
+      { family: "sdk", state: "unavailable", reason: "no bundle (test)", remedy: "generate one (test)" },
     ],
   );
 });
@@ -185,6 +186,14 @@ test("bridge-health reports the launch source and child state of a live family",
     state: "available",
     source: "env-command",
     transport: { state: "not-started", lastError: null },
+  });
+  assert.deepEqual(body.families[3], { family: "build", state: "available" });
+  assert.deepEqual(body.families[4], { family: "caps", state: "available" });
+  assert.deepEqual(body.families[5], {
+    family: "sdk",
+    state: "unavailable",
+    reason: "no bundle (test)",
+    remedy: "generate one (test)",
   });
   // The whole surface must stay free: an agent may call it as often as it likes.
   assert.equal(spawns, 0, "bridge:health must never spawn a child process");

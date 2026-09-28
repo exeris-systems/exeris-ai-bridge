@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.js";
 
 // Generates the bundled reference data that ships inside the npm package, so an
 // application developer with no ecosystem checkout and no network still gets
@@ -11,6 +13,7 @@ import { fileURLToPath } from "node:url";
 //   --emit     rebuild data/ and data/manifest.json  (default)
 //   --verify   check that the manifest is present, well-formed, and that every
 //              entry's bytes still match the digest recorded for it
+//   --strict   fail hard if no repository or SDK jars are found (required in prepack)
 //
 // data/ is NOT committed. Generating at pack time keeps a stale `generatedAt`
 // out of git and means the bundle-absent path is the ordinary experience when
@@ -21,36 +24,32 @@ const DATA_DIR = join(PACKAGE_ROOT, "data");
 const MANIFEST = join(DATA_DIR, "manifest.json");
 const SCHEMA_VERSION = 1;
 
-/**
- * Decide what to vendor.
- *
- * Returns nothing at 0.5.0, on purpose: this milestone ships the mechanism and
- * 0.7.0's sdk:* family ships the content — the annotation catalog and AST
- * schema, generated upstream by the reflection mechanism `AnnotationContractTest`
- * already uses. Shipping placeholder content to prove a pipeline works would put
- * fiction in a public package, so the bundle ships with zero entries and an
- * honest manifest instead.
- *
- * A function rather than a constant because 0.7.0 has to *locate* these — probe
- * the local Maven repository, pick a version, fail loudly if the artifact is
- * absent — which is logic, not a literal.
- *
- * @returns {Array<{id: string, file: string, sourceArtifact: string}>} `file` is
- *   an absolute path to read; `sourceArtifact` the Maven coordinate it was
- *   derived from, so an agent can say which upstream release an answer reflects.
- */
-function collectSources() {
-  return [];
-}
-
-function emit() {
+function emit(strict = false) {
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
 
-  const entries = collectSources().map(({ id, file, sourceArtifact }) => {
-    const bytes = readFileSync(file);
+  const explicitVersion = process.env.EXERIS_SDK_VERSION?.trim();
+  const repo = resolveMavenRepo({
+    explicitVersion,
+    checkArtifacts: ["exeris-sdk-annotations", "exeris-sdk-source-model"],
+    minVersion: "0.12.0",
+  });
+
+  let sources;
+  try {
+    sources = collectSources({
+      repo,
+      explicitVersion,
+      strict,
+      failFn: (msg) => fail(msg),
+    });
+  } catch (err) {
+    fail(err.message);
+  }
+
+  const entries = sources.map(({ id, bytes, sourceArtifact }) => {
     const path = `${id}.json`;
-    copyFileSync(file, join(DATA_DIR, path));
+    writeFileSync(join(DATA_DIR, path), bytes);
     return {
       id,
       path,
@@ -106,7 +105,8 @@ function fail(message) {
 }
 
 const args = new Set(process.argv.slice(2));
+const wantsStrict = args.has("--strict") || process.env.EXERIS_VENDOR_STRICT === "1";
 const wantsVerify = args.has("--verify");
 const wantsEmit = args.has("--emit") || !wantsVerify;
-if (wantsEmit) emit();
+if (wantsEmit) emit(wantsStrict);
 if (wantsVerify) verify();

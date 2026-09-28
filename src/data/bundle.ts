@@ -250,3 +250,14 @@ function parseManifest(value: unknown): BundleManifest | null {
 function defaultBundleRoot(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..", "..", DATA_DIRNAME);
 }
+
+/**
+ * True only when the bundle holds both annotation-catalog and ast-schema entries.
+ */
+export function isSdkAvailable(bundle: BundleState): boolean {
+  return (
+    bundle.state === "available" &&
+    bundle.entries.some((e) => e.id === "annotation-catalog") &&
+    bundle.entries.some((e) => e.id === "ast-schema")
+  );
+}

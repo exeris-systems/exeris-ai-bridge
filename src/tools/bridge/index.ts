@@ -7,7 +7,7 @@ import type {
   ToolFamily,
   Unavailable,
 } from "../../config/env.js";
-import { loadBundle, type BundleState } from "../../data/bundle.js";
+import { isSdkAvailable, loadBundle, type BundleState } from "../../data/bundle.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
 import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
@@ -45,7 +45,7 @@ export function registerBridgeTools(
   transports: BridgeTransports = {},
   bundle: BundleState = loadBundle(),
 ): RegisteredTool[] {
-  return [versionTool(config, bundle), healthTool(config, transports)];
+  return [versionTool(config, bundle), healthTool(config, transports, bundle)];
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +101,11 @@ function describeBundle(bundle: BundleState): unknown {
 // ---------------------------------------------------------------------------
 // bridge:health
 
-function healthTool(config: BridgeConfig, transports: BridgeTransports): RegisteredTool {
+function healthTool(
+  config: BridgeConfig,
+  transports: BridgeTransports,
+  bundle: BundleState,
+): RegisteredTool {
   return {
     definition: {
       name: "bridge-health",
@@ -128,6 +132,7 @@ function healthTool(config: BridgeConfig, transports: BridgeTransports): Registe
           // guessing which of its tools the state applied to.
           plainFamilyReport("build", config.project),
           plainFamilyReport("caps", config.project),
+          bundleFamilyReport("sdk", bundle),
         ],
       }),
   };
@@ -161,6 +166,24 @@ function plainFamilyReport(
   config: DocsConfig | ProjectConfig | Unavailable,
 ): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
+  return { family, state: "available" };
+}
+
+/**
+ * Reports sdk availability with reason and remedy based on bundled reference data.
+ */
+function bundleFamilyReport(family: ToolFamily, bundle: BundleState): FamilyReport {
+  if (bundle.state === "unavailable") {
+    return { family, state: "unavailable", reason: bundle.reason, remedy: bundle.remedy };
+  }
+  if (!isSdkAvailable(bundle)) {
+    return {
+      family,
+      state: "unavailable",
+      reason: "The bundled reference data carries no annotation catalog.",
+      remedy: "Run npm run vendor:data to generate the bundle.",
+    };
+  }
   return { family, state: "available" };
 }
 

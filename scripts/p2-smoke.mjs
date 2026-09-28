@@ -89,7 +89,12 @@ function pack() {
   mkdirSync(out);
   // Packed into an empty directory and read back, rather than parsed out of
   // npm's stdout: the prepack lifecycle script writes there too.
-  npm(["pack", "--pack-destination", out], { cwd: PACKAGE_ROOT, stdio: "inherit" });
+  // Explicitly point EXERIS_MAVEN_REPO at test fixtures for hermetic pack testing.
+  npm(["pack", "--pack-destination", out], {
+    cwd: PACKAGE_ROOT,
+    stdio: "inherit",
+    env: { ...process.env, EXERIS_MAVEN_REPO: join(PACKAGE_ROOT, "test", "fixtures", "m2") },
+  });
   const files = readdirSync(out);
   assert.equal(files.length, 1, `expected exactly one tarball in ${out}, got ${files.join(", ")}`);
   return join(out, files[0]);
@@ -204,6 +209,8 @@ function assertBootsDark({
   ungenerated,
   detach,
   diagnostic,
+  sdkList,
+  sdkAst,
   stderr,
 }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
@@ -218,30 +225,28 @@ function assertBootsDark({
   assert.equal(version.version, PKG.version);
 
   // The bundle ships inside the tarball, so unlike every other surface it is
-  // live on a bare machine. Zero entries is the honest 0.5.0 state; 0.7.0 fills
-  // it, and this assertion is what will notice when it does.
+  // live on a bare machine, carrying reference data entries for the P2 families.
   assert.equal(version.bundle.state, "available", "the bundled reference data did not survive packaging");
-  assert.equal(version.bundle.entryCount, 0);
+  assert.equal(version.bundle.entryCount, 2);
   assert.equal(version.bundle.bridgeVersion, PKG.version);
 
   assert.equal(health.mode, "app");
   const byFamily = new Map(health.families.map((f) => [f.family, f]));
   assert.deepEqual(
     [...byFamily.keys()].sort((a, b) => a.localeCompare(b)),
-    ["build", "caps", "docs", "kernel", "lsp"],
+    ["build", "caps", "docs", "kernel", "lsp", "sdk"],
   );
 
-  // build:* and caps:* are the P2 families, and this scratch install is the P2
-  // machine: no ecosystem, no ~/.m2, one Maven project. They are the only two
-  // that SHOULD be live here, resolved by the cwd probe finding the project's
-  // own pom.xml — so this asserts the positive case that the rest of this file
-  // cannot, and would catch a probe that silently stopped working.
+  // build:* and caps:* resolve from the P2 project; sdk:* is live because its
+  // reference data ships in the package bundle. They are the three that SHOULD be live here.
   for (const family of ["build", "caps"]) {
     const report = byFamily.get(family);
     assert.equal(report.state, "available", `${family}:* did not resolve from the project the server was started in`);
   }
+  const sdkReport = byFamily.get("sdk");
+  assert.equal(sdkReport?.state, "available", "sdk:* reference data did not load from the package bundle");
 
-  const dark = new Map([...byFamily].filter(([f]) => f !== "build" && f !== "caps"));
+  const dark = new Map([...byFamily].filter(([f]) => f !== "build" && f !== "caps" && f !== "sdk"));
   for (const [family, report] of dark) {
     assert.equal(report.state, "unavailable", `${family}:* resolved on a machine that has nothing to resolve it from`);
     assert.ok(report.reason?.length > 0, `${family}:* is dark without a reason`);
@@ -294,9 +299,24 @@ function assertBootsDark({
   assert.equal(diagnosticPayload.recognised, true, "the diagnostic catalogue did not survive packaging");
   assert.equal(diagnosticPayload.matches[0].id, "processor/universe-tier-reserved");
 
+  assert.ok(!sdkList.isError, `sdk-list_annotations errored: ${sdkList.content[0].text}`);
+  const sdkListPayload = JSON.parse(sdkList.content[0].text);
+  assert.ok(sdkListPayload.totalInCatalog > 0, "the catalog should contain annotations");
+  assert.equal(sdkListPayload.matched, sdkListPayload.totalInCatalog);
+  assert.ok(typeof sdkListPayload.sdkVersion === "string" && sdkListPayload.sdkVersion.length > 0);
+  const expectedSdkArtifact = version.bundle.sourceArtifacts?.find((a) => a.includes("exeris-sdk-annotations"));
+  if (expectedSdkArtifact) {
+    const expectedVer = expectedSdkArtifact.split(":").pop();
+    assert.equal(sdkListPayload.sdkVersion, expectedVer);
+  }
+
+  assert.ok(!sdkAst.isError, `sdk-get_ast_schema errored: ${sdkAst.content[0].text}`);
+  const sdkAstPayload = JSON.parse(sdkAst.content[0].text);
+  assert.equal(sdkAstPayload.definition, "DomainMetadata");
+
   assert.match(
     stderr,
-    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable build=available caps=available$/m,
+    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable build=available caps=available sdk=available$/m,
     `the boot summary is missing or wrong; stderr was:\n${stderr}`,
   );
 }
@@ -320,7 +340,7 @@ function assertSurfaceInvariant(dark, lit) {
     ["bridge-health", "bridge-version"],
     "bridge:* is frozen at two tools by the ADR-025 2026-08-26 addendum",
   );
-  for (const family of ["docs", "lsp", "kernel", "build", "caps"]) {
+  for (const family of ["docs", "sdk", "lsp", "kernel", "build", "caps"]) {
     assert.ok(names.some((n) => n.startsWith(`${family}-`)), `${family}:* vanished from tools/list`);
   }
 }
@@ -419,6 +439,15 @@ async function interrogate(project, home, extraEnv) {
       },
     });
 
+    const sdkList = await client.request("tools/call", {
+      name: "sdk-list_annotations",
+      arguments: {},
+    });
+    const sdkAst = await client.request("tools/call", {
+      name: "sdk-get_ast_schema",
+      arguments: { definition: "DomainMetadata" },
+    });
+
     assert.equal(child.exitCode, null, "the server exited during the session");
     return {
       initialize,
@@ -431,6 +460,8 @@ async function interrogate(project, home, extraEnv) {
       ungenerated,
       detach,
       diagnostic,
+      sdkList,
+      sdkAst,
       stderr: client.stderr,
     };
   } finally {

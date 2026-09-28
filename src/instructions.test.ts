@@ -4,9 +4,13 @@ import { test } from "node:test";
 import type { BridgeConfig } from "./config/env.js";
 import { buildInstructions } from "./instructions.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
+import { registerBuildTools } from "./tools/build/index.js";
+import { registerCapsTools } from "./tools/caps/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
+import { registerSdkTools } from "./tools/sdk/index.js";
+import type { BundleState } from "./data/bundle.js";
 
 const LIT: BridgeConfig = {
   mode: "contributor",
@@ -28,9 +32,24 @@ const DARK: BridgeConfig = {
   project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
 };
 
+const BUNDLE: BundleState = {
+  state: "available",
+  generatedAt: "2026-09-28T00:00:00.000Z",
+  bridgeVersion: "0.7.0",
+  entries: [
+    {
+      id: "annotation-catalog",
+      path: "annotation-catalog.json",
+      sha256: "0".repeat(64),
+      bytes: 1,
+      sourceArtifact: "eu.exeris:exeris-sdk-annotations:0.12.0",
+    },
+  ],
+};
+
 test("the instructions report the resolved state of every family", () => {
-  assert.match(buildInstructions(LIT), /docs=available lsp=available kernel=available/);
-  assert.match(buildInstructions(DARK), /docs=unavailable lsp=unavailable kernel=unavailable/);
+  assert.match(buildInstructions(LIT, BUNDLE), /docs=available lsp=available kernel=available/);
+  assert.match(buildInstructions(DARK, { state: "unavailable", reason: "none", remedy: "none" }), /docs=unavailable lsp=unavailable kernel=unavailable/);
 });
 
 // The reason this string exists at all: an agent whose priors are Spring will
@@ -38,7 +57,7 @@ test("the instructions report the resolved state of every family", () => {
 // If this assertion is ever deleted, the instructions have lost their purpose
 // and are just a tool listing the client already has.
 test("the instructions correct the Spring default before any tool is called", () => {
-  const text = buildInstructions(LIT);
+  const text = buildInstructions(LIT, BUNDLE);
   assert.match(text, /Exeris is not Spring/);
   assert.match(text, /@ExerisDomain/);
 });
@@ -55,15 +74,18 @@ test("the instructions explain that a dark family still answers", () => {
 // family — or the separator — has to move this string too, or the client is
 // handed a map to a surface that no longer exists.
 test("every family named in the instructions matches a registered tool prefix", () => {
-  const text = buildInstructions(LIT);
+  const text = buildInstructions(LIT, BUNDLE);
   const registered = [
     ...registerDocsTools(LIT),
     ...registerLspTools(LIT),
     ...registerKernelTools(LIT),
+    ...registerBuildTools(LIT),
+    ...registerCapsTools(LIT),
+    ...registerSdkTools(BUNDLE),
     ...registerBridgeTools(LIT),
   ].map((t) => t.definition.name);
 
-  for (const family of ["docs", "lsp", "kernel", "bridge"]) {
+  for (const family of ["docs", "sdk", "lsp", "kernel", "build", "caps", "bridge"]) {
     assert.ok(text.includes(`${family}-*`), `instructions do not name ${family}-*`);
     assert.ok(
       registered.some((n) => n.startsWith(`${family}-`)),
@@ -75,16 +97,19 @@ test("every family named in the instructions matches a registered tool prefix", 
 // Named tools are a promise the surface has to keep; a stale one sends the
 // agent to a tool that is not there.
 test("every tool the instructions name by full name is actually registered", () => {
-  const text = buildInstructions(LIT);
+  const text = buildInstructions(LIT, BUNDLE);
   const registered = new Set(
     [
       ...registerDocsTools(LIT),
       ...registerLspTools(LIT),
       ...registerKernelTools(LIT),
+      ...registerBuildTools(LIT),
+      ...registerCapsTools(LIT),
+      ...registerSdkTools(BUNDLE),
       ...registerBridgeTools(LIT),
     ].map((t) => t.definition.name),
   );
-  const named = text.match(/\b(?:docs|lsp|kernel|bridge)-[a-z_]+\b/g) ?? [];
+  const named = text.match(/\b(?:docs|sdk|lsp|kernel|build|caps|bridge)-[a-z_]+\b/g) ?? [];
   assert.ok(named.length > 0, "the instructions name no tool at all");
   for (const name of new Set(named)) {
     assert.ok(registered.has(name), `instructions name ${name}, which is not registered`);

@@ -2,10 +2,12 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import type { BridgeConfig } from "./config/env.js";
+import type { BundleState } from "./data/bundle.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerDocsTools } from "./tools/docs/index.js";
 import { registerKernelTools } from "./tools/kernel/index.js";
 import { registerLspTools } from "./tools/lsp/index.js";
+import { registerSdkTools } from "./tools/sdk/index.js";
 
 // Composition tests (counts, names, prefixes). Handlers are not invoked against
 // the live config, so paths need only be syntactically valid — `/var/empty`
@@ -31,12 +33,41 @@ const zeroCheckoutConfig: BridgeConfig = {
   project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
 };
 
-function registerAll(config: BridgeConfig) {
+const stubBundle: BundleState = {
+  state: "available",
+  generatedAt: "2026-09-28T00:00:00Z",
+  bridgeVersion: "0.6.0",
+  entries: [
+    {
+      id: "annotation-catalog",
+      path: "annotation-catalog.json",
+      sha256: "fake-sha",
+      bytes: 100,
+      sourceArtifact: "eu.exeris:exeris-sdk-annotations:0.12.0",
+    },
+    {
+      id: "ast-schema",
+      path: "ast-schema.json",
+      sha256: "fake-sha",
+      bytes: 100,
+      sourceArtifact: "eu.exeris:exeris-sdk-source-model:0.12.0",
+    },
+  ],
+};
+
+const darkBundle: BundleState = {
+  state: "unavailable",
+  reason: "sdk reason",
+  remedy: "sdk remedy",
+};
+
+function registerAll(config: BridgeConfig, bundle: BundleState = stubBundle) {
   return [
     ...registerDocsTools(config),
     ...registerLspTools(config),
     ...registerKernelTools(config),
-    ...registerBridgeTools(config),
+    ...registerSdkTools(bundle),
+    ...registerBridgeTools(config, undefined, bundle),
   ];
 }
 
@@ -57,7 +88,11 @@ test("kernel registry exposes at least one tool", () => {
   assert.ok(registerKernelTools(stubConfig).length > 0);
 });
 
-test("tool names are unique across all three families", () => {
+test("sdk registry exposes at least one tool", () => {
+  assert.ok(registerSdkTools(stubBundle).length > 0);
+});
+
+test("tool names are unique across all families", () => {
   const names = registerAll(stubConfig).map((t) => t.definition.name);
   assert.equal(new Set(names).size, names.length);
 });
@@ -72,7 +107,10 @@ test("every tool name is prefixed with its family", () => {
   for (const t of registerKernelTools(stubConfig)) {
     assert.match(t.definition.name, /^kernel-/);
   }
-  for (const t of registerBridgeTools(stubConfig)) {
+  for (const t of registerSdkTools(stubBundle)) {
+    assert.match(t.definition.name, /^sdk-/);
+  }
+  for (const t of registerBridgeTools(stubConfig, undefined, stubBundle)) {
     assert.match(t.definition.name, /^bridge-/);
   }
 });
@@ -111,7 +149,7 @@ test("tool descriptions point only at tools that exist", () => {
     // Backtick-delimited, because that is how this codebase writes a tool name
     // and because bare prose is not a reference: "docs-root-relative path" is
     // English, not a pointer at a `docs-root` tool.
-    for (const [, ref] of description.matchAll(/`((?:docs|lsp|kernel|bridge)-[a-z_]+)`/g)) {
+    for (const [, ref] of description.matchAll(/`((?:docs|lsp|kernel|bridge|sdk)-[a-z_]+)`/g)) {
       assert.ok(registered.has(ref), `${name} description points at ${ref}, which is not registered`);
     }
   }
@@ -125,8 +163,8 @@ test("the tool surface is identical with every family dark", () => {
   // time, so the surface cannot vary with the environment. If this fails, some
   // registry started returning a different set of tools when its dependency is
   // missing — that is the regression, not this assertion.
-  const live = registerAll(stubConfig).map((t) => JSON.stringify(t.definition));
-  const dark = registerAll(zeroCheckoutConfig).map((t) => JSON.stringify(t.definition));
+  const live = registerAll(stubConfig, stubBundle).map((t) => JSON.stringify(t.definition));
+  const dark = registerAll(zeroCheckoutConfig, darkBundle).map((t) => JSON.stringify(t.definition));
   assert.deepEqual(dark, live);
 });
 
@@ -134,7 +172,7 @@ test("every tool in a dark family returns the structured reason and remedy", asy
   // The anti-drift guard for the masking in tools/unavailable.ts: a handler
   // added without guard() would reach its transport (or its filesystem read)
   // here and fail some other way.
-  for (const tool of registerAll(zeroCheckoutConfig).filter((t) => isGated(t.definition.name))) {
+  for (const tool of registerAll(zeroCheckoutConfig, darkBundle).filter((t) => isGated(t.definition.name))) {
     const name = tool.definition.name;
     const family = name.split("-")[0];
     const res = await tool.handler({});
@@ -151,7 +189,7 @@ test("bridge:* stays live when every environment-dependent family is dark", asyn
   // The surface that explains the others must not be gated by the same thing
   // it explains. If bridge:* ever starts answering family_unavailable, the
   // diagnostic path has gone dark exactly when it is needed.
-  const bridge = registerAll(zeroCheckoutConfig).filter((t) => !isGated(t.definition.name));
+  const bridge = registerAll(zeroCheckoutConfig, darkBundle).filter((t) => !isGated(t.definition.name));
   assert.equal(bridge.length, 2);
   for (const tool of bridge) {
     const res = await tool.handler({});
