@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     ...registerKernelTools(config, kernel),
     ...registerBuildTools(config),
     ...registerCapsTools(config),
-    ...registerSdkTools(bundle),
+    ...registerSdkTools(bundle, config.project),
     ...registerBridgeTools(config, { lsp, kernel }, bundle),
   ]) {
     tools.set(tool.definition.name, tool);

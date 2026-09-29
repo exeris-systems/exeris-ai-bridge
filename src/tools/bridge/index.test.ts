@@ -1,4 +1,8 @@
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -90,9 +94,10 @@ async function call(
   name: string,
   transports?: { lsp?: LspClient; kernel?: KernelAdapter },
   bundle: BundleState = NO_BUNDLE,
+  rootOverride?: string,
 ) {
   const tool = new Map(
-    registerBridgeTools(config, transports, bundle).map((t) => [t.definition.name, t]),
+    registerBridgeTools(config, transports, bundle, rootOverride).map((t) => [t.definition.name, t]),
   ).get(name);
   assert.ok(tool, `${name} is not registered`);
   const res = await tool.handler({});
@@ -304,3 +309,167 @@ test("bridge-version names the upstream releases the bundled data came from", as
     "eu.exeris:exeris-tooling-core:0.7.0",
   ]);
 });
+
+function makeTestSdkBundle(dataDir: string, sdkVersion = "0.12.0-SNAPSHOT"): BundleState {
+  const catalogText = JSON.stringify({
+    catalogFormat: 1,
+    sdkVersion,
+    annotationCount: 1,
+    packages: [],
+    annotations: [],
+  });
+  const schemaText = JSON.stringify({
+    schemaFormat: 1,
+    sdkVersion,
+    astSchemaVersion: "1.0.0",
+    definitions: [],
+  });
+  writeFileSync(join(dataDir, "annotation-catalog.json"), catalogText, "utf8");
+  writeFileSync(join(dataDir, "ast-schema.json"), schemaText, "utf8");
+
+  const catalogHash = createHash("sha256").update(Buffer.from(catalogText, "utf8")).digest("hex");
+  const schemaHash = createHash("sha256").update(Buffer.from(schemaText, "utf8")).digest("hex");
+
+  return {
+    state: "available",
+    generatedAt: "2026-09-29T00:00:00.000Z",
+    bridgeVersion: "0.7.0",
+    entries: [
+      {
+        id: "annotation-catalog",
+        path: "annotation-catalog.json",
+        sha256: catalogHash,
+        bytes: Buffer.byteLength(catalogText),
+        sourceArtifact: `eu.exeris:exeris-sdk-annotation-catalog:${sdkVersion}`,
+      },
+      {
+        id: "ast-schema",
+        path: "ast-schema.json",
+        sha256: schemaHash,
+        bytes: Buffer.byteLength(schemaText),
+        sourceArtifact: `eu.exeris:exeris-sdk-ast-schema:${sdkVersion}`,
+      },
+    ],
+  };
+}
+
+test("bridge-health reports sdk versionSkew aligned when project matches catalog", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "bridge-health-aligned-"));
+  const dataDir = join(tmp, "data");
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    writeFileSync(
+      join(tmp, "pom.xml"),
+      `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.12.0-SNAPSHOT</version></dependency></dependencies></project>`,
+      "utf8",
+    );
+    const config: BridgeConfig = {
+      ...LIVE,
+      project: { state: "available", projectRoot: tmp, source: "env" },
+    };
+    const bundle = makeTestSdkBundle(dataDir, "0.12.0-SNAPSHOT");
+    const body = await call(config, "bridge-health", undefined, bundle, dataDir);
+    const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+    assert.ok(sdkFamily);
+    assert.equal(sdkFamily.state, "available");
+    assert.equal(sdkFamily.versionSkew?.status, "aligned");
+    assert.equal(sdkFamily.versionSkew?.bundledSdkVersion, "0.12.0-SNAPSHOT");
+    assert.equal(sdkFamily.versionSkew?.projectSdkVersion, "0.12.0-SNAPSHOT");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("bridge-health reports sdk versionSkew skew_detected when project pins different version", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "bridge-health-skew-"));
+  const dataDir = join(tmp, "data");
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    writeFileSync(
+      join(tmp, "pom.xml"),
+      `<project><dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk</artifactId><version>0.10.0</version></dependency></dependencies></project>`,
+      "utf8",
+    );
+    const config: BridgeConfig = {
+      ...LIVE,
+      project: { state: "available", projectRoot: tmp, source: "env" },
+    };
+    const bundle = makeTestSdkBundle(dataDir, "0.12.0-SNAPSHOT");
+    const body = await call(config, "bridge-health", undefined, bundle, dataDir);
+    const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+    assert.ok(sdkFamily);
+    assert.equal(sdkFamily.state, "available");
+    assert.equal(sdkFamily.versionSkew?.status, "skew_detected");
+    assert.equal(sdkFamily.versionSkew?.bundledSdkVersion, "0.12.0-SNAPSHOT");
+    assert.equal(sdkFamily.versionSkew?.projectSdkVersion, "0.10.0");
+    assert.ok(sdkFamily.versionSkew?.warning?.includes("0.10.0"));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("bridge-health reports sdk versionSkew unknown when project has no SDK or missing pom", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "bridge-health-unknown-"));
+  const dataDir = join(tmp, "data");
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    const config: BridgeConfig = {
+      ...LIVE,
+      project: { state: "available", projectRoot: tmp, source: "env" },
+    };
+    const bundle = makeTestSdkBundle(dataDir, "0.12.0-SNAPSHOT");
+    const body = await call(config, "bridge-health", undefined, bundle, dataDir);
+    const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+    assert.ok(sdkFamily);
+    assert.equal(sdkFamily.state, "available");
+    assert.equal(sdkFamily.versionSkew?.status, "unknown");
+    assert.equal(sdkFamily.versionSkew?.bundledSdkVersion, "0.12.0-SNAPSHOT");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("bridge-health reports sdk versionSkew unknown when catalog cannot be read", async () => {
+  const badBundle: BundleState = {
+    state: "available",
+    generatedAt: "2026-08-26T00:00:00.000Z",
+    bridgeVersion: "0.7.0",
+    entries: [
+      {
+        id: "annotation-catalog",
+        path: "non-existent-catalog.json",
+        sha256: "0".repeat(64),
+        bytes: 0,
+        sourceArtifact: "eu.exeris:exeris-sdk-annotation-catalog:0.12.0",
+      },
+      {
+        id: "ast-schema",
+        path: "non-existent-schema.json",
+        sha256: "0".repeat(64),
+        bytes: 0,
+        sourceArtifact: "eu.exeris:exeris-sdk-ast-schema:0.12.0",
+      },
+    ],
+  };
+  const body = await call(LIVE, "bridge-health", undefined, badBundle);
+  const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+  assert.ok(sdkFamily);
+  assert.equal(sdkFamily.state, "available");
+  assert.equal(sdkFamily.versionSkew?.status, "unknown");
+  assert.equal(sdkFamily.versionSkew?.bundledSdkVersion, "unknown");
+});
+
+test("bridge-health reports sdk family unavailable when bundle has no catalog entry", async () => {
+  const emptyBundle: BundleState = {
+    state: "available",
+    generatedAt: "2026-08-26T00:00:00.000Z",
+    bridgeVersion: "0.7.0",
+    entries: [],
+  };
+  const body = await call(LIVE, "bridge-health", undefined, emptyBundle);
+  const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+  assert.ok(sdkFamily);
+  assert.equal(sdkFamily.state, "unavailable");
+  assert.equal(sdkFamily.reason, "The bundled reference data carries no annotation catalog.");
+});
+

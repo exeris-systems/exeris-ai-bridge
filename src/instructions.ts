@@ -46,8 +46,9 @@ Two failure modes follow, and both are common:
 Tool names are \`family-tool\`:
   docs-*    ADR registry, high-level architecture, whitepaper, per-repo docs
   sdk-*     the \`@ExerisDomain\` authoring contract — annotation catalog, attribute
-            contracts, deprecations, AST schema; use \`sdk-describe_annotation\`
-            for attribute contracts and \`sdk-list_deprecations\` for replacement guidance
+            contracts, scoping rules, deprecations, AST schema; use \`sdk-describe_annotation\`
+            for attribute contracts, \`sdk-get_scoping_rules\` for @Field vs @Validation
+            scoping rules, and \`sdk-list_deprecations\` for replacement guidance
   lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
