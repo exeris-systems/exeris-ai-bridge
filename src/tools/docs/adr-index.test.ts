@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { deriveGithubUrl, parseAdrIndex } from "./adr-index.js";
+import { deriveGithubUrl, localLinkCandidates, parseAdrIndex } from "./adr-index.js";
 
 const MINIMAL = `# ADR Index
 
@@ -303,6 +303,61 @@ test("deriveGithubUrl returns null for malformed or escape-shaped targets", () =
   assert.equal(deriveGithubUrl("/etc/passwd", "public"), null);
   assert.equal(deriveGithubUrl("../", "public"), null);
   assert.equal(deriveGithubUrl("../../something", "public"), null);
+});
+
+test("localLinkCandidates keeps a relative target as the one candidate", () => {
+  assert.deepEqual(localLinkCandidates("adr/ADR-001-foo.md"), ["adr/ADR-001-foo.md"]);
+  assert.deepEqual(localLinkCandidates("../exeris-kernel/docs/adr/ADR-007.md"), [
+    "../exeris-kernel/docs/adr/ADR-007.md",
+  ]);
+});
+
+test("localLinkCandidates maps an ecosystem GitHub URL to the sibling checkout", () => {
+  assert.deepEqual(
+    localLinkCandidates("https://github.com/exeris-systems/exeris-kernel/blob/main/docs/adr/ADR-007.md")?.[0],
+    "../exeris-kernel/docs/adr/ADR-007.md",
+  );
+  assert.deepEqual(
+    localLinkCandidates("https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-001.md")?.[0],
+    "adr/ADR-001.md",
+  );
+  // The fragment and the query name no file.
+  assert.deepEqual(
+    localLinkCandidates("https://github.com/exeris-systems/exeris-sdk/blob/v0.11.0/docs/adr/ADR-003.md#decision")?.[0],
+    "../exeris-sdk/docs/adr/ADR-003.md",
+  );
+  assert.deepEqual(
+    localLinkCandidates("https://github.com/exeris-systems/exeris-sdk/blob/main/docs/adr/ADR-003.md?plain=1")?.[0],
+    "../exeris-sdk/docs/adr/ADR-003.md",
+  );
+});
+
+test("localLinkCandidates offers every split of a ref that may contain a slash, shortest ref first", () => {
+  assert.deepEqual(
+    localLinkCandidates("https://github.com/exeris-systems/exeris-kernel/blob/development/0.12.0/docs/adr/ADR-071.md"),
+    [
+      "../exeris-kernel/0.12.0/docs/adr/ADR-071.md",
+      "../exeris-kernel/docs/adr/ADR-071.md",
+      "../exeris-kernel/adr/ADR-071.md",
+      "../exeris-kernel/ADR-071.md",
+    ],
+  );
+});
+
+test("localLinkCandidates returns null for URLs that name no ecosystem file", () => {
+  assert.equal(localLinkCandidates("https://github.com/someone-else/exeris-kernel/blob/main/x.md"), null);
+  assert.equal(localLinkCandidates("https://github.com/exeris-systems/../blob/main/x.md"), null);
+  assert.equal(localLinkCandidates("https://github.com/exeris-systems/exeris-kernel/tree/main/docs"), null);
+  assert.equal(localLinkCandidates("https://github.com/exeris-systems/exeris-kernel/blob/main"), null);
+  assert.equal(localLinkCandidates("https://example.com/adr/ADR-040.md"), null);
+  assert.equal(localLinkCandidates("file:///etc/passwd"), null);
+});
+
+test("deriveGithubUrl returns an ecosystem GitHub URL as written and drops any other URL", () => {
+  const url = "https://github.com/exeris-systems/exeris-sdk/blob/main/docs/adr/ADR-003.md";
+  assert.equal(deriveGithubUrl(url, "public"), url);
+  assert.equal(deriveGithubUrl(url, "enterprise-private"), null);
+  assert.equal(deriveGithubUrl("https://example.com/adr/ADR-040.md", "public"), null);
 });
 
 test("parseAdrIndex populates link.github on each entry", () => {

@@ -169,6 +169,99 @@ test("docs-get_adr resolves cross-repo links via the ecosystem sandbox", async (
   assert.match((res.content[0] as { text: string }).text, /^# ADR-007 Cross-repo/);
 });
 
+function writeGithubLinkedIndex(extraRow = ""): void {
+  writeFileSync(
+    join(docsRoot, "adr-index.md"),
+    `## Index
+
+| # | Title | Owning repo | Scope | Visibility | Status | Link |
+|---|-------|-------------|-------|------------|--------|------|
+| 001 | Own by URL | exeris-docs | platform | public | accepted (2026-01-01) | [adr/ADR-001](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-001-local-a.md) |
+| 007 | Sibling by URL | exeris-kernel | kernel | public | accepted (2026-01-01) | [exeris-kernel/docs/adr/ADR-007 …](https://github.com/exeris-systems/exeris-kernel/blob/main/docs/adr/ADR-007-cross.md) |
+| 033 | Absent sibling | exeris-sdk | sdk | public | accepted (2026-01-01) | [exeris-sdk/docs/adr/ADR-033 …](https://github.com/exeris-systems/exeris-sdk/blob/main/docs/adr/ADR-033-absent.md) |
+| 071 | Slash ref | exeris-kernel | kernel | public | accepted (2026-01-01) | [exeris-kernel/docs/adr/ADR-071 …](https://github.com/exeris-systems/exeris-kernel/blob/development/0.12.0/docs/adr/ADR-071-slash.md) |
+| 040 | Foreign | exeris-docs | platform | public | accepted (2026-01-01) | [elsewhere](https://example.com/adr/ADR-040.md) |
+${extraRow}`,
+    "utf8",
+  );
+}
+
+test("docs-get_adr reads a record linked by an ecosystem GitHub URL from the sibling checkout", async () => {
+  writeGithubLinkedIndex();
+  const tool = tools().get("docs-get_adr")!;
+  const sibling = await tool.handler({ number: 7 });
+  assert.equal(sibling.isError, undefined);
+  assert.match((sibling.content[0] as { text: string }).text, /^# ADR-007 Cross-repo/);
+  const own = await tool.handler({ number: 1 });
+  assert.equal(own.isError, undefined);
+  assert.match((own.content[0] as { text: string }).text, /^# ADR-001 Local A/);
+});
+
+test("docs-get_adr names the owning repo and URL when a GitHub-linked sibling is not on disk", async () => {
+  writeGithubLinkedIndex();
+  const tool = tools().get("docs-get_adr")!;
+  const res = await tool.handler({ number: 33 });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /exeris-sdk/);
+  assert.ok(
+    text.includes("https://github.com/exeris-systems/exeris-sdk/blob/main/docs/adr/ADR-033-absent.md"),
+  );
+  assert.ok(!text.includes("https:/github.com/exeris-systems/exeris-sdk/blob"));
+  assert.ok(!text.includes(base));
+});
+
+test("docs-get_adr finds a GitHub-linked record whose ref contains a slash", async () => {
+  writeGithubLinkedIndex();
+  writeFileSync(
+    join(base, "exeris-kernel", "docs", "adr", "ADR-071-slash.md"),
+    "# ADR-071 Slash ref\n",
+    "utf8",
+  );
+  const tool = tools().get("docs-get_adr")!;
+  const res = await tool.handler({ number: 71 });
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# ADR-071 Slash ref/);
+});
+
+test("docs-get_adr reports the URL, not a guessed path, when no candidate is on disk", async () => {
+  writeGithubLinkedIndex();
+  const tool = tools().get("docs-get_adr")!;
+  const res = await tool.handler({ number: 71 });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.ok(text.includes("blob/development/0.12.0/docs/adr/ADR-071-slash.md"));
+  assert.ok(!text.includes("exeris-kernel/0.12.0/"));
+});
+
+test("docs-get_adr refuses a GitHub URL whose path climbs out of the ecosystem", async () => {
+  const outsideBase = realpathSync(mkdtempSync(join(tmpdir(), "exeris-docs-outside-")));
+  try {
+    writeFileSync(join(outsideBase, "x.md"), "stolen content", "utf8");
+    const outsideName = outsideBase.split("/").pop()!;
+    writeGithubLinkedIndex(
+      `| 072 | Escaping | exeris-kernel | kernel | public | accepted (2026-01-01) | ` +
+        `[x](https://github.com/exeris-systems/exeris-kernel/blob/main/../../${outsideName}/x.md) |\n`,
+    );
+    const tool = tools().get("docs-get_adr")!;
+    const res = await tool.handler({ number: 72 });
+    assert.equal(res.isError, true);
+    const text = (res.content[0] as { text: string }).text;
+    assert.match(text, /escapes the ecosystem sandbox/);
+    assert.doesNotMatch(text, /stolen content/);
+  } finally {
+    rmSync(outsideBase, { recursive: true, force: true });
+  }
+});
+
+test("docs-get_adr refuses a URL outside the ecosystem without touching disk", async () => {
+  writeGithubLinkedIndex();
+  const tool = tools().get("docs-get_adr")!;
+  const res = await tool.handler({ number: 40 });
+  assert.equal(res.isError, true);
+  assert.match((res.content[0] as { text: string }).text, /linked outside the Exeris ecosystem/);
+});
+
 test("docs-get_adr returns isError for an ADR not in the registry", async () => {
   const tool = tools().get("docs-get_adr")!;
   const res = await tool.handler({ number: 999 });

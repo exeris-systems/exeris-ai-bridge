@@ -5,7 +5,7 @@ import type { BridgeConfig, DocsConfig, DocsRoots, Unavailable } from "../../con
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
-import { parseAdrIndex, type AdrEntry } from "./adr-index.js";
+import { localLinkCandidates, parseAdrIndex, type AdrEntry } from "./adr-index.js";
 
 // docs:* — surfaces the exeris-docs ADR registry, canonical narratives,
 // decision-doc templates, and a bounded literal-substring search to AI
@@ -203,25 +203,43 @@ function getAdrTool(handle: DocsFamily): RegisteredTool {
         );
       }
 
-      const joined = join(config.docsRoot, trimmedTarget);
-      let resolved: string;
-      try {
-        resolved = resolveInside(config.ecosystemRoot, joined);
-      } catch (err) {
-        if (err instanceof SandboxEscapeError) {
-          // Operator-debug stderr parity with the other handlers — get_adr is
-          // the most likely legit-escape surface (cross-repo links) so the
-          // operator needs the structured fields on both branches below.
-          process.stderr.write(formatSandboxStderrLine(err));
-          if (err.resolved === null) {
-            return errorResult(missingAdrContentMessage(entry, config, joined));
+      const candidates = localLinkCandidates(trimmedTarget);
+      if (candidates === null) {
+        return errorResult(
+          `ADR-${entry.numberPadded} ("${entry.title}") is linked outside the Exeris ` +
+            `ecosystem (${trimmedTarget}); the bridge reads registry content from disk only.`,
+        );
+      }
+
+      // First candidate present on disk wins. Every candidate goes through the
+      // sandbox, and one that resolves outside it refuses the whole lookup
+      // rather than falling through to the next.
+      // Operator-debug stderr parity with the other handlers — get_adr is the
+      // most likely legit-escape surface (cross-repo links) so the operator
+      // needs the structured fields on both failure branches. A candidate that
+      // merely misses before a later one hits is not a failure and is not logged.
+      let resolved: string | null = null;
+      let firstMiss: SandboxEscapeError | null = null;
+      for (const candidate of candidates) {
+        const joined = join(config.docsRoot, candidate);
+        try {
+          resolved = resolveInside(config.ecosystemRoot, joined);
+          break;
+        } catch (err) {
+          if (!(err instanceof SandboxEscapeError)) throw err;
+          if (err.resolved !== null) {
+            process.stderr.write(formatSandboxStderrLine(err));
+            return errorResult(
+              `ADR-${entry.numberPadded} link target escapes the ecosystem sandbox: ` +
+                `${entry.link.target}`,
+            );
           }
-          return errorResult(
-            `ADR-${entry.numberPadded} link target escapes the ecosystem sandbox: ` +
-              `${entry.link.target}`,
-          );
+          firstMiss ??= err;
         }
-        throw err;
+      }
+      if (resolved === null) {
+        if (firstMiss) process.stderr.write(formatSandboxStderrLine(firstMiss));
+        return errorResult(missingAdrContentMessage(entry, config, candidates));
       }
 
       let body: string;
@@ -1038,13 +1056,20 @@ function describeReadError(err: unknown, config: DocsRoots, resourceName: string
   return `Failed to read ${resourceName}: ${redactEcosystemPaths(raw, config)}`;
 }
 
-function missingAdrContentMessage(entry: AdrEntry, config: DocsRoots, joined: string): string {
+function missingAdrContentMessage(entry: AdrEntry, config: DocsRoots, candidates: string[]): string {
   const hint =
     entry.visibility === "enterprise-private"
       ? "This is an enterprise-private ADR; its content may not be available in this checkout."
-      : "Check that the cross-repo sibling is present alongside exeris-docs.";
+      : `Check that the cross-repo sibling (${entry.owningRepo}) is present alongside exeris-docs.` +
+        (entry.link?.github ? ` Its authoritative copy is ${entry.link.github}.` : "");
+  // A GitHub URL is its own clearest statement of the target; the on-disk
+  // guesses derived from it would only restate it, less readably.
+  const target =
+    candidates.length === 1
+      ? relativizeToEcosystem(config, join(config.docsRoot, candidates[0]))
+      : (entry.link?.target ?? "");
   return (
     `ADR-${entry.numberPadded} ("${entry.title}") link target ` +
-    `${relativizeToEcosystem(config, joined)} could not be resolved on disk. ${hint}`
+    `${target} could not be resolved on disk. ${hint}`
   );
 }

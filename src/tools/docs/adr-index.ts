@@ -242,14 +242,21 @@ function parseLink(cell: string, visibility: string): AdrLink | null {
  * at the index file's directory (= the `exeris-docs` checkout). Examples:
  *   - `adr/ADR-001-...md`                  → exeris-docs/blob/main/adr/...
  *   - `../exeris-kernel/docs/adr/ADR-007-...md` → exeris-kernel/blob/main/docs/adr/...
+ *   - `https://github.com/exeris-systems/...`  → returned as written
  *
  * Returns `null` for enterprise-private ADRs (private repos return 404
  * anyway) and for any target shape we can't safely map (absolute paths,
- * targets that climb above the ecosystem root, malformed strings).
+ * targets that climb above the ecosystem root, URLs outside the ecosystem
+ * organisation, malformed strings).
  */
 export function deriveGithubUrl(target: string, visibility: string): string | null {
   if (visibility === "enterprise-private") return null;
   if (target.length === 0) return null;
+  // A target that is already an ecosystem GitHub URL is its own public URL;
+  // any other URL names no ecosystem file, so there is nothing to map.
+  if (URL_SCHEME.test(target)) {
+    return localLinkCandidates(target) === null ? null : target;
+  }
   if (target.startsWith("/")) return null;
 
   let repo: string;
@@ -270,6 +277,41 @@ export function deriveGithubUrl(target: string, visibility: string): string | nu
   if (path.length === 0) return null;
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   return `https://github.com/${ECOSYSTEM_ORG}/${repo}/blob/${DEFAULT_BRANCH}/${encodedPath}`;
+}
+
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const GITHUB_BLOB_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^?#]+)/;
+const REPO_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Map a registry link target to the paths, relative to the `exeris-docs`
+ * checkout, that `docs-get_adr` may resolve on disk.
+ *
+ * The index links a record either by a relative path — returned as the one
+ * candidate — or by the GitHub URL of its authoritative copy in a sibling
+ * repository. A GitHub URL into the ecosystem organisation maps to that
+ * sibling's checkout (`../<repo>/<path>`, or `<path>` for `exeris-docs`
+ * itself). The ref in the URL names no checkout — the one on disk is whatever
+ * branch the reader has — but it may span several segments
+ * (`development/0.12.0`), and the URL alone cannot say where it ends, so each
+ * split is a candidate, shortest ref first. Returns `null` for any other URL:
+ * it names no file in the ecosystem. Candidates are not sandbox-checked
+ * here; the caller resolves each inside the ecosystem root.
+ */
+export function localLinkCandidates(target: string): string[] | null {
+  if (!URL_SCHEME.test(target)) return [target];
+  const match = GITHUB_BLOB_URL.exec(target);
+  if (!match) return null;
+  const [, org, repo, refAndPath] = match;
+  if (org !== ECOSYSTEM_ORG) return null;
+  if (!REPO_SEGMENT.test(repo) || repo === "." || repo === "..") return null;
+  const segments = refAndPath.split("/").filter((s) => s.length > 0);
+  const candidates: string[] = [];
+  for (let refLength = 1; refLength < segments.length; refLength += 1) {
+    const path = segments.slice(refLength).join("/");
+    candidates.push(repo === OWN_REPO ? path : `../${repo}/${path}`);
+  }
+  return candidates.length > 0 ? candidates : null;
 }
 
 function decodeMaybe(value: string): string {
