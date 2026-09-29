@@ -5,7 +5,8 @@ role: specialist
 mode: edit
 capabilities: [read, search, edit, web]
 model: inherit
-policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+policies: [hard-constraints, tool-surface, bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+references: [cross-repo-adrs, tool-families]
 ---
 
 # Exeris AI Bridge Docs/ADR
@@ -16,7 +17,7 @@ Maintain knowledge integrity between MCP server implementation and its strategic
 ## Primary Responsibilities
 - Detect drift between code and `docs/adr/ADR-025-ai-agent-bridge.md`, `README.md` (architecture + tool families + wiring snippet), `ROADMAP.md` milestone scope.
 - Decide whether a change triggers an ADR-025 amendment, a new cross-repo ADR (e.g. ADR-024 capability composition surfacing), a link-stub update in sibling repos, a ROADMAP entry, or nothing.
-- Reserve ADR numbers in `adr-index.md` of `exeris-systems/exeris-docs` BEFORE drafting (per the ecosystem-wide `CLAUDE.md` routing rules; `../exeris-docs/adr-index.md` in a sibling checkout).
+- Reserve ADR numbers in `adr-index.md` of `exeris-systems/exeris-docs` BEFORE drafting (`../exeris-docs/adr-index.md` in a sibling checkout).
 - Maintain link stubs in `exeris-kernel/docs/adr/`, `exeris-platform/docs/adr/` when ADR-025 is amended.
 - Keep docs realistic to current repository state (TRL-2 / scaffold; 0.2.0+ in flight).
 

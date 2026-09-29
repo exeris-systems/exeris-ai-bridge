@@ -19,8 +19,9 @@ commits and pull request bodies; this file judges the TypeScript server those do
 A Model Context Protocol server, in TypeScript on Node, that publishes Exeris surfaces to agents and
 is driven by strings an agent chose. Three properties carry everything else: every tool is a read;
 every path an agent names stays inside a pinned root; and the kernel is reached across a process
-boundary, never linked. `CLAUDE.md` states them as hard constraints and strong defaults and is the
-home of their wording; the rules below are how a reviewer applies them to a diff.
+boundary, never linked. The policies under `.agents/policies/` state them as hard constraints and
+strong defaults and are the home of their wording; the rules below are how a reviewer applies them
+to a diff.
 
 ## Step B — rules of this repository
 

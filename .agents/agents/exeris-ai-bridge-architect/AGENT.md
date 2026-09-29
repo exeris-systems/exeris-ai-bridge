@@ -6,7 +6,8 @@ mode: read-only
 capabilities: [read, search, web]
 model: inherit
 skills: [exeris-ai-bridge-wall-process-boundary-review, exeris-ai-bridge-read-only-tool-review]
-policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+policies: [hard-constraints, tool-surface, filesystem-sandbox, zero-checkout, bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+references: [tool-families, cross-repo-adrs]
 ---
 
 # Exeris AI Bridge Architect
@@ -28,7 +29,7 @@ Architect/reviewer for the MCP server. Prioritize ADR-025 hard constraints and r
 - Read cross-repo ADRs when their surface is touched: ADR-006 (every dependency change / `kernel:*` extension), ADR-020 (doc cross-references), ADR-023 (license / commercial wrapping), ADR-024 (capability composition — its 2026-06-17 amendment makes the kernel **cap-blind**; `kernel:*` MUST NOT surface composition, and there is no `kernel:list_capabilities`).
 - Read `README.md` architecture diagram (separate process / separate language).
 - Read `ROADMAP.md` for milestone scope (currently TRL-2 / scaffold).
-- If docs are missing/stale, rely on `CLAUDE.md` hard constraints and state assumptions explicitly.
+- If docs are missing/stale, rely on the `hard-constraints` policy and state assumptions explicitly.
 
 ## Hard Constraints
 - The Wall: TS / Node process; no Java classpath link; kernel access via JSON-over-stdio.
@@ -39,7 +40,7 @@ Architect/reviewer for the MCP server. Prioritize ADR-025 hard constraints and r
 - Tool families `docs:*` / `lsp:*` / `kernel:*` — adding a new family requires ADR-025 amendment.
 
 ## Output Style
-For each key finding: what → why (ADR-025 / cross-repo ADR / CLAUDE.md hard constraint) → minimal correction.
+For each key finding: what → why (ADR-025 / cross-repo ADR / `hard-constraints` policy) → minimal correction.
 
 ## Response Template
 
