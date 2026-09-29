@@ -211,6 +211,8 @@ function assertBootsDark({
   diagnostic,
   sdkList,
   sdkAst,
+  sdkDescribe,
+  sdkDeprecations,
   stderr,
 }) {
   assert.equal(initialize.serverInfo.name, "exeris-ai-bridge");
@@ -313,6 +315,23 @@ function assertBootsDark({
   assert.ok(!sdkAst.isError, `sdk-get_ast_schema errored: ${sdkAst.content[0].text}`);
   const sdkAstPayload = JSON.parse(sdkAst.content[0].text);
   assert.equal(sdkAstPayload.definition, "DomainMetadata");
+
+  assert.ok(!sdkDescribe.isError, `sdk-describe_annotation errored: ${sdkDescribe.content[0].text}`);
+  const sdkDescribePayload = JSON.parse(sdkDescribe.content[0].text);
+  assert.equal(sdkDescribePayload.name, "ExerisDomain");
+  assert.equal(sdkDescribePayload.qualifiedName, "eu.exeris.sdk.annotation.ExerisDomain");
+  assert.ok(sdkDescribePayload.attributes.length > 0);
+  assert.equal(sdkDescribePayload.packageSummary?.name, "eu.exeris.sdk.annotation");
+
+  assert.ok(!sdkDeprecations.isError, `sdk-list_deprecations errored: ${sdkDeprecations.content[0].text}`);
+  const sdkDeprecationsPayload = JSON.parse(sdkDeprecations.content[0].text);
+  assert.equal(sdkDeprecationsPayload.sdkVersion, sdkListPayload.sdkVersion);
+  assert.ok(sdkDeprecationsPayload.totalDeprecatedAttributes > 0);
+  assert.ok(
+    sdkDeprecationsPayload.deprecatedAttributes.some(
+      (a) => a.annotation === "ExerisDomain" && a.attribute === "tenantScoped",
+    ),
+  );
 
   assert.match(
     stderr,
@@ -447,6 +466,14 @@ async function interrogate(project, home, extraEnv) {
       name: "sdk-get_ast_schema",
       arguments: { definition: "DomainMetadata" },
     });
+    const sdkDescribe = await client.request("tools/call", {
+      name: "sdk-describe_annotation",
+      arguments: { annotation: "ExerisDomain" },
+    });
+    const sdkDeprecations = await client.request("tools/call", {
+      name: "sdk-list_deprecations",
+      arguments: { forRemovalOnly: true },
+    });
 
     assert.equal(child.exitCode, null, "the server exited during the session");
     return {
@@ -462,6 +489,8 @@ async function interrogate(project, home, extraEnv) {
       diagnostic,
       sdkList,
       sdkAst,
+      sdkDescribe,
+      sdkDeprecations,
       stderr: client.stderr,
     };
   } finally {
