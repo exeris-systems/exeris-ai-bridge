@@ -44,7 +44,7 @@ export type BridgeMode = "contributor" | "app";
 export type LaunchSource = "env-command" | "env-jar" | "m2" | "source-tree";
 
 /** The tool families whose availability depends on the environment. */
-export type ToolFamily = "docs" | "lsp" | "kernel" | "build" | "caps";
+export type ToolFamily = "docs" | "lsp" | "kernel" | "build" | "caps" | "sdk";
 
 /**
  * A family that cannot serve requests in this environment.

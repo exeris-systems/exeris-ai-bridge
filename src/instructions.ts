@@ -1,4 +1,5 @@
 import type { BridgeConfig } from "./config/env.js";
+import { loadBundle, isSdkAvailable, type BundleState } from "./data/bundle.js";
 
 /**
  * What the client hands the model at connect time, before it has called
@@ -16,13 +17,15 @@ import type { BridgeConfig } from "./config/env.js";
  * tools serve; copied here they would be a second, unversioned copy that drifts
  * and that nothing tests.
  */
-export function buildInstructions(config: BridgeConfig): string {
+export function buildInstructions(config: BridgeConfig, bundle: BundleState = loadBundle()): string {
+  const sdkState = isSdkAvailable(bundle) ? "available" : "unavailable";
   const families = [
     `docs=${config.docs.state}`,
     `lsp=${config.lsp.state}`,
     `kernel=${config.kernel.state}`,
     `build=${config.project.state}`,
     `caps=${config.project.state}`,
+    `sdk=${sdkState}`,
   ].join(" ");
   return `exeris-ai-bridge publishes the Exeris ecosystem to you as read-only tools. Every
 tool is a read. Nothing here writes a file, edits a project, or changes kernel
@@ -42,18 +45,20 @@ Two failure modes follow, and both are common:
 
 Tool names are \`family-tool\`:
   docs-*    ADR registry, high-level architecture, whitepaper, per-repo docs
+  sdk-*     the \`@ExerisDomain\` authoring contract — annotation catalog and
+            AST schema (\`sdk-list_annotations\`, \`sdk-get_ast_schema\`)
   lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
   build-*   what YOUR OWN project's last build emitted — the DomainMetadata AST
             the code generators consume, plus the generated tree itself and who
             owns it. Codegen already emits the schema, handlers, services,
-            repositories and OpenAPI for an entity; ask build-explain_artefacts
-            before hand-writing any of them, and build-get_detach_state before
+            repositories and OpenAPI for an entity; ask \`build-explain_artefacts\`
+            before hand-writing any of them, and \`build-get_detach_state\` before
             editing a generated file, or the next build silently discards it.
-            build-explain_diagnostic decodes an error the build printed
-  caps-*    the capability composition of YOUR OWN project, from the build-time
-            cap-manifest.json — modules, provided services, init order, stamp
+            \`build-explain_diagnostic\` decodes an error the build printed
+  caps-*    the capability composition of YOUR OWN project, from the
+            cap-manifest.json produced at build time — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable
 
 Resolved for this session: ${families}.
