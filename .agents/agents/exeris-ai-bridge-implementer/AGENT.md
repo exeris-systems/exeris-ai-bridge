@@ -6,7 +6,8 @@ mode: edit
 capabilities: [read, search, edit, shell, web]
 model: inherit
 skills: [exeris-ai-bridge-path-sandbox-review]
-policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+policies: [hard-constraints, implementation-defaults, filesystem-sandbox, tool-surface, zero-checkout, bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+references: [tool-families]
 handoffs:
   - {agent: exeris-ai-bridge-architect, when: "the change adds a dependency", blocking: true}
   - {agent: exeris-ai-bridge-tool-family-discipline, when: "the change adds or renames a tool", blocking: true}

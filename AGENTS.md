@@ -4,14 +4,14 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-22
+last-verified: 2026-09-29
 ---
 
 # exeris-ai-bridge: the MCP server that publishes Exeris surfaces to AI agents
 
 The portable entry point for any AI agent working in this repository. It is an index and a safety
-boundary: the detailed operating rules live in [`CLAUDE.md`](CLAUDE.md), the founding decision in
-[ADR-025](docs/adr/ADR-025-ai-agent-bridge.md), and the reusable agent material under
+boundary: the founding decision is [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md), and the detailed
+operating rules — policies, references, role profiles, skills and workflows — live under
 [`.agents/`](.agents). Human-facing description is in [`README.md`](README.md).
 
 ## Mission and scope
@@ -24,8 +24,9 @@ of the kernel substrate, not a capability, not a SKU.
 
 ## Operating contract
 
-These are hard constraints. The reasoning behind each is in ADR-025 and in `CLAUDE.md`; this list
-names them so no agent starts without them.
+These are hard constraints. The reasoning behind each is in ADR-025 and in the
+[`hard-constraints`](.agents/policies/hard-constraints.md) policy; this list names them so no agent
+starts without them.
 
 - **The Wall, by construction.** This process never links the Java kernel classpath. Kernel access
   crosses a process boundary (JSON over stdio to the `KernelDiagnostics` adapter) — no GraalVM,
@@ -43,14 +44,19 @@ names them so no agent starts without them.
 - **Zero-checkout stays bootable:** the server starts on a machine with no sibling repositories.
 
 When sources disagree, ADR-025 wins, then the cross-repo ADRs in `exeris-systems/exeris-docs`, then
-`CLAUDE.md`, then this file. English for every persisted artefact.
+the ecosystem-wide routing rules, then `.agents/policies/`, then this file, then `README.md`. A
+higher source wins; the lower one is a doc-drift task.
+
+English for every persisted artefact — source, comments, commit messages, pull requests, documents.
+Conversation with the founder happens in Polish.
 
 ## Architecture and documentation entry points
 
 - [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md) — the founding decision and its amendments (tool
   families, the two personas, cap-blind `kernel:*`, preview-never-write). Read it first.
-- [`CLAUDE.md`](CLAUDE.md) — strong defaults, scoped bans, the tool family table, the two personas,
-  and when to consult ADR-006, ADR-020, ADR-023 and ADR-024.
+- [`tool-families`](.agents/references/tool-families.md) — every family, its scope and its source;
+  [`cross-repo-adrs`](.agents/references/cross-repo-adrs.md) — when ADR-006, ADR-020, ADR-023,
+  ADR-024 and ADR-033 bear on a change.
 - [`ROADMAP.md`](ROADMAP.md) — milestone scope.
 - [`README.md`](README.md) — architecture diagram and client wiring.
 - The ecosystem ADR registry is `adr-index.md` in `exeris-systems/exeris-docs`; this repository
@@ -62,6 +68,8 @@ Agent material is authored once, under [`.agents/`](.agents), and rendered for e
 
 | Path | What it holds |
 |:--|:--|
+| [`.agents/policies/`](.agents/policies) | Repository rules: [hard constraints](.agents/policies/hard-constraints.md) (incl. preview-never-write and scoped bans), [tool surface](.agents/policies/tool-surface.md), [filesystem sandbox](.agents/policies/filesystem-sandbox.md), [zero-checkout](.agents/policies/zero-checkout.md) (the two personas), [implementation defaults](.agents/policies/implementation-defaults.md). |
+| [`.agents/references/`](.agents/references) | Short forms that yield to their source: [tool families](.agents/references/tool-families.md), [cross-repo ADRs](.agents/references/cross-repo-adrs.md). |
 | [`.agents/agents/`](.agents/agents) | Role profiles, one per directory as `<name>/AGENT.md`: router, architect, implementer, tool-family discipline, docs/ADR. |
 | [`.agents/skills/`](.agents/skills) | Bounded capabilities: task classification, routing, and the four reviews — Wall / process boundary, read-only tool, path sandbox, tool-family purity. |
 | [`.agents/workflows/`](.agents/workflows) | User-invoked checks: `/wall-process-boundary-check`, `/read-only-tool-check`, `/path-sandbox-check`, `/tool-family-purity`. |
@@ -86,5 +94,6 @@ Report what ran and its result, and name what did not run as not run — silence
 
 [`.claude/`](.claude) holds Claude Code adapters generated from `.agents/` by the shared renderer
 in `exeris-systems/exeris-agents`, each carrying a do-not-edit marker naming its source, plus
-provider-owned local configuration. Regenerate them; never edit them. The other provider
-directories are deferred, and the manifest says so.
+provider-owned local configuration. Regenerate them; never edit them. [`CLAUDE.md`](CLAUDE.md) is a
+thin pointer to this file for clients that look for it, and states no rule of its own. The other
+provider directories are deferred, and the manifest says so.

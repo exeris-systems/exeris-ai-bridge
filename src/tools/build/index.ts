@@ -34,7 +34,7 @@ import {
 // build:* — read-only questions about the USER'S OWN build output. Nothing here
 // runs a build, and no handler writes into the project: this family reads what
 // `mvn compile` already produced and nothing else (ADR-025 §"Preview, never
-// write"; CLAUDE.md hard constraint 3 extended across families by the
+// write"; the no-mutation hard constraint extended across families by the
 // 2026-06-24 amendment).
 //
 // Source of truth is the annotation processor's own output directory —

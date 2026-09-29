@@ -6,7 +6,8 @@ mode: read-only
 capabilities: [read, search, web]
 model: inherit
 skills: [exeris-ai-bridge-task-classifier, exeris-ai-bridge-routing-planner]
-policies: [bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+policies: [hard-constraints, zero-checkout, bundle:agent-safety-and-autonomy, bundle:error-handling-and-fallback]
+references: [tool-families]
 handoffs:
   - {agent: exeris-ai-bridge-architect, when: "ADR-025 alignment, Wall by construction, tool family scope or not-a-capability is the primary risk", blocking: false}
   - {agent: exeris-ai-bridge-implementer, when: "TS code in src/server.ts, src/tools/<family>/ or the transport layer is the primary work", blocking: false}

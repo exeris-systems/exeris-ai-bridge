@@ -39,12 +39,21 @@ workflows:
   - tool-family-purity
   - wall-process-boundary-check
 
-# Repository-owned policies only, and there are none yet: the rules this repository's roles
-# enforce are stated in CLAUDE.md and ADR-025, which the profiles read directly. The shared
-# `agent-safety-and-autonomy` and `error-handling-and-fallback` come from the bundle and are
-# composed as `bundle:<name>`, so a reader can tell whose rule it is.
-policies: []
-references: []
+# Repository-owned policies only. The shared `agent-safety-and-autonomy` and
+# `error-handling-and-fallback` come from the bundle and are composed as `bundle:<name>`, so a
+# reader can tell whose rule it is.
+policies:
+  - hard-constraints
+  - tool-surface
+  - filesystem-sandbox
+  - zero-checkout
+  - implementation-defaults
+
+# Short forms of material whose authority is elsewhere (ADR-025, the cross-repo ADRs); each names
+# its source and yields to it (rule 6).
+references:
+  - tool-families
+  - cross-repo-adrs
 
 # Not adopted yet, each for a stated reason rather than by omission:
 #
