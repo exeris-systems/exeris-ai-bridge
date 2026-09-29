@@ -37,10 +37,10 @@ The repo is deliberately named *bridge*, not *mcp*: MCP is the first protocol su
 
 ### Concrete obligations
 
-1. **Repository and layout.** `~/exeris-systems/exeris-ai-bridge/` — public, Apache 2.0, top-level sibling to `exeris-kernel`, `exeris-sdk`, `exeris-tooling`. TypeScript + Node 20+ as the implementation stack (rationale below). Module layout: `src/tools/lsp/`, `src/tools/docs/`, `src/tools/kernel/` for the three initial tool families; `src/server.ts` for the MCP server entry; `src/transport/` for stdio and SSE transports.
+1. **Repository and layout.** `~/exeris-systems/exeris-ai-bridge/` — public, Apache 2.0, top-level sibling to `exeris-kernel`, `exeris-sdk`, `exeris-tooling`. TypeScript + Node 20+ as the implementation stack (rationale below). Module layout: `src/tools/lsp/`, `src/tools/docs/`, `src/tools/kernel/` for the three initial tool families; `src/server.ts` for the MCP server entry; `src/transport/` for stdio and SSE transports. *(The HTTP transport is Streamable HTTP, not SSE — see the 2026-09-30 amendment "The Hosted Transport Is Streamable HTTP, and the Public Endpoint Serves Public Content Only" below.)*
 2. **Three initial tool families.**
    - `lsp:*` — query Studio/LSP for `@ExerisDomain` types, action signatures, codegen artefacts. Talks to `exeris-platform-lsp` over JSON-RPC (LSP-native transport, no new wire format). *(The concrete method names + payload shapes are pinned by the 2026-06-24 amendment "`lsp:*` Binds to the Read-Only `exeris/*` LSP Slice" below: methods are `exeris/domains` / `exeris/domainDescribe` / `exeris/actions`, read-only.)*
-   - `docs:*` — search the ADR registry, fetch ADR-NNN content, fetch HLA / whitepaper / template by name. Reads `exeris-docs/` filesystem; no network dependency.
+   - `docs:*` — search the ADR registry, fetch ADR-NNN content, fetch HLA / whitepaper / template by name. Reads `exeris-docs/` filesystem; no network dependency. *(Without a checkout it reads a bundled registry snapshot instead — see the 2026-09-30 amendment "`docs:*` Serves a Bundled Registry Snapshot When No Checkout Is Present" below.)*
    - `kernel:*` — introspect provider registry, subsystem DAG, per-subsystem detail, JVM/runtime ergonomics. MUST NOT embed kernel; MUST query a running kernel via a *read-only diagnostic SPI* (`KernelDiagnostics`) in `exeris-kernel-spi`. Talks via a thin JSON-over-stdio adapter spawned by the agent (no Spring, no servlet, no IoC — see Wall obligation below). *(The original wording listed "capability composition (per ADR-024)" here — **superseded by the 2026-06-17 amendment "`kernel:*` Is Cap-Blind" below**. ADR-024's 2026-06-17 "Validation Stamp Lifecycle" amendment makes the open kernel cap-blind, so capability composition is NOT a `kernel:*` surface; it is a tooling/platform concern. The provider-registry / subsystem-DAG clauses stand.)*
 3. **Stack: TypeScript.** Rationale: (a) `@modelcontextprotocol/sdk` is most mature in TS; (b) LSP bridge is naturally JSON-RPC in Node; (c) docs surface is filesystem-bound markdown — no Java needed; (d) kernel introspection crosses a process boundary by design (see The Wall obligation below), so language uniformity with the kernel is not a benefit. The kernel stays Java; the bridge stays TS; the boundary between them is JSON-over-stdio.
 4. **The Wall is preserved (ADR-006).** `exeris-ai-bridge` is NOT on the kernel classpath. It is NOT a kernel provider. It is an external agent-facing tool that *queries* the kernel through a process boundary. The diagnostic SPI surface it consumes lives in `exeris-kernel-spi` and is read-only — `KernelDiagnostics` is a new SPI but it does not let the agent mutate kernel state. Provider implementations of that SPI ship in Community.
@@ -207,6 +207,60 @@ The zero-checkout mode introduced by the "Two Personas" amendment above multipli
 - The 2026-08-16 "Two Personas" amendment above — whose zero-checkout mode created the failure modes this family exists to explain.
 - ROADMAP 0.5.0 (`bridge:health` + `bridge:version`) and 1.0.0 (tool surface frozen, `bridge:*` at 2 tools).
 - ROADMAP 0.11.0 (`bridge:health` deepening) — latency history and richer per-family failure detail land there, on top of this cut.
+
+## `docs:*` Serves a Bundled Registry Snapshot When No Checkout Is Present (2026-09-30 amendment)
+
+Obligation 2 sources `docs:*` from the `exeris-docs/` filesystem, and the "Two Personas" amendment serves it to P1 only. On a machine without the checkout the family is dark, so a P2 agent cannot read the decisions that constrain the code it writes — the Wall (ADR-006), the three-tier model, the entity-first premise (ADR-003). Checking out `exeris-docs` alone does not close the gap: the registry links most records to their authoritative copy in a sibling repository, so the registry is readable only with those siblings on disk as well.
+
+### The Decision
+
+1. **A checkout outranks the snapshot.** When `EXERIS_DOCS_ROOT` or the install-neighbour layout resolves a docs root, `docs:*` reads it exactly as before. Only when no docs root resolves does the family serve the bundled snapshot, and `bridge:health` reports which of the two answered, with the snapshot's per-repository commits.
+
+2. **The snapshot is the registry tier, not the documentation trees.** It holds `adr-index.md`, the record each index row links (in `exeris-docs` or a sibling repository), the HLA, the whitepaper and the decision templates. `docs-list_adrs`, `docs-get_adr`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template` and `docs-search` answer from it, `docs-search` over the snapshot's files only. The per-repository tools (`docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc`) browse sibling `docs/` trees and stay checkout-only: without a checkout they return the family's structured `reason` + `remedy`.
+
+3. **Built at release from the default branch, never from a working tree.** `prepack` assembles the snapshot from each source repository's default branch at a recorded commit, and the manifest records repository, commit and `sha256` per file, with the same integrity check the `sdk:*` corpus carries. A working tree is on whatever branch its owner has checked out, so reading one would make the package's content depend on the release machine. Network access happens at build time only; at runtime the family still reads local files and nothing else.
+
+4. **Visibility is enforced at build time, by the same rules as at read time.** Only `public` records from public repositories enter the snapshot. The enterprise and `exeris-business` deny-list that guards the per-repository tools applies to the snapshot's sources as well; an `enterprise-private` record answers as it does today, with no content.
+
+5. **Redistribution requires a licence, and this is a gate on shipping.** The snapshot redistributes text the bridge does not own, inside a package whose code is Apache 2.0. A source repository is vendored only when it carries a licence that permits redistributing its documentation, and the package ships a data notice naming each source and its licence. A record whose repository does not meet that bar is left out of the snapshot and its `docs-get_adr` error names the owning repository and the record's GitHub URL, as the checkout path already does for a sibling that is absent. The registry itself (`exeris-docs`) has to meet the bar for the snapshot to exist at all.
+
+### What this amendment does NOT change
+
+- **The tool surface.** The nine `docs:*` tools keep their names, input schemas and output shapes; the snapshot changes where an answer comes from, not what it looks like.
+- **No runtime network dependency (obligation 2).** The bridge does not fetch documentation while serving. A snapshot is as current as the release that built it, and `bridge:health` makes its age visible.
+- **Read-only, the Wall (obligation 4), not a capability (obligation 5).** Unchanged.
+- **The bridge's own licence (obligation 6).** Apache 2.0 covers the code. Bundled documentation carries its source's licence, stated in the data notice.
+
+### Cross-references for this amendment
+
+- The 2026-08-16 "Two Personas" amendment above — whose zero-checkout mode left `docs:*` dark, and whose bundled `sdk:*` corpus is the mechanism this snapshot reuses.
+- ADR-020 (Open-Core Documentation Mirror Policy) — the `public` / `enterprise-private` taxonomy the build-time filter applies.
+- ROADMAP 0.9.0 — the milestone that builds the snapshot, and whose resources and prompts read the same content.
+
+## The Hosted Transport Is Streamable HTTP, and the Public Endpoint Serves Public Content Only (2026-09-30 amendment)
+
+Obligation 1 names "stdio and SSE transports". The MCP specification has since replaced its HTTP+SSE transport with Streamable HTTP, keeping HTTP+SSE only as a deprecated fallback for older clients, and its authorization model for HTTP is OAuth 2.1 with the server publishing OAuth 2.0 Protected Resource Metadata. A hosted deployment also changes the auth posture: until now every transport trusted the process that spawned it.
+
+### The Decision
+
+1. **The HTTP transport is Streamable HTTP.** It sits beside stdio and serves the same tool surface. HTTP+SSE is not implemented unless a client that needs it turns up.
+
+2. **The hosted families are `docs:*`, `sdk:*` and `bridge:*`.** `build:*` and `caps:*` read the user's project and `kernel:*` and `lsp:*` spawn processes on the user's machine; a hosted server has neither, so over HTTP those families are unavailable by construction — no project root, no ecosystem root, no launch spec — and report the structured `family_unavailable` error the zero-checkout mode already produces. `tools/list` stays invariant. `docs:*` answers from the registry snapshot of the amendment above.
+
+3. **The public endpoint is unauthenticated and rate-limited.** Every hosted family reads only public content — the snapshot admits `public` records from public repositories, and the `sdk:*` corpus is vendored from released artefacts — so authentication would protect nothing that is not already public. MCP makes authorization optional; the endpoint bounds its cost with a per-client rate limit and a request-size cap instead.
+
+4. **A deployment that serves non-public content authenticates per the MCP authorization specification** — an OAuth 2.1 resource server publishing Protected Resource Metadata and validating that each token was issued for it. A static bearer allowlist is not used: it is a token no spec-conforming client knows how to obtain. No such deployment is scheduled.
+
+### What this amendment does NOT change
+
+- **stdio stays the primary transport** and keeps trusting its spawning process; the project-bound and process-spawning families remain local-only.
+- **The tool surface, read-only, the Wall (obligation 4), not a capability (obligation 5), licence (obligation 6).** Unchanged.
+
+### Cross-references for this amendment
+
+- The 2026-09-30 registry-snapshot amendment above — the content the hosted `docs:*` serves.
+- The 2026-08-16 "Two Personas" amendment above — whose `family_unavailable` contract the hosted families reuse.
+- ROADMAP 0.10.0 — the milestone that builds the transport and the endpoint.
 
 ## Cross-references
 

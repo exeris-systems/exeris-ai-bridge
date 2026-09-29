@@ -28,7 +28,7 @@ Delivery agent for writing and refactoring MCP server code without re-litigating
 
 ## Coding Defaults
 - TypeScript strict mode stays on. `tsconfig.json` enforces `strict`, `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`. `@ts-ignore` requires a comment.
-- Stdio transport first, SSE later. Don't preemptively complicate the transport layer.
+- Stdio transport first, Streamable HTTP later. Don't preemptively complicate the transport layer.
 - Tool definitions live next to their handlers (`src/tools/<family>/index.ts`).
 - `import` is the dependency mechanism — no IoC containers, no decorators-as-DI.
 - Agent-supplied strings reach tool handlers; never `eval`, `new Function(...)`, dynamic `require` of user-controlled paths.

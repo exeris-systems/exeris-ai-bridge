@@ -20,7 +20,7 @@ Return exactly:
 - `ARCHITECTURE`: ADR-025 alignment, Wall by construction, license, not-a-capability.
 - `IMPLEMENTATION`: TS code in `src/server.ts`, `src/tools/{docs,lsp,kernel}/`, helpers.
 - `TOOL_FAMILY`: tool naming, namespace, family scope, new family proposal.
-- `TRANSPORT`: stdio / SSE / JSON-RPC client / kernel adapter wire layer.
+- `TRANSPORT`: stdio / Streamable HTTP / JSON-RPC client / kernel adapter wire layer.
 - `CROSS_REPO`: requires companion PR in `exeris-platform-lsp` / `exeris-kernel` / `exeris-docs`.
 - `DOCS_ADR`: ADR-025 amendment, ROADMAP, README, link stubs.
 - `MULTI_DOMAIN`: at least two classes above are first-order concerns.

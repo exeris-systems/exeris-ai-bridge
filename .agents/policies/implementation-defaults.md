@@ -22,9 +22,10 @@ least surprise, and an override carries its reason where the override is made.
    the `any` and `no-unsafe-*` family is off only in `**/*.test.ts`, where asserting about untyped
    wire data is the premise rather than a defect. Widening one of those scopes, or adding a rule to
    them, needs the same kind of reason the existing ones carry.
-2. **Stdio transport first, SSE later.** The MCP server is invoked as a child process by the agent.
-   SSE/HTTP transport lands only when there is a real hosted-deployment need; the transport layer is
-   not complicated preemptively.
+2. **Stdio transport first, Streamable HTTP later.** The MCP server is invoked as a child process by
+   the agent. The HTTP transport is Streamable HTTP — the MCP specification keeps HTTP+SSE only as
+   a deprecated fallback — and it lands only for the hosted public endpoint scheduled in the ROADMAP;
+   the transport layer is not complicated preemptively.
 3. **JSON-RPC to LSP, JSON-over-stdio to the kernel adapter.** No new wire formats. The LSP server
    already speaks JSON-RPC; the kernel adapter uses newline-delimited JSON over stdio per the
    `KernelDiagnostics` contract (ADR-025 2026-06-25 amendment).
