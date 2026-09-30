@@ -28,7 +28,7 @@ Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) t
 
 - **Node 20+**, TypeScript 5.6+, ES2023 target.
 - [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) for the MCP server runtime.
-- Stdio transport for local agent integration; SSE transport added later if hosted deployment is needed.
+- Stdio transport for local agent integration; a Streamable HTTP transport for a hosted endpoint serving the public families (`docs:*`, `sdk:*`, `bridge:*`) is planned for 0.10.0.
 
 ## Architecture in one line
 

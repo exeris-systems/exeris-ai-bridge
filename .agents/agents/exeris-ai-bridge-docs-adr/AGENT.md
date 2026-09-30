@@ -33,7 +33,7 @@ Maintain knowledge integrity between MCP server implementation and its strategic
 - New tool added inside an existing family → ROADMAP entry.
 - Cross-repo coordination (new custom LSP request in `exeris-platform-lsp`, new `KernelDiagnostics` shape) → link stub in sibling repo + cited cross-repo ADR if new.
 - Wall / read-only / not-a-capability / license change → ADR-025 amendment required.
-- Transport addition (SSE alongside stdio) → ROADMAP entry; ADR only if it changes the security/auth posture.
+- Transport addition (Streamable HTTP alongside stdio) → ROADMAP entry; ADR only if it changes the security/auth posture.
 - `kernel:list_capabilities` shape change → consult ADR-024.
 
 ## Non-goals
