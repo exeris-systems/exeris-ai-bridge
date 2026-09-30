@@ -37,7 +37,7 @@ const LIVE: BridgeConfig = {
   mode: "contributor",
   modeSource: "probe",
   ecosystemRoot: "/var/empty",
-  docs: { state: "available", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
+  docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: LSP_SPEC,
   kernel: KERNEL_SPEC,
   project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
@@ -178,8 +178,9 @@ test("bridge-health reports the launch source and child state of a live family",
 
   const body = await call(LIVE, "bridge-health", { lsp, kernel });
 
-  // docs:* has no child process at all, so it carries no transport key.
-  assert.deepEqual(body.families[0], { family: "docs", state: "available" });
+  // docs:* has no child process at all, so it carries no transport key; its
+  // source says whether a checkout or the bundled snapshot answers.
+  assert.deepEqual(body.families[0], { family: "docs", state: "available", source: "checkout" });
   assert.deepEqual(body.families[1], {
     family: "lsp",
     state: "available",
@@ -202,6 +203,31 @@ test("bridge-health reports the launch source and child state of a live family",
   });
   // The whole surface must stay free: an agent may call it as often as it likes.
   assert.equal(spawns, 0, "bridge:health must never spawn a child process");
+});
+
+test("bridge-health reports a docs snapshot with when it was built and from which commits", async () => {
+  const snapshotConfig: BridgeConfig = {
+    ...ZERO_CHECKOUT,
+    docs: {
+      state: "available",
+      source: "snapshot",
+      docsRoot: "/var/empty/data/docs/exeris-docs",
+      ecosystemRoot: "/var/empty/data/docs",
+      generatedAt: "2026-09-30T00:00:00.000Z",
+      sources: [{ repo: "exeris-docs", commit: "abc123", licence: "Apache-2.0" }],
+    },
+  };
+  const body = await call(snapshotConfig, "bridge-health");
+  assert.deepEqual(body.families[0], {
+    family: "docs",
+    state: "available",
+    source: "snapshot",
+    snapshot: {
+      generatedAt: "2026-09-30T00:00:00.000Z",
+      sources: [{ repo: "exeris-docs", commit: "abc123", licence: "Apache-2.0" }],
+    },
+  });
+  assert.equal(JSON.stringify(body.families[0]).includes("/var/empty"), false, "the snapshot report carries no path");
 });
 
 test("bridge-health distinguishes 'no child process' from 'child not visible'", async () => {

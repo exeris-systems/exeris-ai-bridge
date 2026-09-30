@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
 
+import { writeDocsEcosystemFixture } from "../../data/__tests__/docs-ecosystem.js";
+import { buildDocsSnapshot, directoryReader } from "../../data/docs-snapshot-build.js";
+import { loadDocsSnapshot } from "../../data/docs-snapshot.js";
+
 import { SandboxEscapeError } from "../../fs/sandbox.js";
 import type { BridgeConfig, DocsRoots } from "../../config/env.js";
 import { formatSandboxStderrLine, redactEcosystemPaths, registerDocsTools } from "./index.js";
@@ -24,7 +28,7 @@ function contributorConfig(docsRoot: string, ecosystemRoot: string): BridgeConfi
     modeSource: "probe",
     ecosystemRoot,
     project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
-    docs: { state: "available", docsRoot, ecosystemRoot },
+    docs: { state: "available", source: "checkout", docsRoot, ecosystemRoot },
     lsp: DARK,
     kernel: DARK,
   };
@@ -1169,4 +1173,70 @@ test("docs-list_repo_docs rejects enterprise-tier siblings parity with get_repo_
   assert.match(text, /enterprise-tier sibling/);
   // Negative: must not enumerate the docs/ contents in the error response.
   assert.ok(!text.includes("HTTP3-TEST-PLAN.md"));
+});
+
+// ---------------------------------------------------------------------------
+// docs:* over the bundled registry snapshot (ADR-025, 2026-09-30 amendment)
+
+async function snapshotTools() {
+  const ecosystem = join(base, "fixture-ecosystem");
+  writeDocsEcosystemFixture(ecosystem);
+  const dataRoot = join(base, "data");
+  mkdirSync(dataRoot);
+  await buildDocsSnapshot(directoryReader(ecosystem), dataRoot);
+  const snapshot = loadDocsSnapshot(dataRoot);
+  assert.equal(snapshot.state, "available");
+  if (snapshot.state !== "available") throw new Error("unreachable");
+  const snapshotConfig: BridgeConfig = {
+    ...config,
+    mode: "app",
+    ecosystemRoot: null,
+    docs: {
+      state: "available",
+      source: "snapshot",
+      docsRoot: snapshot.docsRoot,
+      ecosystemRoot: snapshot.ecosystemRoot,
+      generatedAt: snapshot.generatedAt,
+      sources: snapshot.sources,
+    },
+  };
+  return new Map(registerDocsTools(snapshotConfig).map((t) => [t.definition.name, t]));
+}
+
+test("over a snapshot, docs-get_adr reads a record the index links by GitHub URL", async () => {
+  const t = await snapshotTools();
+  const res = await t.get("docs-get_adr")!.handler({ number: 3 });
+  assert.equal(res.isError, undefined);
+  assert.match((res.content[0] as { text: string }).text, /^# ADR-003 Sibling by URL/);
+});
+
+test("over a snapshot, a record from an excluded repository names its owner and URL", async () => {
+  const t = await snapshotTools();
+  const res = await t.get("docs-get_adr")!.handler({ number: 7 });
+  assert.equal(res.isError, true);
+  const text = (res.content[0] as { text: string }).text;
+  assert.match(text, /exeris-kernel/);
+  assert.match(text, /https:\/\/github\.com\/exeris-systems\/exeris-kernel\/blob\/main\/docs\/adr\/ADR-007-unlicensed\.md/);
+  assert.equal(text.includes(base), false);
+});
+
+test("over a snapshot, the registry tools answer and the per-repository tools are dark", async () => {
+  const t = await snapshotTools();
+  const hla = await t.get("docs-get_hla")!.handler({});
+  assert.equal(hla.isError, undefined);
+  const search = await t.get("docs-search")!.handler({ query: "The Wall" });
+  assert.equal(search.isError, undefined);
+  assert.match((search.content[0] as { text: string }).text, /ADR-001-local-record\.md/);
+
+  for (const [name, args] of [
+    ["docs-list_repos", {}],
+    ["docs-list_repo_docs", { repo: "exeris-sdk" }],
+    ["docs-get_repo_doc", { repo: "exeris-sdk", path: "adr/ADR-003-sibling-by-url.md" }],
+  ] as const) {
+    const res = await t.get(name)!.handler(args);
+    assert.equal(res.isError, true, `${name} answered over a snapshot`);
+    const payload = JSON.parse((res.content[0] as { text: string }).text) as { error: string; reason: string };
+    assert.equal(payload.error, "family_unavailable");
+    assert.match(payload.reason, /documentation snapshot bundled in the package/);
+  }
 });

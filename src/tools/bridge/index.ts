@@ -125,7 +125,7 @@ function healthTool(
         mode: config.mode,
         modeSource: config.modeSource,
         families: [
-          plainFamilyReport("docs", config.docs),
+          docsFamilyReport(config.docs),
           childFamilyReport("lsp", config.lsp, transports.lsp?.status()),
           childFamilyReport("kernel", config.kernel, transports.kernel?.status()),
           // Two families, one resolution: build:* and caps:* both read the
@@ -144,8 +144,16 @@ function healthTool(
 interface FamilyReport {
   readonly family: ToolFamily;
   readonly state: "available" | "unavailable";
-  /** Which rung of the launch ladder produced the spec. Absent for docs:*. */
+  /**
+   * Which rung of the launch ladder produced the spec; for docs:*, whether a
+   * checkout or the bundled snapshot answers.
+   */
   readonly source?: string;
+  /** docs:* over the bundled snapshot: when it was built, and from which commits. */
+  readonly snapshot?: {
+    readonly generatedAt: string;
+    readonly sources: readonly { readonly repo: string; readonly commit: string; readonly licence: string }[];
+  };
   /** Which artifact version the ladder picked, when it resolved one by coordinate. */
   readonly artifactVersion?: string;
   readonly reason?: string;
@@ -161,16 +169,36 @@ interface TransportReport {
 }
 
 /**
- * A family with no child process behind it — docs:*, build:* and caps:* all
- * read the filesystem directly. The `transport` key is absent entirely, not
+ * A family with no child process behind it — build:* and caps:* read the
+ * filesystem directly (docs:* too, reported by docsFamilyReport). The `transport` key is absent entirely, not
  * null.
  */
 function plainFamilyReport(
   family: ToolFamily,
-  config: DocsConfig | ProjectConfig | Unavailable,
+  config: ProjectConfig | Unavailable,
 ): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
   return { family, state: "available" };
+}
+
+/**
+ * docs:* reports where its answers come from. A snapshot is as current as the
+ * release that built it, so it also carries when it was built and the commit of
+ * each repository it was read from — the facts an agent needs to judge whether
+ * a record it read may since have changed.
+ */
+function docsFamilyReport(config: DocsConfig | Unavailable): FamilyReport {
+  if (config.state === "unavailable") return darkFamilyReport("docs", config);
+  if (config.source === "checkout") return { family: "docs", state: "available", source: "checkout" };
+  return {
+    family: "docs",
+    state: "available",
+    source: "snapshot",
+    snapshot: {
+      generatedAt: config.generatedAt,
+      sources: config.sources.map(({ repo, commit, licence }) => ({ repo, commit, licence })),
+    },
+  };
 }
 
 /**

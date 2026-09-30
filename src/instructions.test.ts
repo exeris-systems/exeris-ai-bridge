@@ -16,7 +16,7 @@ const LIT: BridgeConfig = {
   mode: "contributor",
   modeSource: "probe",
   ecosystemRoot: "/var/empty",
-  docs: { state: "available", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
+  docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
   kernel: { state: "available", command: "kernel-stub", args: [], source: "source-tree" },
   project: { state: "available", projectRoot: "/var/empty/project", source: "env" },
