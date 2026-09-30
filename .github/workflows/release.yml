@@ -1,0 +1,217 @@
+name: release
+
+# A version tag builds the release; publishing it is a second, gated job.
+#
+#   package  — every `v*` tag (and a manual run against an existing tag): check
+#              the tag against package.json and server.json, test, run the
+#              zero-checkout smoke, pack the tarball with its vendored data, build
+#              the .mcpb bundle, and keep all of it as a workflow artifact. This
+#              is the dry run, and it is the whole run until publishing is on.
+#   publish  — only for a pushed tag, only when the repository variable
+#              RELEASE_PUBLISH is 'true', and only through the protected `release`
+#              environment: npm (trusted publishing, provenance attached), the MCP
+#              Registry, then a GitHub Release carrying the same files.
+#
+# Publishing stays off until the eu.exeris artifacts the bridge resolves reach
+# Maven Central: before that, the published package would point application
+# developers at coordinates they cannot resolve without a GitHub Packages token.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build (dry run: nothing is published from a manual run)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Pinned tools. Bumping either is a reviewed change, not something a release picks up.
+  MCPB_CLI: "@anthropic-ai/mcpb@2.1.2"
+  MCP_PUBLISHER_VERSION: "1.8.1"
+
+jobs:
+  package:
+    name: package (dry run)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # 22.14 is the floor npm trusted publishing needs; the engines floor (20)
+      # is already covered by the build and p2-smoke jobs.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: The tag, package.json and server.json name one version
+        id: version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match package.json version $version"; exit 1
+          fi
+          node -e '
+            const pkg = require("./package.json"), server = require("./server.json");
+            const npm = server.packages[0];
+            const bad = [
+              server.name !== pkg.mcpName && "server.json name != package.json mcpName",
+              server.version !== pkg.version && "server.json version != package.json version",
+              npm.identifier !== pkg.name && "server.json package identifier != package.json name",
+              npm.version !== pkg.version && "server.json package version != package.json version",
+            ].filter(Boolean);
+            if (bad.length) { for (const b of bad) console.log(`::error::${b}`); process.exit(1); }
+          '
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # prepack vendors the sdk:* reference data from released exeris-sdk jars in
+      # the local Maven repository, so they have to be there first. The version is
+      # the repository variable EXERIS_SDK_VERSION, set when a release is cut;
+      # prepack is also told it explicitly, so it cannot pick up something else.
+      # GitHub Packages is consulted only while PACKAGES_READ_TOKEN is present,
+      # which is what lets this dry run work before Maven Central does.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Fetch the exeris-sdk jars the reference data is vendored from
+        env:
+          EXERIS_SDK_VERSION: ${{ vars.EXERIS_SDK_VERSION }}
+          PACKAGES_READ_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: |
+          if [ -z "$EXERIS_SDK_VERSION" ]; then
+            echo "::error::set the repository variable EXERIS_SDK_VERSION to the released exeris-sdk version this release vendors"; exit 1
+          fi
+          repos="central::default::https://repo.maven.apache.org/maven2"
+          settings=""
+          if [ -n "$PACKAGES_READ_TOKEN" ]; then
+            repos="$repos,github-exeris-sdk::default::https://maven.pkg.github.com/exeris-systems/exeris-sdk"
+            settings="$RUNNER_TEMP/settings.xml"
+            cat > "$settings" <<'XML'
+          <settings><servers><server>
+            <id>github-exeris-sdk</id><username>x-access-token</username><password>${env.PACKAGES_READ_TOKEN}</password>
+          </server></servers></settings>
+          XML
+          fi
+          for artifact in exeris-sdk-annotations exeris-sdk-source-model; do
+            mvn -B -q ${settings:+-s "$settings"} dependency:get \
+              -Dartifact="eu.exeris:$artifact:$EXERIS_SDK_VERSION" -Dtransitive=false \
+              -DremoteRepositories="$repos"
+          done
+
+      - name: Test
+        run: npm test
+
+      - name: Zero-checkout smoke
+        run: npm run smoke:p2
+
+      # prepack builds, vendors both corpora strictly (the SDK data from the jars
+      # above, the docs registry snapshot from GitHub at each repository's
+      # default-branch head) and verifies them before npm writes the tarball.
+      - name: Pack
+        env:
+          EXERIS_SDK_VERSION: ${{ vars.EXERIS_SDK_VERSION }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          npm pack --pack-destination out
+
+      - name: Build the MCP bundle from the tarball
+        run: npm run build:mcpb -- "out/exeris-ai-bridge-${{ steps.version.outputs.version }}.tgz" out
+
+      - name: Checksums
+        working-directory: out
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Keep the release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: out/
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    # Configure this environment with a deployment rule restricted to v* tags and a
+    # required reviewer: it is the only place publishing credentials exist, and a
+    # registry login for the organisation namespace can overwrite any server in it.
+    environment: release
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # npm trusted publishing and the MCP Registry's GitHub OIDC login
+    env:
+      VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+
+      - name: Fetch the release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.package.outputs.version }}
+          path: out
+
+      - name: Verify the release files
+        working-directory: out
+        run: sha256sum -c SHA256SUMS
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm 11.5.1 or later. It needs no token, and npm
+      # attaches provenance by itself. The package must already exist on npm to
+      # configure a trusted publisher for it, so the very first publish uses
+      # NPM_TOKEN from the `release` environment; remove that secret afterwards.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm install -g npm@^11.5.1
+          npm publish "out/exeris-ai-bridge-$VERSION.tgz" --access public
+
+      # The registry checks server.json against the published package's mcpName,
+      # so this runs after npm.
+      - name: Publish to the MCP Registry
+        run: |
+          asset="mcp-publisher_linux_amd64.tar.gz"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/v$MCP_PUBLISHER_VERSION"
+          curl -fsSLO "$base/$asset"
+          curl -fsSLO "$base/registry_${MCP_PUBLISHER_VERSION}_checksums.txt"
+          grep " $asset\$" "registry_${MCP_PUBLISHER_VERSION}_checksums.txt" | sha256sum -c -
+          tar xzf "$asset" mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" --verify-tag --notes-from-tag \
+            "out/exeris-ai-bridge-$VERSION.tgz" \
+            "out/exeris-ai-bridge-$VERSION.mcpb" \
+            out/SHA256SUMS

@@ -81,9 +81,24 @@ directory behind for inspection) — that is how it resolves the npm binary to a
 absolute path instead of a `PATH` lookup, and it guarantees the pack and the
 install run on the same npm that manages the project.
 
+## Installing
+
+The package is not on npm yet: publication waits until the `eu.exeris` artifacts it resolves are on Maven Central (see [Releasing](#releasing)). Once it is:
+
+- **Claude Code** — run this inside your project, so the server starts there and finds your `pom.xml`:
+
+  ```sh
+  claude mcp add exeris -- npx -y @exeris/ai-bridge
+  ```
+
+- **Claude Desktop** — install `exeris-ai-bridge-<version>.mcpb` from the [GitHub Release](https://github.com/exeris-systems/exeris-ai-bridge/releases). Desktop does not start the server inside a project, so set **Project root** in the extension's settings to use `build-*` and `caps-*`.
+- **Any other MCP client** — the command is `npx -y @exeris/ai-bridge` over stdio. The server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.exeris-systems/ai-bridge`.
+
+Nothing else is needed: the ADR registry snapshot and the SDK reference data ship inside the package. Until then, run it from a clone as below.
+
 ## Wiring into an agent
 
-For Claude Code, add an entry to your `.claude/settings.json` MCP servers list:
+To run from a clone, add an entry to your `.claude/settings.json` MCP servers list:
 
 ```json
 {
@@ -224,10 +239,24 @@ scripts/
   vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
   p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
                              the tarball on a scrubbed environment (CI job `p2-smoke`)
+  build-mcpb.mjs             builds the Claude Desktop bundle (.mcpb) from the npm tarball
+server.json                  MCP Registry entry; held equal to package.json by a test
 docs/
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)
 ```
+
+## Releasing
+
+A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs the repository variable `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the reference data is vendored from — and, until that release is on Maven Central, the secret `PACKAGES_READ_TOKEN` to fetch it from GitHub Packages.
+
+The `publish` job runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, and only through the `release` environment. It publishes to npm with provenance, then to the MCP Registry, then creates the GitHub Release with the tarball, the bundle and the checksums. Before turning it on:
+
+1. The `@exeris` scope on npm belongs to the project.
+2. The `release` environment exists, restricted to `v*` tags, with a required reviewer.
+3. The first publish uses an `NPM_TOKEN` secret on that environment. Afterwards, configure npm trusted publishing for the package (workflow `release.yml`, environment `release`) and delete the secret: every later publish authenticates by OIDC and carries provenance.
+
+The MCP Registry needs no secret: it verifies the organisation through GitHub OIDC and checks `server.json` against the published package's `mcpName`. `src/release-metadata.test.ts` holds the two equal on every change.
 
 ## License
 
