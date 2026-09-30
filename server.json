@@ -1,0 +1,46 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.exeris-systems/ai-bridge",
+  "title": "Exeris AI Bridge",
+  "description": "Read-only Exeris context for AI agents: ADRs, SDK contract, build output, kernel diagnostics.",
+  "repository": {
+    "url": "https://github.com/exeris-systems/exeris-ai-bridge",
+    "source": "github"
+  },
+  "version": "0.7.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@exeris/ai-bridge",
+      "version": "0.7.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "EXERIS_PROJECT_ROOT",
+          "description": "Root of your own project, for build-* and caps-*. Defaults to the nearest pom.xml at or above the working directory.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "EXERIS_DOCS_ROOT",
+          "description": "An exeris-docs checkout. Without one, docs-* answers from the registry snapshot bundled in the package.",
+          "format": "filepath",
+          "isRequired": false
+        },
+        {
+          "name": "EXERIS_BRIDGE_MODE",
+          "description": "Which persona the environment looks like; inferred when unset.",
+          "choices": [
+            "auto",
+            "contributor",
+            "app"
+          ],
+          "default": "auto",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

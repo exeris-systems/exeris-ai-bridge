@@ -2,6 +2,7 @@
   "name": "@exeris/ai-bridge",
   "version": "0.7.0",
   "description": "Model Context Protocol server exposing Exeris ecosystem surfaces (Studio/LSP, docs/ADR registry, kernel introspection) to AI agents.",
+  "mcpName": "io.github.exeris-systems/ai-bridge",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -42,6 +43,7 @@
     "test": "cd dist && node --test",
     "test:coverage": "c8 --reporter=lcovonly --reporter=text-summary --report-dir=coverage --exclude='**/*.test.*' npm test",
     "smoke:p2": "npm run build && node scripts/p2-smoke.mjs",
+    "build:mcpb": "node scripts/build-mcpb.mjs",
     "vendor:data": "npm run build && node scripts/vendor-reference-data.mjs --emit",
     "prepack": "npm run build && node scripts/vendor-reference-data.mjs --emit --verify --strict"
   },
