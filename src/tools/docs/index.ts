@@ -78,6 +78,7 @@ type DocsFamily = DocsConfig | Unavailable;
 
 export function registerDocsTools(config: BridgeConfig): RegisteredTool[] {
   const docs = config.docs;
+  const repoDocs = checkoutOnly(docs);
   return [
     listAdrsTool(docs),
     getAdrTool(docs),
@@ -85,10 +86,26 @@ export function registerDocsTools(config: BridgeConfig): RegisteredTool[] {
     getHlaTool(docs),
     getWhitepaperTool(docs),
     searchTool(docs),
-    listReposTool(docs),
-    listRepoDocsTool(docs),
-    getRepoDocTool(docs),
+    listReposTool(repoDocs),
+    listRepoDocsTool(repoDocs),
+    getRepoDocTool(repoDocs),
   ];
+}
+
+/**
+ * The per-repository tools browse sibling `docs/` trees. The bundled snapshot
+ * carries the registry tier only, so over a snapshot they are dark with their
+ * own reason rather than answering from a partial tree as if it were whole.
+ */
+function checkoutOnly(handle: DocsFamily): DocsFamily {
+  if (handle.state === "unavailable" || handle.source === "checkout") return handle;
+  return {
+    state: "unavailable",
+    reason:
+      "The docs-* tools are answering from the documentation snapshot bundled in the package, which carries the ADR registry, the records it links, the HLA, the whitepaper and the templates — not each repository's documentation tree.",
+    remedy:
+      "Set EXERIS_DOCS_ROOT to an exeris-docs checkout with its sibling repositories beside it to browse per-repository documentation.",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +737,15 @@ function resolveRepoDocsRoot(config: DocsRoots, repo: string): RepoDocsRootResul
 }
 
 type RepoRestriction = "docs-self" | "enterprise" | "business";
+
+/**
+ * True when `repo` names an ecosystem repository whose documentation the
+ * public surface may serve. The registry snapshot applies it at build time,
+ * so the snapshot admits no repository the per-repo tools would refuse.
+ */
+export function isServableRepo(repo: string): boolean {
+  return REPO_NAME_RE.test(repo) && !REPO_NAME_ENTERPRISE_RE.test(repo) && repo !== REPO_NAME_BUSINESS;
+}
 
 /**
  * Classify a repo name against the bridge's public-scope policy.

@@ -4,6 +4,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, test } from "node:test";
 
+import { writeDocsEcosystemFixture } from "../data/__tests__/docs-ecosystem.js";
+import { buildDocsSnapshot, directoryReader } from "../data/docs-snapshot-build.js";
+
 import { loadConfig, type BridgeConfig, type DocsConfig, type KernelConfig, type LspConfig, type Unavailable } from "./env.js";
 
 let work: string;
@@ -21,9 +24,14 @@ beforeEach(() => {
   mkdirSync(mavenRepo, { recursive: true });
 });
 
-/** loadConfig with the local Maven repository pinned to the scratch repo. */
-function load(env: NodeJS.ProcessEnv = {}, defaultRoot?: string): BridgeConfig {
-  return loadConfig({ EXERIS_MAVEN_REPO: mavenRepo, ...env }, defaultRoot);
+/**
+ * loadConfig with the local Maven repository pinned to the scratch repo, and
+ * the package data root pinned to an empty directory unless a test supplies
+ * one — a snapshot generated in this checkout must not decide what docs:*
+ * resolves to in a test that is not about the snapshot.
+ */
+function load(env: NodeJS.ProcessEnv = {}, defaultRoot?: string, dataRoot?: string): BridgeConfig {
+  return loadConfig({ EXERIS_MAVEN_REPO: mavenRepo, ...env }, defaultRoot, dataRoot ?? join(work, "no-data"));
 }
 
 /** Install a fake artifact jar into the scratch repo and return its path. */
@@ -185,8 +193,9 @@ test("loadConfig on a bare application project boots with every family dark", ()
     assert.ok(dark.reason.length > 0);
     assert.ok(dark.remedy.length > 0);
   }
-  // The expected-state wording must not read as a fault.
-  assert.match(darkOf(cfg.docs).reason, /application-developer mode/);
+  // From a source tree the package's snapshot has not been generated, and the
+  // wording has to say that rather than read as a fault.
+  assert.match(darkOf(cfg.docs).reason, /No exeris-docs checkout is present, and this bridge carries no documentation snapshot/);
 });
 
 test("loadConfig with the real process environment does not throw", () => {
@@ -494,7 +503,7 @@ test("an unresolvable EXERIS_MAVEN_REPO warns once instead of silently disabling
   // like a machine that does not have the artifact installed.
   const gone = missing("no-such-repo");
   const { value: cfg, stderr } = captureStderr(() =>
-    loadConfig({ EXERIS_MAVEN_REPO: gone, EXERIS_BRIDGE_MODE: "app" }, missing("no-default-docs")),
+    loadConfig({ EXERIS_MAVEN_REPO: gone, EXERIS_BRIDGE_MODE: "app" }, missing("no-default-docs"), missing("no-data")),
   );
   assert.equal(cfg.kernel.state, "unavailable");
   assert.match(stderr, /EXERIS_MAVEN_REPO is not an existing directory/);
@@ -583,4 +592,67 @@ test("neither project-dark string leaks a machine path", () => {
   const dark = cfg.project as Unavailable;
   assert.equal(dark.reason.includes(secret), false);
   assert.equal(dark.remedy.includes(secret), false);
+});
+
+// ---------------------------------------------------------------------------
+// docs:* — the bundled registry snapshot (ADR-025, 2026-09-30 amendment)
+
+/** Build a snapshot of the fixture ecosystem into a scratch data root and return that root. */
+async function snapshotDataRoot(): Promise<string> {
+  const ecosystem = join(work, "fixture-ecosystem");
+  writeDocsEcosystemFixture(ecosystem);
+  const dataRoot = join(work, "data");
+  mkdirSync(dataRoot);
+  await buildDocsSnapshot(directoryReader(ecosystem), dataRoot);
+  return dataRoot;
+}
+
+test("with no checkout, docs:* answers from the bundled snapshot and the mode stays app", async () => {
+  const dataRoot = await snapshotDataRoot();
+  const cfg = load({}, missing("no-default-docs"), dataRoot);
+  const docs = docsOf(cfg);
+  assert.equal(docs.source, "snapshot");
+  assert.ok(docs.docsRoot.endsWith(join("data", "docs", "exeris-docs")));
+  // A snapshot is not an ecosystem: nothing to build children from, and no
+  // reason to read this machine as a contributor's.
+  assert.equal(cfg.ecosystemRoot, null);
+  assert.equal(cfg.mode, "app");
+  if (docs.source === "snapshot") {
+    assert.deepEqual(docs.sources.map((s) => s.repo), ["exeris-docs", "exeris-sdk"]);
+  }
+});
+
+test("a checkout outranks the snapshot", async () => {
+  const dataRoot = await snapshotDataRoot();
+  const checkout = join(work, "eco", "exeris-docs");
+  mkdirSync(checkout, { recursive: true });
+  const cfg = load({ EXERIS_DOCS_ROOT: checkout }, undefined, dataRoot);
+  assert.equal(docsOf(cfg).source, "checkout");
+  assert.equal(cfg.mode, "contributor");
+});
+
+test("an explicit EXERIS_DOCS_ROOT that does not resolve stays dark rather than falling back to the snapshot", async () => {
+  const dataRoot = await snapshotDataRoot();
+  const { value: cfg } = captureStderr(() => load({ EXERIS_DOCS_ROOT: missing("typo") }, undefined, dataRoot));
+  const dark = darkOf(cfg.docs);
+  assert.match(dark.reason, /EXERIS_DOCS_ROOT is set/);
+  assert.match(dark.remedy, /unset it to use the documentation snapshot/);
+});
+
+test("a pinned contributor with no checkout gets the snapshot, and a warning", async () => {
+  const dataRoot = await snapshotDataRoot();
+  const { value: cfg, stderr } = captureStderr(() =>
+    load({ EXERIS_BRIDGE_MODE: "contributor" }, missing("no-default-docs"), dataRoot),
+  );
+  assert.equal(docsOf(cfg).source, "snapshot");
+  assert.equal(cfg.mode, "contributor");
+  assert.match(stderr, /answers from the bundled snapshot/);
+});
+
+test("with neither a checkout nor a snapshot, docs:* is dark with the snapshot's remedy", () => {
+  const cfg = load({}, missing("no-default-docs"));
+  const dark = darkOf(cfg.docs);
+  assert.match(dark.reason, /no documentation snapshot/);
+  assert.match(dark.remedy, /EXERIS_DOCS_ROOT/);
+  assert.equal(cfg.mode, "app");
 });

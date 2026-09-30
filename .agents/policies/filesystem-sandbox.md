@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-09-30
 ---
 
 # Policy — filesystem reads are sandboxed to pinned roots
@@ -13,7 +13,8 @@ Every filesystem-bound handler reads under a root the server pinned, never under
 named:
 
 - `docs:*` reads the configured `exeris-docs` checkout (`../exeris-docs/` beside this repository in
-  an ecosystem checkout).
+  an ecosystem checkout), or, when none resolves, the registry snapshot under
+  `<packageRoot>/data/docs/`, whose digests are verified at boot.
 - The bundled reference corpus reads `<packageRoot>/data/`.
 - `build:*` and `caps:*` read the pinned `projectRoot` and nothing above it.
 

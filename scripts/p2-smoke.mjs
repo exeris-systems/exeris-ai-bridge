@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { writeDocsEcosystemFixture } from "../dist/data/__tests__/docs-ecosystem.js";
+
 // The P2 smoke test — the item that closes ROADMAP 0.5.0.
 //
 // Every other test in this repo runs against the source tree, inside an
@@ -87,13 +89,22 @@ async function main() {
 function pack() {
   const out = join(scratch, "tarball");
   mkdirSync(out);
+  const ecosystem = join(scratch, "docs-ecosystem");
+  writeDocsEcosystemFixture(ecosystem);
   // Packed into an empty directory and read back, rather than parsed out of
   // npm's stdout: the prepack lifecycle script writes there too.
-  // Explicitly point EXERIS_MAVEN_REPO at test fixtures for hermetic pack testing.
+  // Both vendored corpora come from test fixtures, so the pack is hermetic: the
+  // SDK reference data from a fixture Maven repository, and the docs registry
+  // snapshot from a fixture ecosystem written into the scratch directory
+  // instead of GitHub.
   npm(["pack", "--pack-destination", out], {
     cwd: PACKAGE_ROOT,
     stdio: "inherit",
-    env: { ...process.env, EXERIS_MAVEN_REPO: join(PACKAGE_ROOT, "test", "fixtures", "m2") },
+    env: {
+      ...process.env,
+      EXERIS_MAVEN_REPO: join(PACKAGE_ROOT, "test", "fixtures", "m2"),
+      EXERIS_DOCS_SNAPSHOT_SOURCE: ecosystem,
+    },
   });
   const files = readdirSync(out);
   assert.equal(files.length, 1, `expected exactly one tarball in ${out}, got ${files.join(", ")}`);
@@ -179,9 +190,10 @@ function install(project, tarball) {
  *
  * `defaultDocsRoot()` walks three levels up from `dist/config`, which in an
  * npm install lands on `node_modules/@exeris/exeris-docs` — absent, so docs:*
- * goes dark and everything below passes. If a future change to that default
- * ever made it resolve, the test would keep passing while testing nothing.
- * Both halves of "there is no ecosystem here" are therefore asserted directly.
+ * answers from the bundled snapshot. If a future change to that default ever
+ * made it resolve, docs:* would answer from a checkout and the snapshot
+ * assertions below would stop testing the snapshot. Both halves of "there is
+ * no ecosystem here" are therefore asserted directly.
  */
 function assertZeroCheckout(project, home) {
   const sibling = join(project, "node_modules", "@exeris", "exeris-docs");
@@ -197,6 +209,11 @@ function assertZeroCheckout(project, home) {
     true,
     "the installed package is missing data/manifest.json — prepack did not run, or `files` dropped data/",
   );
+  assert.equal(
+    existsSync(join(project, "node_modules", "@exeris", "ai-bridge", "data", "docs", "manifest.json")),
+    true,
+    "the installed package is missing the docs registry snapshot — prepack did not build it, or `files` dropped it",
+  );
 }
 
 function assertBootsDark({
@@ -204,6 +221,9 @@ function assertBootsDark({
   version,
   health,
   calls,
+  docsAdr,
+  docsExcluded,
+  docsRepos,
   capless,
   unbuilt,
   ungenerated,
@@ -241,15 +261,23 @@ function assertBootsDark({
   );
 
   // build:* and caps:* resolve from the P2 project; sdk:* is live because its
-  // reference data ships in the package bundle. They are the three that SHOULD be live here.
+  // reference data ships in the package bundle, and docs:* because the registry
+  // snapshot does. They are the four that SHOULD be live here.
   for (const family of ["build", "caps"]) {
     const report = byFamily.get(family);
     assert.equal(report.state, "available", `${family}:* did not resolve from the project the server was started in`);
   }
   const sdkReport = byFamily.get("sdk");
   assert.equal(sdkReport?.state, "available", "sdk:* reference data did not load from the package bundle");
+  const docsReport = byFamily.get("docs");
+  assert.equal(docsReport?.state, "available", "docs:* did not load the registry snapshot from the package");
+  assert.equal(docsReport.source, "snapshot");
+  assert.deepEqual(
+    docsReport.snapshot.sources.map((s) => `${s.repo}@${s.commit}:${s.licence}`),
+    ["exeris-docs@fixture-docs-commit:Apache-2.0", "exeris-sdk@fixture-sdk-commit:Apache-2.0"],
+  );
 
-  const dark = new Map([...byFamily].filter(([f]) => f !== "build" && f !== "caps" && f !== "sdk"));
+  const dark = new Map([...byFamily].filter(([f]) => !["build", "caps", "sdk", "docs"].includes(f)));
   for (const [family, report] of dark) {
     assert.equal(report.state, "unavailable", `${family}:* resolved on a machine that has nothing to resolve it from`);
     assert.ok(report.reason?.length > 0, `${family}:* is dark without a reason`);
@@ -273,6 +301,16 @@ function assertBootsDark({
     assert.equal(payload.family, family);
     assert.ok(payload.remedy?.length > 0);
   }
+
+  // docs:* over the snapshot: a record the registry links by GitHub URL reads
+  // from the installed package; a record from a repository the snapshot
+  // excludes names where it lives; the per-repository tools are dark.
+  assert.ok(!docsAdr.isError, `docs-get_adr errored over the snapshot: ${docsAdr.content[0].text}`);
+  assert.match(docsAdr.content[0].text, /^# ADR-003 Sibling by URL/);
+  assert.equal(docsExcluded.isError, true);
+  assert.match(docsExcluded.content[0].text, /https:\/\/github\.com\/exeris-systems\/exeris-kernel\//);
+  assert.equal(docsRepos.isError, true);
+  assert.equal(JSON.parse(docsRepos.content[0].text).error, "family_unavailable");
 
   assert.ok(!capless.isError, `caps-list_capabilities errored on a cap-less project: ${capless.content[0].text}`);
   const caplessPayload = JSON.parse(capless.content[0].text);
@@ -350,7 +388,7 @@ function assertBootsDark({
 
   assert.match(
     stderr,
-    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=unavailable lsp=unavailable kernel=unavailable build=available caps=available sdk=available$/m,
+    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=available lsp=unavailable kernel=unavailable build=available caps=available sdk=available$/m,
     `the boot summary is missing or wrong; stderr was:\n${stderr}`,
   );
 }
@@ -426,9 +464,13 @@ async function interrogate(project, home, extraEnv) {
     // One gated tool per family, to see the dark path on the wire. All of them
     // is server.test.ts's job; this is about the transport, not the coverage.
     const calls = [];
-    for (const name of ["docs-list_adrs", "lsp-list_domains", "kernel-list_providers"]) {
+    for (const name of ["lsp-list_domains", "kernel-list_providers"]) {
       calls.push([name, await client.request("tools/call", { name, arguments: {} })]);
     }
+
+    const docsAdr = await client.request("tools/call", { name: "docs-get_adr", arguments: { number: 3 } });
+    const docsExcluded = await client.request("tools/call", { name: "docs-get_adr", arguments: { number: 7 } });
+    const docsRepos = await client.request("tools/call", { name: "docs-list_repos", arguments: {} });
 
     // The live counterpart: caps:* is up on this machine, and the project has
     // no cap-manifest.json, so the contract says a clean present:false answer
@@ -501,6 +543,9 @@ async function interrogate(project, home, extraEnv) {
       version,
       health,
       calls,
+      docsAdr,
+      docsExcluded,
+      docsRepos,
       capless,
       unbuilt,
       ungenerated,

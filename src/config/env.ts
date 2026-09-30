@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { defaultDataRoot, loadDocsSnapshot, type SnapshotSource } from "../data/docs-snapshot.js";
 import { findArtifactJar, newestReleaseVersion, resolveLocalRepository, type MavenCoordinate } from "./maven.js";
 
 // Config resolution for the two personas the bridge serves (ADR-025,
@@ -88,9 +89,27 @@ export interface DocsRoots {
   readonly ecosystemRoot: string;
 }
 
-/** Resolved docs:* configuration. */
-export interface DocsConfig extends DocsRoots {
+/**
+ * Resolved docs:* configuration.
+ *
+ * `source` says what answers: an exeris-docs checkout, or the registry
+ * snapshot bundled in the package, which serves only when no checkout resolves
+ * (ADR-025, 2026-09-30 amendment). For a snapshot the two roots point into it —
+ * `ecosystemRoot` is the snapshot's stand-in for the sibling-repo root, not a
+ * real ecosystem, which is why BridgeConfig.ecosystemRoot stays null then.
+ */
+export type DocsConfig = CheckoutDocsConfig | SnapshotDocsConfig;
+
+export interface CheckoutDocsConfig extends DocsRoots {
   readonly state: "available";
+  readonly source: "checkout";
+}
+
+export interface SnapshotDocsConfig extends DocsRoots {
+  readonly state: "available";
+  readonly source: "snapshot";
+  readonly generatedAt: string;
+  readonly sources: readonly SnapshotSource[];
 }
 
 /**
@@ -167,19 +186,24 @@ const DEFAULT_DOCS_DIRNAME = "exeris-docs";
  * `reason` (a pinned contributor whose roots are missing is a misconfiguration
  * to report, not a silent downgrade to app mode).
  *
- * The `env` and `defaultRoot` parameters are injectable for tests. Injecting
- * the install-neighbour default is what makes the zero-checkout branch
- * reachable from a test run that is itself sitting inside an ecosystem
- * checkout, where the real default resolves.
+ * The `env`, `defaultRoot` and `dataRoot` parameters are injectable for tests.
+ * Injecting the install-neighbour default is what makes the zero-checkout
+ * branch reachable from a test run that is itself sitting inside an ecosystem
+ * checkout, where the real default resolves; injecting the data root keeps a
+ * locally generated snapshot out of tests that are not about it.
  */
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   defaultRoot: string = defaultDocsRoot(),
+  dataRoot: string = defaultDataRoot(),
 ): BridgeConfig {
   const pinned = resolvePinnedMode(env);
-  const docs = resolveDocsConfig(env, pinned, defaultRoot);
-  const ecosystemRoot = docs.state === "available" ? docs.ecosystemRoot : null;
-  const mode = pinned ?? (docs.state === "available" ? "contributor" : "app");
+  const docs = resolveDocsConfig(env, pinned, defaultRoot, dataRoot);
+  // Only a checkout is an ecosystem. A snapshot serves docs:* but has no
+  // module poms to build from and does not make this a contributor's machine.
+  const checkout = docs.state === "available" && docs.source === "checkout";
+  const ecosystemRoot = checkout ? docs.ecosystemRoot : null;
+  const mode = pinned ?? (checkout ? "contributor" : "app");
   warnIfLocalRepositoryUnresolvable(env);
   const launch: LaunchContext = { env, ecosystemRoot, mode, pinned };
   return {
@@ -320,23 +344,28 @@ function resolvePinnedMode(env: NodeJS.ProcessEnv): BridgeMode | null {
 
 /**
  * Resolve the docs roots from `EXERIS_DOCS_ROOT`, falling back to the
- * install-neighbour layout (`../exeris-docs` relative to the package root).
+ * install-neighbour layout (`../exeris-docs` relative to the package root),
+ * and then to the registry snapshot bundled in the package.
  *
- * Three distinct dark cases, deliberately worded differently: an explicitly
- * configured root that does not resolve is an operator error; a missing
- * default under pinned contributor mode is a misconfiguration; a missing
- * default otherwise is the expected P2 state and must not read as a fault.
+ * An explicitly configured root that does not resolve takes the family dark
+ * rather than falling through to the snapshot: the operator named a checkout,
+ * and quietly answering from a snapshot would hide the typo. Same stance as an
+ * unresolvable EXERIS_*_JAR.
+ *
+ * A pinned contributor with no checkout still gets the snapshot, with a
+ * warning: pinning changes wording, never availability.
  */
 function resolveDocsConfig(
   env: NodeJS.ProcessEnv,
   pinned: BridgeMode | null,
   defaultRoot: string,
+  dataRoot: string,
 ): DocsConfig | Unavailable {
   const explicit = env.EXERIS_DOCS_ROOT?.trim();
   const configured = explicit !== undefined && explicit.length > 0 ? explicit : null;
   const real = resolveRealDir(configured ?? defaultRoot);
   if (real !== null) {
-    return { state: "available", docsRoot: real, ecosystemRoot: dirname(real) };
+    return { state: "available", source: "checkout", docsRoot: real, ecosystemRoot: dirname(real) };
   }
   if (configured !== null) {
     warn(`EXERIS_DOCS_ROOT does not resolve to a readable directory: ${configured} — docs:* is unavailable.`);
@@ -344,29 +373,39 @@ function resolveDocsConfig(
       state: "unavailable",
       reason: "EXERIS_DOCS_ROOT is set but does not resolve to a readable directory.",
       remedy:
-        "Point EXERIS_DOCS_ROOT at an exeris-docs checkout. The path that failed to resolve is on the bridge's stderr.",
+        "Point EXERIS_DOCS_ROOT at an exeris-docs checkout, or unset it to use the documentation snapshot bundled in the package. The path that failed to resolve is on the bridge's stderr.",
     };
   }
+
+  const snapshot = loadDocsSnapshot(dataRoot);
   if (pinned === "contributor") {
     warn(
       "EXERIS_BRIDGE_MODE=contributor, but no exeris-docs checkout was found next to the bridge " +
-        "installation — docs:* is unavailable.",
+        (snapshot.state === "available"
+          ? "installation — docs:* answers from the bundled snapshot."
+          : "installation — docs:* is unavailable."),
     );
+  }
+  if (snapshot.state === "available") {
+    return {
+      state: "available",
+      source: "snapshot",
+      docsRoot: snapshot.docsRoot,
+      ecosystemRoot: snapshot.ecosystemRoot,
+      generatedAt: snapshot.generatedAt,
+      sources: snapshot.sources,
+    };
+  }
+  if (pinned === "contributor") {
     return {
       state: "unavailable",
       reason:
-        "EXERIS_BRIDGE_MODE pins contributor mode, but no exeris-docs checkout was found next to the bridge installation.",
+        "EXERIS_BRIDGE_MODE pins contributor mode, but no exeris-docs checkout was found next to the bridge installation, and no documentation snapshot is bundled.",
       remedy:
         "Set EXERIS_DOCS_ROOT to an exeris-docs checkout, or unset EXERIS_BRIDGE_MODE to run in application-developer mode.",
     };
   }
-  return {
-    state: "unavailable",
-    reason:
-      "No exeris-docs checkout is present. The bridge is running in application-developer mode, where the ecosystem documentation registry is not expected on disk.",
-    remedy:
-      "Set EXERIS_DOCS_ROOT to an exeris-docs checkout if you are working on the Exeris ecosystem itself.",
-  };
+  return snapshot;
 }
 
 /**

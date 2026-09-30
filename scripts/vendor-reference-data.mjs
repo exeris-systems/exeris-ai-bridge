@@ -4,6 +4,8 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:f
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildDocsSnapshot, directoryReader, githubReader } from "../dist/data/docs-snapshot-build.js";
+import { loadDocsSnapshot } from "../dist/data/docs-snapshot.js";
 import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.js";
 
 // Generates the bundled reference data that ships inside the npm package, so an
@@ -13,7 +15,14 @@ import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.j
 //   --emit     rebuild data/ and data/manifest.json  (default)
 //   --verify   check that the manifest is present, well-formed, and that every
 //              entry's bytes still match the digest recorded for it
-//   --strict   fail hard if no repository or SDK jars are found (required in prepack)
+//   --strict   fail hard if no repository or SDK jars are found, or the docs
+//              registry snapshot cannot be built (required in prepack)
+//
+// The docs registry snapshot (data/docs/, ADR-025 2026-09-30 amendment) is read
+// from GitHub — each repository's default branch at one recorded commit — or,
+// when EXERIS_DOCS_SNAPSHOT_SOURCE names a directory laid out as <repo>/<path>,
+// from there. The directory source is what keeps the smoke run hermetic.
+// GITHUB_TOKEN, when set, only raises the API rate limit.
 //
 // data/ is NOT committed. Generating at pack time keeps a stale `generatedAt`
 // out of git and means the bundle-absent path is the ordinary experience when
@@ -24,7 +33,7 @@ const DATA_DIR = join(PACKAGE_ROOT, "data");
 const MANIFEST = join(DATA_DIR, "manifest.json");
 const SCHEMA_VERSION = 1;
 
-function emit(strict = false) {
+async function emit(strict = false) {
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
 
@@ -67,9 +76,33 @@ function emit(strict = false) {
   };
   writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   console.log(`[vendor-reference-data] wrote ${entries.length} entr${entries.length === 1 ? "y" : "ies"} to data/`);
+
+  await emitDocsSnapshot(strict);
 }
 
-function verify() {
+async function emitDocsSnapshot(strict) {
+  const local = process.env.EXERIS_DOCS_SNAPSHOT_SOURCE?.trim();
+  const reader = local ? directoryReader(local) : githubReader(process.env.GITHUB_TOKEN?.trim());
+  let report;
+  try {
+    report = await buildDocsSnapshot(reader, DATA_DIR);
+  } catch (cause) {
+    rmSync(join(DATA_DIR, "docs"), { recursive: true, force: true });
+    if (strict) fail(`docs registry snapshot: ${cause.message}`);
+    console.warn(`[vendor-reference-data] no docs registry snapshot: ${cause.message}`);
+    return;
+  }
+  const { manifest, unresolved } = report;
+  const from = manifest.sources.map((s) => `${s.repo}@${s.commit.slice(0, 7)}`).join(", ");
+  console.log(`[vendor-reference-data] docs snapshot: ${manifest.files.length} files from ${from}`);
+  for (const e of manifest.excluded) console.log(`[vendor-reference-data]   excluded ${e.repo}: ${e.reason}`);
+  if (unresolved.length > 0) {
+    console.log(`[vendor-reference-data]   ${unresolved.length} index rows not vendored:`);
+    for (const u of unresolved) console.log(`[vendor-reference-data]     ADR-${u.adr}: ${u.reason}`);
+  }
+}
+
+function verify(strict = false) {
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
@@ -97,6 +130,15 @@ function verify() {
     if (digest !== entry.sha256) fail(`entry '${entry.id}' does not match its recorded digest`);
   }
   console.log(`[vendor-reference-data] verified ${manifest.entries.length} entries`);
+
+  // The same check the server runs at boot, so a snapshot the server would
+  // refuse never reaches a published tarball.
+  const snapshot = loadDocsSnapshot(DATA_DIR);
+  if (snapshot.state === "available") {
+    console.log(`[vendor-reference-data] verified the docs registry snapshot`);
+  } else if (strict) {
+    fail(`docs registry snapshot: ${snapshot.reason}`);
+  }
 }
 
 function fail(message) {
@@ -108,5 +150,5 @@ const args = new Set(process.argv.slice(2));
 const wantsStrict = args.has("--strict") || process.env.EXERIS_VENDOR_STRICT === "1";
 const wantsVerify = args.has("--verify");
 const wantsEmit = args.has("--emit") || !wantsVerify;
-if (wantsEmit) emit(wantsStrict);
-if (wantsVerify) verify();
+if (wantsEmit) await emit(wantsStrict);
+if (wantsVerify) verify(wantsStrict);
