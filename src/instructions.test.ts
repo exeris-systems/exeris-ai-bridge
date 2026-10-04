@@ -14,7 +14,7 @@ import type { BundleState } from "./data/bundle.js";
 
 const LIT: BridgeConfig = {
   mode: "contributor",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: "/var/empty",
   docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
@@ -24,7 +24,7 @@ const LIT: BridgeConfig = {
 
 const DARK: BridgeConfig = {
   mode: "app",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: null,
   docs: { state: "unavailable", reason: "no exeris-docs (test)", remedy: "set EXERIS_DOCS_ROOT (test)" },
   lsp: { state: "unavailable", reason: "no launch spec (test)", remedy: "set EXERIS_LSP_COMMAND (test)" },

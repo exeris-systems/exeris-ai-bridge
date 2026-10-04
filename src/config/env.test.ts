@@ -186,7 +186,7 @@ test("loadConfig on a bare application project boots with every family dark", ()
   // The P2 contract: no ecosystem checkout anywhere, no EXERIS_* set at all.
   const cfg = loadZeroCheckout({});
   assert.equal(cfg.mode, "app");
-  assert.equal(cfg.modeSource, "probe");
+  assert.equal(cfg.modeSource, "default");
   assert.equal(cfg.ecosystemRoot, null);
   for (const family of [cfg.docs, cfg.lsp, cfg.kernel]) {
     const dark = darkOf(family);
@@ -205,10 +205,12 @@ test("loadConfig with the real process environment does not throw", () => {
 // ---------------------------------------------------------------------------
 // EXERIS_BRIDGE_MODE
 
-test("mode probes to contributor when the docs root resolves", () => {
+test("a resolved docs checkout does not make the mode contributor", () => {
   const cfg = load({ EXERIS_DOCS_ROOT: withDocs() });
-  assert.equal(cfg.mode, "contributor");
-  assert.equal(cfg.modeSource, "probe");
+  assert.equal(cfg.mode, "app");
+  assert.equal(cfg.modeSource, "default");
+  assert.equal(cfg.docs.state, "available");
+  assert.notEqual(cfg.ecosystemRoot, null);
 });
 
 test("EXERIS_BRIDGE_MODE=contributor with no checkout reports a misconfiguration, not app mode", () => {
@@ -227,22 +229,33 @@ test("EXERIS_BRIDGE_MODE is descriptive, not a mask: pinning app keeps a resolve
   assert.equal(cfg.docs.state, "available");
 });
 
-test("EXERIS_BRIDGE_MODE=auto and blank both mean probe", () => {
+test("a blank EXERIS_BRIDGE_MODE is the default", () => {
   const docs = withDocs();
-  for (const value of ["auto", "  AUTO  ", "", "   "]) {
-    const cfg = load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: value });
-    assert.equal(cfg.modeSource, "probe", `for ${JSON.stringify(value)}`);
+  for (const value of ["", "   "]) {
+    const { value: cfg } = captureStderr(() => load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: value }));
+    assert.equal(cfg.mode, "app", `for ${JSON.stringify(value)}`);
+    assert.equal(cfg.modeSource, "default", `for ${JSON.stringify(value)}`);
   }
 });
 
-test("an unrecognised EXERIS_BRIDGE_MODE warns and falls back to auto", () => {
+test("EXERIS_BRIDGE_MODE=auto warns that the mode is never inferred, and runs in app mode", () => {
+  const docs = withDocs();
+  for (const value of ["auto", "  AUTO  "]) {
+    const { value: cfg, stderr } = captureStderr(() => load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: value }));
+    assert.equal(cfg.mode, "app", `for ${JSON.stringify(value)}`);
+    assert.equal(cfg.modeSource, "default", `for ${JSON.stringify(value)}`);
+    assert.match(stderr, /EXERIS_BRIDGE_MODE=auto is not a mode/);
+  }
+});
+
+test("an unrecognised EXERIS_BRIDGE_MODE warns and falls back to app mode", () => {
   const docs = withDocs();
   const { value: cfg, stderr } = captureStderr(() =>
     load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "contrib" }),
   );
-  assert.equal(cfg.modeSource, "probe");
-  assert.equal(cfg.mode, "contributor");
-  assert.match(stderr, /EXERIS_BRIDGE_MODE must be one of/);
+  assert.equal(cfg.modeSource, "default");
+  assert.equal(cfg.mode, "app");
+  assert.match(stderr, /EXERIS_BRIDGE_MODE must be contributor or app/);
 });
 
 // ---------------------------------------------------------------------------
@@ -424,8 +437,10 @@ test("contributor mode prefers the source tree; app mode prefers the published j
   installPom(KERNEL_POM);
   const docs = withDocs();
 
-  assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs })).source, "source-tree");
+  assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "contributor" })).source, "source-tree");
   assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs, EXERIS_BRIDGE_MODE: "app" })).source, "m2");
+  // Unpinned is app: a checkout next to the install does not flip the order.
+  assert.equal(kernelOf(load({ EXERIS_DOCS_ROOT: docs })).source, "m2");
 
   // Preference, not gating: the second rung still fires when the first cannot.
   const kernel = kernelOf(loadZeroCheckout({ EXERIS_BRIDGE_MODE: "contributor" }));
@@ -628,7 +643,7 @@ test("a checkout outranks the snapshot", async () => {
   mkdirSync(checkout, { recursive: true });
   const cfg = load({ EXERIS_DOCS_ROOT: checkout }, undefined, dataRoot);
   assert.equal(docsOf(cfg).source, "checkout");
-  assert.equal(cfg.mode, "contributor");
+  assert.equal(cfg.mode, "app");
 });
 
 test("an explicit EXERIS_DOCS_ROOT that does not resolve stays dark rather than falling back to the snapshot", async () => {

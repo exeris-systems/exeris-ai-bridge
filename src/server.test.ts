@@ -14,7 +14,7 @@ import { registerSdkTools } from "./tools/sdk/index.js";
 // avoids Sonar's S5443 publicly-writable-directory flag on /tmp.
 const stubConfig: BridgeConfig = {
   mode: "contributor",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: "/var/empty",
   docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "true", args: [], source: "source-tree", workspaceRoot: "/var/empty" },
@@ -25,7 +25,7 @@ const stubConfig: BridgeConfig = {
 /** What a bare application project resolves to: no roots, no launch specs. */
 const zeroCheckoutConfig: BridgeConfig = {
   mode: "app",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: null,
   docs: { state: "unavailable", reason: "docs reason", remedy: "docs remedy" },
   lsp: { state: "unavailable", reason: "lsp reason", remedy: "lsp remedy" },
