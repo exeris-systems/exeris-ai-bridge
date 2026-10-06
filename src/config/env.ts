@@ -32,7 +32,7 @@ import { findArtifactJar, newestReleaseVersion, resolveLocalRepository, type Mav
 // dirname(docsRoot) rather than from a second env var, because the ADR registry
 // links into ../exeris-kernel/…, ../exeris-sdk/… (v0.2.0 locked decision).
 
-/** Which persona the current environment looks like. */
+/** Which persona the bridge serves: app unless EXERIS_BRIDGE_MODE chose contributor. */
 export type BridgeMode = "contributor" | "app";
 
 /**
@@ -183,13 +183,13 @@ const DEFAULT_DOCS_DIRNAME = "exeris-docs";
  * NEVER throws — see the file header. Every failure to resolve a root becomes
  * an `Unavailable` on the family it belongs to.
  *
- * `mode` is DESCRIPTIVE, not a mask: it records which persona the environment
- * looks like and is reported by bridge:health, but it does not switch families
- * off. Availability has exactly one source of truth — whether the family's
- * dependency resolved. A contributor who pins `app` still gets docs:* if
- * exeris-docs is on disk; pinning only changes the wording of a family's
- * `reason` (a pinned contributor whose roots are missing is a misconfiguration
- * to report, not a silent downgrade to app mode).
+ * `mode` is not a mask: it is app unless EXERIS_BRIDGE_MODE chose contributor,
+ * it is reported by bridge:health, and it never switches a family off.
+ * Availability has exactly one source of truth — whether the family's
+ * dependency resolved. App mode still gets docs:* when exeris-docs is on disk.
+ * Contributor mode changes two things only: the source tree wins over a
+ * published jar in the launch ladder, and a missing root is worded as a
+ * misconfiguration to report rather than as the ordinary application state.
  *
  * The `env`, `defaultRoot` and `dataRoot` parameters are injectable for tests.
  * Injecting the install-neighbour default is what makes the zero-checkout
