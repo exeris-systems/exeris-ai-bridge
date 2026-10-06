@@ -278,6 +278,13 @@ Obligation 1 names "stdio and SSE transports". The MCP specification has since r
 
 5. **The preview is bounded.** Each run has a wall-clock timeout and a cap on the size of the output it returns; a run that exceeds either is stopped, its directory removed, and the limit named in the error.
 
+### Risks and assumptions
+
+- **Assumes:** the generator writes only under the output directory it is given. `CodegenMain` (`--output-dir`) and `exeris-gen generate` (`--output`) both write their files, and the manifest of what a run emitted, under that root. Point 3 rests on this as much as on the bridge's own code.
+- **Assumes:** `exeris-tooling` 0.9.0 publishes `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` to Maven Central (ADR-091), so the version `build-get_starter` pins resolves for an application developer. A launchable Java generator is not assumed: until `exeris-tooling` publishes one, `build-preview_generation` covers the TypeScript generator and reports the Java side unavailable with that reason.
+- **Reversed by:** a generator run observed writing outside the directory it was given. Points 2 and 3 then no longer hold together, and the preview is withdrawn until the generator can be confined. Also reversed, in favour of a narrower shape, by `exeris-tooling` publishing a mode that returns the generated files without writing them: the bridge then consumes that and creates no directory at all.
+- **Risk:** a generator of a different version than the project pins answers for the wrong contract; point 4 refuses rather than falls back, and the agent sees it first, as a structured `reason`.
+
 ### What this amendment does NOT change
 
 - **No family is added.** Both tools belong to `build:*`, whose subject is the pipeline seen from the application's side. Like the rest of `build:*`, they are local only: over the hosted transport they report `family_unavailable`.
