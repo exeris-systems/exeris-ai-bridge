@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-10-04
 ---
 
 # Policy — hard constraints
@@ -40,7 +40,10 @@ that intact and adds the one sanctioned path to canonical edits: `lsp-preview_mu
 read-only `exeris/previewMutation`, which applies a `MutationOp` **in memory** and returns a diff —
 the agent writes the file with its own tools.
 
-No tool handler writes into the user's project. `fs.writeFile` against a project path is
+No tool handler writes into the user's project. The one directory the bridge writes is its own:
+`build-preview_generation` sends the generator's output to a directory it creates under the OS
+temporary directory, outside the project and ecosystem roots, and removes it when the call returns
+(ADR-025 2026-10-04 amendment). `fs.writeFile` against a project path is
 `lsp-apply_mutation`: deliberately deferred past 1.0, and it needs a further amendment first.
 
 ## Scoped bans

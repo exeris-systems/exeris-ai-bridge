@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-10-04
 ---
 
 # Reference — the tool families
@@ -32,7 +32,9 @@ ADR-025 disagree, ADR-025 wins and this file is the defect. The registered tools
   scheduling only, not authorisation. `caps:*` specifically satisfies the deferred-composition
   clause of the 2026-06-17 cap-blind amendment. `build:*` and `caps:*` are implemented as of 0.6.0;
   `sdk:*` as of 0.7.0, with public npm publication gated on the upstream 0.12.0 GA release reaching
-  Maven Central.
+  Maven Central. `build-get_starter` and `build-preview_generation` join `build:*` in 0.9.0 under the
+  2026-10-04 amendment, which lets the preview write into a temporary directory the bridge owns and
+  nowhere else.
 - `bridge:*` — the 2026-08-26 addendum.
 
 The rules for adding to any of them are in the [`tool-surface`](../policies/tool-surface.md) policy.

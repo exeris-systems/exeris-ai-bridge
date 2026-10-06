@@ -262,6 +262,37 @@ Obligation 1 names "stdio and SSE transports". The MCP specification has since r
 - The 2026-08-16 "Two Personas" amendment above — whose `family_unavailable` contract the hosted families reuse.
 - ROADMAP 0.10.0 — the milestone that builds the transport and the endpoint.
 
+## `build:*` Serves the Application Starter and Previews Generation, Writing Only Into Its Own Temporary Directory (2026-10-04 amendment)
+
+`build:*` reads what the pipeline already emitted into the user's project. Two questions an application developer asks before that state exists are left unanswered: how to start a project at all, and what the generator will emit for the metadata the project has now. `exeris-tooling` 0.9.0 answers the first upstream with three opt-in POM modules — `exeris-app-bom`, `exeris-app-parent`, `exeris-app-starter` — for a backend, a frontend, or both (ADR-091 and its Amendment 1). Today an agent writes that build by hand and guesses at the generator's output, which is the failure `build-explain_artefacts` was introduced to prevent, moved one step earlier.
+
+### The Decision
+
+1. **`build-get_starter` returns the build files for a new application, and writes none.** It takes the variant — backend, frontend, or backend and frontend — and returns the files ADR-091 says a consumer writes: a `pom.xml` parented on `exeris-app-parent` with `exeris-app-starter` as a dependency, the `package.json` entries for the `@exeris/codegen-ts` side, or both, together with what the application still supplies itself (the JDBC driver). The version is the `exeris-app-bom` the bridge vendored at release, which names a tested tooling, kernel and SDK triple. The tool reads bundled data only; it needs no project root, and the agent writes the files with its own tools.
+
+2. **`build-preview_generation` runs the real generator, never a model of it.** It hands the project's emitted metadata (`target/classes/exeris-metadata`) to the released generator as a child process, directs its output into a directory the bridge creates for that call, and returns the files it produced, a unified diff of each against the project's L1 tree (`src/main/generated/java`, or the TypeScript output root), and the diagnostics the run printed. The rule that `build:*` never predicts what the pipeline would emit stands: a prediction would be a second implementation of the generators' internal guards, and running the generator itself is the opposite of that.
+
+3. **The only directory the bridge writes is its own.** The preview's output directory is created under the operating system's temporary directory, is never inside the project root or the ecosystem root, and is removed when the call returns, whether the run succeeded or not. No tool handler writes into the user's project; the 2026-06-24 statement that the bridge is read-only across all families keeps its meaning for every path the user owns.
+
+4. **The generator is the version the project uses, resolved locally.** The Java generator is resolved from the local Maven repository at the version the project pins, the TypeScript generator from the project's installed `@exeris/codegen-ts`. The bridge does not download either at runtime. When none resolves, the tool returns a structured `reason` and `remedy`, as an unavailable family does, rather than falling back to a generator of a different version, whose output would answer for a contract the project does not use.
+
+5. **The preview is bounded.** Each run has a wall-clock timeout and a cap on the size of the output it returns; a run that exceeds either is stopped, its directory removed, and the limit named in the error.
+
+### What this amendment does NOT change
+
+- **No family is added.** Both tools belong to `build:*`, whose subject is the pipeline seen from the application's side. Like the rest of `build:*`, they are local only: over the hosted transport they report `family_unavailable`.
+- **The Wall (obligation 4).** The Java generator runs as a separate process, exactly as the `kernel:*` and `lsp:*` children do; nothing Java is linked into the bridge.
+- **Preview, never write.** Applying generated output to the project stays the agent's or the build's step (`mvn exeris:generate`, `exeris-gen generate`). A tool that writes into the project still needs a further amendment.
+- **Not a capability (obligation 5), licence (obligation 6).** Unchanged.
+
+### Cross-references for this amendment
+
+- ADR-091 (`exeris-tooling`, Publish an Opt-In Application Starter, and its Amendment 1) — the modules `build-get_starter` returns a build on, and the three variants.
+- ADR-078 (`exeris-tooling`) — the generators emit no build file; the starter is data the bridge serves, not something the generators produce.
+- The 2026-06-24 amendment above — read-only across all families, which point 3 keeps for every user-owned path.
+- The 2026-08-16 "Two Personas" amendment above — which authorised `build:*` for the application developer.
+- ROADMAP 0.9.0 — the milestone that ships both tools.
+
 ## Cross-references
 
 - ADR-006 (Spring-Free Kernel Boundary) — the bridge MUST NOT bring Spring into the kernel; the boundary is by-design satisfied because the bridge is a separate process in a separate language.

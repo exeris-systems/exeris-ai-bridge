@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-10-04
 ---
 
 # Policy — the MCP tool surface
@@ -53,4 +53,6 @@ it does not know individual tool names.
 - `build:*` **reads what the pipeline emitted; it never predicts what it would emit.** Only 2 of the
   13 generators state their gate in `supports()`; the rest decide by a null sentinel inside
   `generate(...)`, so a prediction here would be a second implementation of eleven internal guards.
+  `build-preview_generation` does not break this: it runs the released generator itself, into a
+  directory the bridge owns, and reports what that run emitted (ADR-025 2026-10-04 amendment).
   `caps:*` likewise reads manifests and never re-resolves the `@Requires`→`@Provides` DAG.
