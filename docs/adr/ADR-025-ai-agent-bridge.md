@@ -104,7 +104,7 @@ Obligation 2's `lsp:*` bullet committed the family to "query Studio/LSP … over
 ### The Decision
 
 1. **Method namespace is `exeris/*`, not `workspace/exeris*`.** The three custom requests are `exeris/domains`, `exeris/domainDescribe` (params `{ qualifiedName }`), and `exeris/actions`. They map onto the bridge tools `lsp:list_domains`, `lsp:describe_domain`, and `lsp:list_actions` respectively. (The earlier `workspace/exeris*` working names from ROADMAP 0.3.0 are superseded.)
-2. **The wire shapes are fixed and validated bridge-side.** `exeris/domains` → `DomainSummary[]` (`qualifiedName`, `simpleName`, `packageName`, `sourcePath`); `exeris/domainDescribe` → `DomainDescription` (the summary fields plus `fields[]` of `{ name, type, required }`, `actions[]` of `{ name, httpMethod, resultType, params[] }`, and `artefacts[]` — generated surfaces such as `rest` / `graphql` / `realtime` / `eventSourced` / `saga` / `events` / `internalClient`); `exeris/actions` → `ActionSummary[]` (`owningDomain`, `name`, `httpMethod`, `resultType`, `params[]`). The bridge validates each result against these shapes (`src/tools/lsp/shapes.ts`) and re-emits only the contract fields, so a version-skewed server surfaces a clear shape error instead of leaking drift to the agent.
+2. **The wire shapes are fixed and validated bridge-side.** `exeris/domains` → `DomainSummary[]` (`qualifiedName`, `simpleName`, `packageName`, `sourcePath`); `exeris/domainDescribe` → `DomainDescription` (the summary fields plus `fields[]` of `{ name, type, required }`, `actions[]` of `{ name, httpMethod, resultType, params[] }`, and `artefacts[]` — generated surfaces such as `rest` / `graphql` / `realtime` / `eventSourced` / `saga` / `events` / `internalClient`); `exeris/actions` → `ActionSummary[]` (`owningDomain`, `name`, `httpMethod`, `resultType`, `params[]`). The bridge validates each result against these shapes (`src/tools/lsp/shapes.ts`) and re-emits only the contract fields, so a version-skewed server surfaces a clear shape error instead of leaking drift to the agent. *(`DomainDescription` also carries an optional `relationships[]` — see the 2026-10-06 amendment "`exeris/domainDescribe` Carries an Optional `relationships[]` Facet" below.)*
 3. **The slice is read-only — by design and by construction.** Per the platform method-surface contract the `exeris/*` namespace also reserves a write-back method (`exeris/applyMutation`); the bridge **does not** consume it and MUST NOT. This is the `lsp:*` analogue of hard constraint 3 (no mutation of kernel state): the bridge is a read-only introspection surface across **all** families, not only `kernel:*`.
 
 ### Cross-references for this amendment
@@ -299,6 +299,37 @@ Obligation 1 names "stdio and SSE transports". The MCP specification has since r
 - The 2026-06-24 amendment above — read-only across all families, which point 3 keeps for every user-owned path.
 - The 2026-08-16 "Two Personas" amendment above — which authorised `build:*` for the application developer.
 - ROADMAP 0.9.0 — the milestone that ships both tools.
+
+## `exeris/domainDescribe` Carries an Optional `relationships[]` Facet (2026-10-06 amendment)
+
+Item 2 of the 2026-06-24 amendment pins the shape of `DomainDescription`. The Studio frontend renders a domain's associations, and an agent describing a domain needs them for the same reason. `DomainMetadata.relationships` is populated by the SDK source-model reader: the `@Relationship` annotation is extracted and consumed by the repository, Flyway and application generators. The facet is real data, not a reserved placeholder, so `exeris-platform-lsp` projects it, and this amendment pins the shape it projects.
+
+### The Decision
+
+1. **`DomainDescription` gains one optional component, `relationships`:** an array of `{ name, targetEntity, type }`. Nothing else in the read trio changes.
+2. **Absent and empty are different answers.** The component is *omitted* when the source model does not carry the facet, and is `[]` when the domain declares no associations. The bridge MUST preserve the difference: absent is re-emitted as absent (or `null`) and never normalised to `[]`. Turning "not carried" into "declares none" is the one error this facet can make, and it would be made in the agent's context.
+3. **The vocabulary is the SDK's, not the platform's.** The field names are the components of `eu.exeris.sdk.sourcemodel.ast.RelationshipMetadata`. `type` is that record's `RelationType` in the SDK's Jackson serialized form: `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_ONE` or `MANY_TO_MANY`. `type` may itself be omitted when the model carries none. A new SDK constant reaches the wire unchanged, so the bridge validates `type` as a string, not as a closed enum.
+4. **`targetEntity` is not a domain identity.** It is the target type exactly as the SDK reader extracts it: the declared type name with any collection element unwrapped, usually a simple name (`OrderItem`). The server does not resolve it against the workspace. A consumer that needs a `qualifiedName` matches it against `exeris/domains` itself.
+5. **An additive component is invisible until the bridge adopts it.** `src/tools/lsp/shapes.ts` re-emits only the contract fields, so a bridge that predates this amendment drops `relationships` and keeps working. Exposing it to agents through `lsp-describe_domain` is the bridge's adoption step, with tests for absent, `[]`, and an entry with and without `type`; the ROADMAP schedules it.
+
+### Risks and assumptions
+
+- **Assumes:** the SDK keeps `RelationshipMetadata`'s component names and `RelationType`'s serialized form stable within its 0.x line, and changes them only by its own versioned decision. Point 3 binds the wire to that vocabulary rather than restating it, so an SDK rename reaches the wire without a platform change.
+- **Cost:** until the bridge adopts the facet, it is invisible to agents. `lsp-describe_domain` answers without `relationships`, and an agent reasoning about a domain's associations gets nothing to reason from. It does not get a wrong answer.
+- **Risk:** a consumer that normalises an absent facet to `[]` turns "not carried" into "declares none", a positive claim the server never made (point 2). The adoption tests exist to catch this before an agent sees it.
+- **Reversed by:** an SDK change that removes `relationships` from `DomainMetadata`, or that stops the reader from populating it. The component is then withdrawn by a further amendment, not left on the wire as an always-absent field.
+
+### What this amendment does NOT change
+
+- `exeris/domains`, `exeris/actions` and the other `DomainDescription` components stand as pinned.
+- The read-only invariant stands: the bridge does not consume `exeris/applyMutation`.
+- A component renamed or removed is still a breaking change that needs its own amendment, landed together with the validator change, before the platform ships it.
+
+### Cross-references for this amendment
+
+- The 2026-06-24 amendment above, whose item 2 this extends.
+- `exeris-platform/exeris-platform-lsp`: `ExerisProtocolExtensions.DomainDescription` and `RelationshipDescription`, projected by `ProtocolProjections`. The wire JSON is pinned by `ProtocolProjectionsTest`, which serializes through LSP4J's own message handler, and by `TransportParityIT`, which checks that the JSON is identical over stdio and WebSocket.
+- `exeris-sdk` `RelationshipMetadata` and `RelationType`, the source of the names and the cardinality vocabulary.
 
 ## Cross-references
 
