@@ -2,11 +2,14 @@
 
 **Model Context Protocol server exposing Exeris ecosystem surfaces to AI agents.**
 
-`exeris-ai-bridge` is a public, Apache 2.0 MCP server that publishes three surfaces from the Exeris ecosystem to AI agents (Claude Code, Cursor, Copilot Workspace, and any other MCP-aware client):
+`exeris-ai-bridge` is a public, Apache 2.0 MCP server that gives AI agents (Claude Code, Cursor, Copilot Workspace, and any other MCP-aware client) the Exeris context they need. It is built first for **developers building an application on Exeris**, and that is the mode it runs in unless told otherwise:
 
-- **Studio / LSP bridge** — query `@ExerisDomain` types, action signatures, codegen artefacts from a running `exeris-platform-lsp` session.
-- **Docs / ADR registry** — search and fetch ADRs, HLA, whitepaper, and templates from `exeris-docs`.
-- **Kernel introspection** — read-only inspection of a running kernel's provider registry, bootstrap/subsystem DAG, and per-subsystem detail (via the `KernelDiagnostics` SPI). Cap-blind by design: capability composition is a build-time tooling/platform surface, not a kernel one (see [ADR-024](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-024-capability-composition-model.md) 2026-06-17 amendment and ADR-025 §"`kernel:*` Is Cap-Blind").
+- **Your project's build** (`build:*`, `caps:*`) — the `DomainMetadata` the processor emitted, which files codegen generated and which of them you may edit, what a build diagnostic means, and the capability composition the build validated.
+- **The authoring contract** (`sdk:*`) — every SDK annotation with its attributes and deprecations, the `@Field` vs `@Validation` scoping rules, the AST schema, and whether your project pins a different SDK than the one answering.
+- **Docs / ADR registry** (`docs:*`) — the ADRs, HLA, whitepaper and templates, from a snapshot bundled in the package; no checkout needed.
+- **Kernel introspection** (`kernel:*`) — read-only inspection of a running kernel's provider registry, bootstrap/subsystem DAG, and per-subsystem detail (via the `KernelDiagnostics` SPI), launched from the published jar in your local Maven repository. Cap-blind by design: capability composition is a build-time tooling/platform surface, not a kernel one (see [ADR-024](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-024-capability-composition-model.md) 2026-06-17 amendment and ADR-025 §"`kernel:*` Is Cap-Blind").
+
+**Contributors to Exeris itself** work from the sibling repositories checked out side by side. That checkout is what lights the Studio / LSP bridge (`lsp:*`: `@ExerisDomain` types and action signatures from an `exeris-platform-lsp` session), which has no published artifact yet, so `lsp:*` needs the sibling checkout (or an explicit `EXERIS_LSP_COMMAND` / `EXERIS_LSP_JAR`) whatever the mode. Setting `EXERIS_BRIDGE_MODE=contributor` changes one thing: the source tree wins over published jars when a child process is launched. See [Wiring into an agent](#wiring-into-an-agent).
 
 The repo is named *bridge*, not *mcp*: MCP is the first protocol surface, but the mission is "bridge Exeris semantic surfaces to AI agents" — adjacent integrations (Claude Skills bundles, agent-SDK adapters, future protocols) live here when they share that responsibility.
 
@@ -98,7 +101,20 @@ Nothing else is needed: the ADR registry snapshot and the SDK reference data shi
 
 ## Wiring into an agent
 
-To run from a clone, add an entry to your `.claude/settings.json` MCP servers list:
+To run from a clone, add an entry to your `.claude/settings.json` MCP servers list. For an application, nothing needs setting — start the agent inside your project and the bridge finds its `pom.xml`:
+
+```json
+{
+  "mcpServers": {
+    "exeris": {
+      "command": "node",
+      "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"]
+    }
+  }
+}
+```
+
+A contributor working on the ecosystem itself chooses contributor mode explicitly and points at the checkout:
 
 ```json
 {
@@ -107,6 +123,7 @@ To run from a clone, add an entry to your `.claude/settings.json` MCP servers li
       "command": "node",
       "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"],
       "env": {
+        "EXERIS_BRIDGE_MODE": "contributor",
         "EXERIS_DOCS_ROOT": "/abs/path/to/exeris-docs"
       }
     }
@@ -126,7 +143,7 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 
 `EXERIS_PROJECT_ROOT` points at **the developer's own project** — the tree `build:*` and `caps:*` report on. It is optional: with nothing set, the bridge walks up from its working directory to the nearest `pom.xml`, which is the right answer when an agent starts the server inside the project it is working on, and lands on the owning module rather than the aggregator in a multi-module build. Set it explicitly when the agent's working directory is somewhere else. An explicit root is taken as given and is **not** required to contain a `pom.xml` — naming it is how you escape our guessing. Reads are sandboxed to this root exactly as `docs:*` reads are sandboxed to the docs root, including for paths the bridge builds itself.
 
-`EXERIS_BRIDGE_MODE` (optional, `auto` | `contributor` | `app`, default `auto`) records which persona the environment looks like — `auto` infers it from whether an ecosystem checkout resolved. It is **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
+`EXERIS_BRIDGE_MODE` (optional, `app` | `contributor`, default `app`) says which persona the bridge serves. **The default is the application developer, and contributor mode is chosen, never inferred**: a checkout next to the install does not switch it, because an application developer may well clone `exeris-docs` to read it. The one thing the mode changes is which launch rung wins (below). It is otherwise **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
 
 Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:
 

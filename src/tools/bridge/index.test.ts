@@ -35,7 +35,7 @@ const KERNEL_SPEC: KernelConfig = {
 
 const LIVE: BridgeConfig = {
   mode: "contributor",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: "/var/empty",
   docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs", ecosystemRoot: "/var/empty" },
   lsp: LSP_SPEC,
@@ -45,7 +45,7 @@ const LIVE: BridgeConfig = {
 
 const ZERO_CHECKOUT: BridgeConfig = {
   mode: "app",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: null,
   docs: dark("docs"),
   project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
@@ -130,7 +130,7 @@ test("bridge-version identifies the build and the resolved mode", async () => {
   assert.equal(body.version, getServerVersion());
   assert.equal(body.node, process.version);
   assert.equal(body.mode, "contributor");
-  assert.equal(body.modeSource, "probe");
+  assert.equal(body.modeSource, "default");
 });
 
 test("bridge-version reports a pinned mode as env-sourced", async () => {

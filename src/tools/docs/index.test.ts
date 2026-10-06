@@ -25,7 +25,7 @@ const DARK = {
 function contributorConfig(docsRoot: string, ecosystemRoot: string): BridgeConfig {
   return {
     mode: "contributor",
-    modeSource: "probe",
+    modeSource: "default",
     ecosystemRoot,
     project: { state: "unavailable", reason: "no project root (test)", remedy: "set EXERIS_PROJECT_ROOT (test)" },
     docs: { state: "available", source: "checkout", docsRoot, ecosystemRoot },

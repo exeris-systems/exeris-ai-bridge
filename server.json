@@ -28,17 +28,6 @@
           "description": "An exeris-docs checkout. Without one, docs-* answers from the registry snapshot bundled in the package.",
           "format": "filepath",
           "isRequired": false
-        },
-        {
-          "name": "EXERIS_BRIDGE_MODE",
-          "description": "Which persona the environment looks like; inferred when unset.",
-          "choices": [
-            "auto",
-            "contributor",
-            "app"
-          ],
-          "default": "auto",
-          "isRequired": false
         }
       ]
     }
