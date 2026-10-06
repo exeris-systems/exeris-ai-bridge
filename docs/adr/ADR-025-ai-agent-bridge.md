@@ -312,6 +312,13 @@ Item 2 of the 2026-06-24 amendment pins the shape of `DomainDescription`. The St
 4. **`targetEntity` is not a domain identity.** It is the target type exactly as the SDK reader extracts it: the declared type name with any collection element unwrapped, usually a simple name (`OrderItem`). The server does not resolve it against the workspace. A consumer that needs a `qualifiedName` matches it against `exeris/domains` itself.
 5. **An additive component is invisible until the bridge adopts it.** `src/tools/lsp/shapes.ts` re-emits only the contract fields, so a bridge that predates this amendment drops `relationships` and keeps working. Exposing it to agents through `lsp-describe_domain` is the bridge's adoption step, with tests for absent, `[]`, and an entry with and without `type`; the ROADMAP schedules it.
 
+### Risks and assumptions
+
+- **Assumes:** the SDK keeps `RelationshipMetadata`'s component names and `RelationType`'s serialized form stable within its 0.x line, and changes them only by its own versioned decision. Point 3 binds the wire to that vocabulary rather than restating it, so an SDK rename reaches the wire without a platform change.
+- **Cost:** until the bridge adopts the facet, it is invisible to agents. `lsp-describe_domain` answers without `relationships`, and an agent reasoning about a domain's associations gets nothing to reason from. It does not get a wrong answer.
+- **Risk:** a consumer that normalises an absent facet to `[]` turns "not carried" into "declares none", a positive claim the server never made (point 2). The adoption tests exist to catch this before an agent sees it.
+- **Reversed by:** an SDK change that removes `relationships` from `DomainMetadata`, or that stops the reader from populating it. The component is then withdrawn by a further amendment, not left on the wire as an always-absent field.
+
 ### What this amendment does NOT change
 
 - `exeris/domains`, `exeris/actions` and the other `DomainDescription` components stand as pinned.
