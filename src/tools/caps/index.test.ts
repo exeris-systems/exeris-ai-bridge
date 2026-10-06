@@ -42,7 +42,7 @@ process.on("exit", () => {
 function configFor(root: string | null): BridgeConfig {
   return {
     mode: "app",
-    modeSource: "probe",
+    modeSource: "default",
     ecosystemRoot: null,
     docs: { state: "unavailable", reason: "not under test", remedy: "not under test" },
     lsp: { state: "unavailable", reason: "not under test", remedy: "not under test" },

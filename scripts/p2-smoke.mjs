@@ -243,8 +243,8 @@ function assertBootsDark({
     "the running server reports a different version than package.json — a stale build was installed",
   );
 
-  assert.equal(version.mode, "app", "a machine with no checkout must resolve to application-developer mode");
-  assert.equal(version.modeSource, "probe", "nothing pinned the mode, so it must have been inferred");
+  assert.equal(version.mode, "app", "an installed package with nothing pinned must run in application-developer mode");
+  assert.equal(version.modeSource, "default", "nothing pinned the mode, so it must be the default");
   assert.equal(version.version, PKG.version);
 
   // The bundle ships inside the tarball, so unlike every other surface it is
@@ -388,7 +388,7 @@ function assertBootsDark({
 
   assert.match(
     stderr,
-    /^\[exeris-ai-bridge\] mode=app \(probe\) docs=available lsp=unavailable kernel=unavailable build=available caps=available sdk=available$/m,
+    /^\[exeris-ai-bridge\] mode=app \(default\) docs=available lsp=unavailable kernel=unavailable build=available caps=available sdk=available$/m,
     `the boot summary is missing or wrong; stderr was:\n${stderr}`,
   );
 }

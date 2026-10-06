@@ -12,7 +12,7 @@ import { registerKernelTools } from "./index.js";
 
 const CONFIG: BridgeConfig = {
   mode: "contributor",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: "/var/empty",
   docs: { state: "available", source: "checkout", docsRoot: "/var/empty/exeris-docs-stub", ecosystemRoot: "/var/empty" },
   lsp: { state: "available", command: "lsp-stub", args: [], source: "source-tree", workspaceRoot: "/var/empty" },

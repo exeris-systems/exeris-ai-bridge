@@ -41,7 +41,7 @@ function configFor(root: string | null): BridgeConfig {
   const na = { state: "unavailable" as const, reason: "not under test", remedy: "not under test" };
   return {
     mode: "app",
-    modeSource: "probe",
+    modeSource: "default",
     ecosystemRoot: null,
     docs: na,
     lsp: na,

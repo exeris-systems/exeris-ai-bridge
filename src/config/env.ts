@@ -13,6 +13,11 @@ import { findArtifactJar, newestReleaseVersion, resolveLocalRepository, type Mav
 //   P2 — application developer: NO ecosystem checkout at all — a Maven
 //        dependency on eu.exeris:* and their own sources, nothing else.
 //
+// P2 is the default. Contributor mode is chosen, never inferred: a checkout on
+// disk does not make a machine a contributor's — an application developer may
+// clone exeris-docs to read it — and the one behaviour mode changes, which
+// launch rung wins, must not flip on what happens to sit next to the install.
+//
 // Zero-checkout is a hard requirement, not a nicety, so loadConfig() NEVER
 // throws. A root that does not resolve disables its family with a structured
 // reason + remedy and the server still boots and still serves the families
@@ -27,7 +32,7 @@ import { findArtifactJar, newestReleaseVersion, resolveLocalRepository, type Mav
 // dirname(docsRoot) rather than from a second env var, because the ADR registry
 // links into ../exeris-kernel/…, ../exeris-sdk/… (v0.2.0 locked decision).
 
-/** Which persona the current environment looks like. */
+/** Which persona the bridge serves: app unless EXERIS_BRIDGE_MODE chose contributor. */
 export type BridgeMode = "contributor" | "app";
 
 /**
@@ -37,7 +42,7 @@ export type BridgeMode = "contributor" | "app";
  *   env-command  EXERIS_*_COMMAND — a full command line; the escape hatch
  *   env-jar      EXERIS_*_JAR     — a jar this machine already has
  *   m2           a published jar in the local Maven repository, by coordinate
- *   source-tree  mvn against a sibling module, contributor mode only
+ *   source-tree  mvn against a sibling module; ahead of m2 in contributor mode
  *
  * No rung touches the network. `m2` is what makes the family reachable for an
  * application developer with no checkout.
@@ -149,10 +154,10 @@ export interface KernelConfig {
 }
 
 export interface BridgeConfig {
-  /** The persona this environment looks like. Descriptive — see below. */
+  /** The persona the bridge serves: app unless EXERIS_BRIDGE_MODE chose contributor. */
   readonly mode: BridgeMode;
-  /** "env" when EXERIS_BRIDGE_MODE pinned the mode, "probe" when it was inferred. */
-  readonly modeSource: "env" | "probe";
+  /** "env" when EXERIS_BRIDGE_MODE pinned the mode, "default" when nothing did. */
+  readonly modeSource: "env" | "default";
   /**
    * Parent of the docs checkout, or null in zero-checkout mode. Optional by
    * contract: never assume it exists.
@@ -178,13 +183,13 @@ const DEFAULT_DOCS_DIRNAME = "exeris-docs";
  * NEVER throws — see the file header. Every failure to resolve a root becomes
  * an `Unavailable` on the family it belongs to.
  *
- * `mode` is DESCRIPTIVE, not a mask: it records which persona the environment
- * looks like and is reported by bridge:health, but it does not switch families
- * off. Availability has exactly one source of truth — whether the family's
- * dependency resolved. A contributor who pins `app` still gets docs:* if
- * exeris-docs is on disk; pinning only changes the wording of a family's
- * `reason` (a pinned contributor whose roots are missing is a misconfiguration
- * to report, not a silent downgrade to app mode).
+ * `mode` is not a mask: it is app unless EXERIS_BRIDGE_MODE chose contributor,
+ * it is reported by bridge:health, and it never switches a family off.
+ * Availability has exactly one source of truth — whether the family's
+ * dependency resolved. App mode still gets docs:* when exeris-docs is on disk.
+ * Contributor mode changes two things only: the source tree wins over a
+ * published jar in the launch ladder, and a missing root is worded as a
+ * misconfiguration to report rather than as the ordinary application state.
  *
  * The `env`, `defaultRoot` and `dataRoot` parameters are injectable for tests.
  * Injecting the install-neighbour default is what makes the zero-checkout
@@ -200,15 +205,15 @@ export function loadConfig(
   const pinned = resolvePinnedMode(env);
   const docs = resolveDocsConfig(env, pinned, defaultRoot, dataRoot);
   // Only a checkout is an ecosystem. A snapshot serves docs:* but has no
-  // module poms to build from and does not make this a contributor's machine.
+  // module poms to build from, so it never yields an ecosystem root.
   const checkout = docs.state === "available" && docs.source === "checkout";
   const ecosystemRoot = checkout ? docs.ecosystemRoot : null;
-  const mode = pinned ?? (checkout ? "contributor" : "app");
+  const mode = pinned ?? "app";
   warnIfLocalRepositoryUnresolvable(env);
   const launch: LaunchContext = { env, ecosystemRoot, mode, pinned };
   return {
     mode,
-    modeSource: pinned === null ? "probe" : "env",
+    modeSource: pinned === null ? "default" : "env",
     ecosystemRoot,
     docs,
     lsp: resolveLspConfig(env, launch),
@@ -327,17 +332,26 @@ function warnIfLocalRepositoryUnresolvable(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Read EXERIS_BRIDGE_MODE. `auto` (or unset) means "infer from what resolved".
- * An unrecognised value warns and falls back to auto rather than throwing —
+ * Read EXERIS_BRIDGE_MODE. Unset or blank means the default, app mode.
+ * Any other value warns and falls back to the default rather than throwing —
  * a typo in an operator's MCP client config must not take the server down.
+ * `auto` gets its own warning because it reads as a request to infer the mode,
+ * which the bridge never does.
  */
 function resolvePinnedMode(env: NodeJS.ProcessEnv): BridgeMode | null {
   const raw = env.EXERIS_BRIDGE_MODE?.trim().toLowerCase();
-  if (raw === undefined || raw.length === 0 || raw === "auto") return null;
+  if (raw === undefined || raw.length === 0) return null;
   if (raw === "contributor" || raw === "app") return raw;
+  if (raw === "auto") {
+    warn(
+      `EXERIS_BRIDGE_MODE=auto is not a mode: contributor mode is never inferred, so this runs ` +
+        `in the default app mode. Set contributor to prefer the sibling source tree, or unset the variable.`,
+    );
+    return null;
+  }
   warn(
-    `EXERIS_BRIDGE_MODE must be one of auto, contributor, app — got ${JSON.stringify(raw)}; ` +
-      `falling back to auto.`,
+    `EXERIS_BRIDGE_MODE must be contributor or app — got ${JSON.stringify(raw)}; ` +
+      `falling back to the default app mode.`,
   );
   return null;
 }

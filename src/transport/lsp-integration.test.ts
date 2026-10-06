@@ -21,7 +21,7 @@ const NOT_UNDER_TEST = {
 
 const DARK_CONFIG: BridgeConfig = {
   mode: "app",
-  modeSource: "probe",
+  modeSource: "default",
   ecosystemRoot: null,
   docs: NOT_UNDER_TEST,
   lsp: NOT_UNDER_TEST,
