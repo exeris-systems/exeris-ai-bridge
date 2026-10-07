@@ -104,7 +104,7 @@ Obligation 2's `lsp:*` bullet committed the family to "query Studio/LSP … over
 ### The Decision
 
 1. **Method namespace is `exeris/*`, not `workspace/exeris*`.** The three custom requests are `exeris/domains`, `exeris/domainDescribe` (params `{ qualifiedName }`), and `exeris/actions`. They map onto the bridge tools `lsp:list_domains`, `lsp:describe_domain`, and `lsp:list_actions` respectively. (The earlier `workspace/exeris*` working names from ROADMAP 0.3.0 are superseded.)
-2. **The wire shapes are fixed and validated bridge-side.** `exeris/domains` → `DomainSummary[]` (`qualifiedName`, `simpleName`, `packageName`, `sourcePath`); `exeris/domainDescribe` → `DomainDescription` (the summary fields plus `fields[]` of `{ name, type, required }`, `actions[]` of `{ name, httpMethod, resultType, params[] }`, and `artefacts[]` — generated surfaces such as `rest` / `graphql` / `realtime` / `eventSourced` / `saga` / `events` / `internalClient`); `exeris/actions` → `ActionSummary[]` (`owningDomain`, `name`, `httpMethod`, `resultType`, `params[]`). The bridge validates each result against these shapes (`src/tools/lsp/shapes.ts`) and re-emits only the contract fields, so a version-skewed server surfaces a clear shape error instead of leaking drift to the agent. *(`DomainDescription` also carries an optional `relationships[]` — see the 2026-10-06 amendment "`exeris/domainDescribe` Carries an Optional `relationships[]` Facet" below.)*
+2. **The wire shapes are fixed and validated bridge-side.** `exeris/domains` → `DomainSummary[]` (`qualifiedName`, `simpleName`, `packageName`, `sourcePath`); `exeris/domainDescribe` → `DomainDescription` (the summary fields plus `fields[]` of `{ name, type, required }`, `actions[]` of `{ name, httpMethod, resultType, params[] }`, and `artefacts[]` — generated surfaces such as `rest` / `graphql` / `realtime` / `eventSourced` / `saga` / `events` / `internalClient`); `exeris/actions` → `ActionSummary[]` (`owningDomain`, `name`, `httpMethod`, `resultType`, `params[]`). The bridge validates each result against these shapes (`src/tools/lsp/shapes.ts`) and re-emits only the contract fields, so a version-skewed server surfaces a clear shape error instead of leaking drift to the agent. *(`DomainDescription` also carries an optional `relationships[]` — see the 2026-10-06 amendment "`exeris/domainDescribe` Carries an Optional `relationships[]` Facet" below — and an optional `sourceDigest`, the token `exeris/previewMutation` is judged against — see the 2026-10-07 amendment.)*
 3. **The slice is read-only — by design and by construction.** Per the platform method-surface contract the `exeris/*` namespace also reserves a write-back method (`exeris/applyMutation`); the bridge **does not** consume it and MUST NOT. This is the `lsp:*` analogue of hard constraint 3 (no mutation of kernel state): the bridge is a read-only introspection surface across **all** families, not only `kernel:*`.
 
 ### Cross-references for this amendment
@@ -330,6 +330,35 @@ Item 2 of the 2026-06-24 amendment pins the shape of `DomainDescription`. The St
 - The 2026-06-24 amendment above, whose item 2 this extends.
 - `exeris-platform/exeris-platform-lsp`: `ExerisProtocolExtensions.DomainDescription` and `RelationshipDescription`, projected by `ProtocolProjections`. The wire JSON is pinned by `ProtocolProjectionsTest`, which serializes through LSP4J's own message handler, and by `TransportParityIT`, which checks that the JSON is identical over stdio and WebSocket.
 - `exeris-sdk` `RelationshipMetadata` and `RelationType`, the source of the names and the cardinality vocabulary.
+
+## `exeris/previewMutation` Reaches the Canonical Writer Without Writing, and `exeris/domainDescribe` Carries the `sourceDigest` It Is Judged Against (2026-10-07 amendment)
+
+Item 3 of the 2026-06-24 amendment keeps the bridge off `exeris/applyMutation`. That leaves an agent that adds a field guessing at annotation style, while the SDK writer that decides what the source looks like serves Studio only. ROADMAP 0.8.0 asks the platform for a read-only route to that writer; `exeris-platform` 0.5.0 ships it, and this amendment pins its shape and the token that goes with it.
+
+### The Decision
+
+1. **`exeris/previewMutation` joins the slice as its fourth method.** Its request is the `exeris/applyMutation` request, unchanged: `{ qualifiedName, op, baselineJson?, concurrencyToken? }`, with `op` one of the nine SDK `MutationOp` variants in their Jackson shape. Its result is `MutationPreview`: `{ result, sourcePath?, diff }`. `result` is the SDK `MutationResult` the apply would return, on its `outcome` discriminator. `sourcePath` is the `file:` URI of the source, omitted when the request was rejected before a source was resolved. `diff` is a unified diff whose paths are relative to the workspace root, and is empty when no bytes would change — for every non-`SUCCESS` verdict, and for an op already applied.
+2. **It writes nothing, by construction.** The server computes the preview through the same step as the apply, against one read of the source, and skips the write and the index invalidation. A preview answers exactly what an apply of the same request against the same bytes would write; the platform's tests pin that the applied bytes reproduce the preview's diff. The bridge stays read-only: it hands the diff to the agent, which writes with its own tools.
+3. **`DomainDescription` gains one optional component, `sourceDigest`:** a string, the SDK `SourceDigest` of the source as the server indexed it, omitted when the server has none. It is the `concurrencyToken` a preview or an apply is judged against. A request that carries it and no `baselineJson` is judged against the source the token names (ADR-042's 2026-10-07 amendment), so a caller with no codegen output still gets a verdict; a request whose token no longer matches is `NO_BASELINE` / `STALE_DIGEST`.
+4. **The bridge MUST NOT consume `exeris/applyMutation`.** Item 3 of the 2026-06-24 amendment stands unchanged; a preview is the whole of the bridge's write-adjacent surface.
+
+### Risks and assumptions
+
+- **Assumes:** the SDK keeps `SourceDigest`, the `MutationOp` variants and the `MutationResult` outcomes stable within its 0.x line; they freeze at the SDK's 1.0.0 (ADR-042 obligation 3).
+- **Cost:** a preview is a full parse and write computation on the server per call. The writer changes one member at a time, so the diff is local and cheap; nothing is cached.
+- **Risk:** the agent writes the diff after the source has moved. The diff then fails to apply, or the next preview with the old token is `STALE_DIGEST`; neither silently overwrites. An agent re-reads `exeris/domainDescribe` and previews again.
+- **Reversed by:** the bridge gaining a write path of its own, which needs its own amendment replacing item 4.
+
+### What this amendment does NOT change
+
+- `exeris/domains`, `exeris/actions` and the other `DomainDescription` components stand as pinned.
+- The bridge's adoption is its own step: `lsp-preview_mutation` and passing `sourceDigest` through `lsp-describe_domain` are ROADMAP 0.8.0 work, with the shape validator extended first.
+
+### Cross-references for this amendment
+
+- The 2026-06-24 amendment above, whose item 2 this extends and whose item 3 it keeps.
+- ADR-042 (`exeris-sdk`): the `MutationOp` / `MutationResult` vocabulary, `SourceDigest` as the concurrency token, and its 2026-10-07 amendment on the token-named baseline.
+- `exeris-platform/exeris-platform-lsp`: `ExerisProtocolExtensions.previewMutation` and `MutationPreview`, backed by `MutationApplyService.preview`; `ApplyMutationTest` pins the preview cases, `UnifiedDiffTest` the diff format, and `TransportParityIT` that stdio and WebSocket return the same preview.
 
 ## Cross-references
 
