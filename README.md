@@ -1,3 +1,12 @@
+---
+title: exeris-ai-bridge
+type: reference
+visibility: public
+owning-repo: exeris-ai-bridge
+status: active
+last-verified: 2026-10-14
+---
+
 # exeris-ai-bridge
 
 **Model Context Protocol server exposing Exeris ecosystem surfaces to AI agents.**
