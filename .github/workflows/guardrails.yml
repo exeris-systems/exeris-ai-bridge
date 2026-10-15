@@ -47,8 +47,8 @@ concurrency:
 #
 # Granting them here does not widen docs-lint, commit-lint or pr-body-check: each called workflow's
 # jobs receive what its own permissions block declares, capped by this one. The last two belong to
-# docs-review — `id-token: write` for the OIDC exchange claude-code-action performs, `issues: read`
-# so the routine can see the debt issues of issue-conventions.md rule 6. Drop the `docs-review` job
+# review — `id-token: write` for the OIDC exchange claude-code-action performs, `issues: read`
+# so the routine can see the debt issues of issue-conventions.md rule 6. Drop the `review` job
 # and you may drop them with it.
 #
 # `actions: read` belongs to `judge`, and it is the only permission in this block that the review
@@ -97,10 +97,10 @@ jobs:
   # never the required one, because a review that crashed has to reach the step that notices.
   #
   # THE CHECK NAME THEN HAS THREE SEGMENTS, because the publish half is its own reusable workflow:
-  # `docs-review / publish / verdict`. CONFIRM IT AGAINST A REAL RUN before adding it to a branch
+  # `review / verdict`. CONFIRM IT AGAINST A REAL RUN before adding it to a branch
   # protection rule — a required check whose name does not exist never reports, and a pull request
   # waiting on one can never merge. Without `publish: true` the only check this job contributes is
-  # `docs-review / produce`.
+  # `review / produce`.
   #
   # Secrets are named rather than inherited, matching exeris-kernel and exeris-sdk, which both
   # refused `secrets: inherit` under SonarCloud S7631. The two EXERIS_BOT_* lines are optional: drop
@@ -119,7 +119,7 @@ jobs:
   # required check goes red saying so until a review is asked for again. That is deliberate: a
   # verdict is about the tree it read, and a green check resting on a review of code that is gone is
   # worse than a red one.
-  docs-review:
+  review:
     needs: [docs, commits, pr-body]
     #
     # ON EVERY EVENT THAT IS NOT `closed`, A BOT'S INCLUDED. A required check is read from the NEWEST
@@ -137,7 +137,7 @@ jobs:
     # pull request, and closing one that still carries it is such an event — so without this the
     # model runs again on a pull request whose review is over and whose check decides nothing.
     if: ${{ always() && github.event.action != 'closed' }}
-    uses: exeris-systems/.github/.github/workflows/docs-review.yml@main
+    uses: exeris-systems/.github/.github/workflows/review.yml@main
     with:
       publish: true
       l1-results: >-
