@@ -140,6 +140,22 @@ jobs:
     uses: exeris-systems/.github/.github/workflows/review.yml@main
     with:
       publish: true
+      # CAPTURE IS THE SECOND OPT-IN, and a separate decision from the first. With it on, the run
+      # becomes a row in the organisation's execution dataset (ADR-087 §C.13-§C.17): the runner's
+      # execution log is committed to the streams repository as content, a run record is assembled
+      # from what the producing job exported about itself, and the day's rows reach the inbox as
+      # one pull request per repository per day.
+      #
+      # IT RUNS INSIDE THE PUBLISHING HALF, so it needs `publish: true` as well: with publication
+      # off there is no job for it to be a part of, and `capture: true` alone runs nothing and
+      # says nothing about having run nothing.
+      #
+      # It needs the two EXERIS_INBOX_* secrets below and NO new permission: the capture job reads
+      # the repository and the pull request, both of which the block at the top already grants, and
+      # every write goes through the App's installation token. Without the secrets the job reports
+      # that it has no identity to write under and writes nothing; the review and its gate are
+      # unaffected either way.
+      capture: true
       l1-results: >-
         {"docs-lint": "${{ needs.docs.result }}",
          "commit-lint": "${{ needs.commits.result }}",
@@ -158,41 +174,23 @@ jobs:
       claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       exeris_bot_app_id: ${{ secrets.EXERIS_BOT_APP_ID }}
       exeris_bot_private_key: ${{ secrets.EXERIS_BOT_PRIVATE_KEY }}
-      # THE PEN, AND IT IS ONE EDIT WITH `capture: true` BELOW. A caller may pass only a secret the
-      # called workflow DECLARES: one it does not declare is not ignored, it makes the whole file an
+      # THE PEN, which `capture: true` above writes with. A caller may pass only a secret the called
+      # workflow DECLARES: one it does not declare is not ignored, it makes the whole file an
       # invalid workflow in the adopting repository, on the first push, with no logs — taking every
       # gate in this file down with it, not only this job. That is the same failure the permission
-      # block above exists for. So these two go live in the same change that turns capture on.
+      # block above exists for.
       #
       # They are optional exactly as the two lines above are: an organisation secret that is not set
       # arrives as an empty string, and the capture job then says so and writes nothing. They are
       # named rather than inherited for the reason the others are.
-      # exeris_inbox_app_id: ${{ secrets.EXERIS_INBOX_APP_ID }}
-      # exeris_inbox_private_key: ${{ secrets.EXERIS_INBOX_PRIVATE_KEY }}
+      exeris_inbox_app_id: ${{ secrets.EXERIS_INBOX_APP_ID }}
+      exeris_inbox_private_key: ${{ secrets.EXERIS_INBOX_PRIVATE_KEY }}
     # with:
     #   # PUBLICATION IS OFF BY DEFAULT. Turn it on once `exeris-systems/.github` has run the review
     #   # on itself and answered ADR-087 Engineering Protocol 4 — whether the runner writes a
     #   # verdict file, and what identity it posts under. Until then this job produces a review and
     #   # publishes nothing, which is what it did before the split.
     #   publish: true
-    #   # CAPTURE IS THE SECOND OPT-IN, and a separate decision from the first. With it on, the run
-    #   # becomes a row in the organisation's execution dataset (ADR-087 §C.13-§C.17): the runner's
-    #   # execution log is committed to the streams repository as content, a run record is assembled
-    #   # from what the producing job exported about itself, and the day's rows reach the inbox as
-    #   # one pull request per repository per day. Turn it on after reading rows a producer has
-    #   # already written — a repository that starts contributing to a dataset should have seen what
-    #   # it will be contributing.
-    #   #
-    #   # IT RUNS INSIDE THE PUBLISHING HALF, so it needs `publish: true` as well: with publication
-    #   # off there is no job for it to be a part of, and `capture: true` alone runs nothing and
-    #   # says nothing about having run nothing.
-    #   #
-    #   # It needs the two EXERIS_INBOX_* secrets in the block above — uncomment them in the same
-    #   # edit — and NO new permission: the capture job reads the repository and the pull request,
-    #   # both of which the block at the top already grants, and every write goes through the App's
-    #   # installation token. Without the secrets the job reports that it has no identity to write
-    #   # under and writes nothing; the review and its gate are unaffected either way.
-    #   capture: true
     #   # Which runner produces the verdict. One value is supported today; it is recorded, never
     #   # selected — ADR-087 §B.12.
     #   runner: claude-code-action
@@ -225,16 +223,16 @@ jobs:
   #
   # IT TURNS ON WITH CAPTURE, not separately: it judges rows, so with capture off there are no rows
   # for it to judge and it says so and writes nothing. It needs the same two EXERIS_INBOX_* secrets
-  # — uncomment them here in the same edit that uncomments them above — and `actions: read` in the
-  # permission block at the top, which is the one permission the review itself does not need.
+  # and `actions: read` in the permission block at the top, which is the one permission the review
+  # itself does not need.
   judge:
     if: ${{ github.event.action == 'closed' }}
     uses: exeris-systems/.github/.github/workflows/judge-review.yml@main
     secrets:
       exeris_bot_app_id: ${{ secrets.EXERIS_BOT_APP_ID }}
       exeris_bot_private_key: ${{ secrets.EXERIS_BOT_PRIVATE_KEY }}
-      # exeris_inbox_app_id: ${{ secrets.EXERIS_INBOX_APP_ID }}
-      # exeris_inbox_private_key: ${{ secrets.EXERIS_INBOX_PRIVATE_KEY }}
+      exeris_inbox_app_id: ${{ secrets.EXERIS_INBOX_APP_ID }}
+      exeris_inbox_private_key: ${{ secrets.EXERIS_INBOX_PRIVATE_KEY }}
   # javadoc:                    # JVM repos with a gated module only
   #   uses: exeris-systems/.github/.github/workflows/javadoc-gate.yml@main
   #   with:
