@@ -23,7 +23,7 @@ export default tseslint.config(
     // organisation's review routine, checked out inside this tree by the review
     // job before it runs `npm run lint`: another repository's files, outside
     // the TypeScript project the type-aware rules need.
-    ignores: ["dist/**", "data/**", "coverage/**", "node_modules/**", ".guardrails/**"],
+    ignores: ["dist/**", "data/**", "coverage/**", "node_modules/**", ".guardrails/**", ".claude/**"],
   },
 
   js.configs.recommended,
