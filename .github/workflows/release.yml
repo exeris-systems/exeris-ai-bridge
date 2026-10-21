@@ -1,16 +1,18 @@
 name: release
 
-# A version tag builds the release; publishing it is a second, gated job.
+# A version tag builds the release; publishing it is three gated jobs.
 #
-#   package  — every `v*` tag (and a manual run against an existing tag): check
-#              the tag against package.json and server.json, test, run the
-#              zero-checkout smoke, pack the tarball with its vendored data, build
-#              the .mcpb bundle, and keep all of it as a workflow artifact. This
-#              is the dry run, and it is the whole run until publishing is on.
-#   publish  — only for a pushed tag, only when the repository variable
-#              RELEASE_PUBLISH is 'true', in the `release` environment: npm
-#              (trusted publishing, provenance attached), the MCP Registry, then a
-#              GitHub Release carrying the same files.
+#   package   — every `v*` tag (and a manual run against an existing tag): check
+#               the tag against package.json and server.json, test, run the
+#               zero-checkout smoke, pack the tarball with its vendored data, build
+#               the .mcpb bundle, and keep all of it as a workflow artifact. This
+#               is the dry run, and it is the whole run until publishing is on.
+#   npm-stage — only for a pushed tag, only when the repository variable
+#               RELEASE_PUBLISH is 'true', in the `npm-publish` environment: stage
+#               that tarball on npm with provenance. It goes live only when a
+#               maintainer approves it with 2FA.
+#   registry  — once the approved version is live on npm: the MCP Registry, then a
+#               GitHub Release carrying the same files.
 #
 # Publishing needs every eu.exeris artifact the bridge resolves to be on Maven
 # Central: otherwise the published package points application developers at
@@ -49,8 +51,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      # 22.14 is the floor npm trusted publishing needs; the engines floor (20)
-      # is already covered by the build and p2-smoke jobs.
+      # The engines floor (20) is covered by the build and p2-smoke jobs.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -168,17 +169,66 @@ jobs:
           path: out/
           if-no-files-found: error
 
-  publish:
+  # Staged, not published, as @exeris/ui-kit is in exeris-sdk and @exeris/codegen-ts in
+  # exeris-tooling: `npm stage publish` submits the version for review, and it goes live only when
+  # a maintainer approves it with 2FA (`npm stage approve <stage-id>`, or Approve under the
+  # package's Staged Packages tab on npmjs.com). CI therefore holds no credential that can put a
+  # version on the registry by itself. NPM_TOKEN is the organisation's npm granular access token
+  # with "Read and write (stage only)" on the @exeris scope.
+  npm-stage:
     needs: package
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
-    # The environment carries no protection rule, as in the organisation's other
-    # publishing repositories: pushing a v* tag is the release decision, and only
-    # maintainers push one. It is also the name npm trusted publishing binds to.
-    environment: release
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # OIDC token that signs the provenance statement (publishConfig.provenance)
+    env:
+      VERSION: ${{ needs.package.outputs.version }}
+    steps:
+      - name: Fetch the release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.package.outputs.version }}
+          path: out
+
+      - name: Verify the release files
+        working-directory: out
+        run: sha256sum -c SHA256SUMS
+
+      # registry-url writes an .npmrc for npmjs that reads NODE_AUTH_TOKEN.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@exeris"
+
+      - name: Install npm with `npm stage`
+        run: npm install -g npm@^11.15.0
+
+      # The tarball the package job built and checksummed is what is staged. The leading ./
+      # makes npm read a file: `out/<name>.tgz` parses as a GitHub owner/repo shorthand.
+      - name: Stage the publish on npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is not visible to this repository. Nothing was staged." >&2
+            exit 1
+          fi
+          npm stage publish "./out/exeris-ai-bridge-$VERSION.tgz" --tag latest
+          echo "::notice::@exeris/ai-bridge@$VERSION is staged, not live. Approve it with 2FA: npm stage approve <stage-id>, or the Staged Packages tab on npmjs.com."
+
+  # The MCP Registry checks server.json against the published package's mcpName, so this job waits
+  # for the approved version to be live on npm. Approval is a person's action this workflow cannot
+  # observe; past the wait, re-run this job once `npm view @exeris/ai-bridge@<version>` answers.
+  registry:
+    needs: [package, npm-stage]
+    runs-on: ubuntu-latest
     permissions:
       contents: write # the GitHub Release
-      id-token: write # npm trusted publishing and the MCP Registry's GitHub OIDC login
+      id-token: write # the MCP Registry's GitHub OIDC login
     env:
       VERSION: ${{ needs.package.outputs.version }}
     steps:
@@ -195,26 +245,17 @@ jobs:
         working-directory: out
         run: sha256sum -c SHA256SUMS
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      # Trusted publishing needs npm 11.5.1 or later. It needs no token, and npm
-      # attaches provenance by itself. The package must already exist on npm to
-      # configure a trusted publisher for it, so the first publish authenticates
-      # with the organisation secret NPM_TOKEN; once a trusted publisher is
-      # configured, npm authenticates by OIDC.
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Wait for the approved version on npm
         run: |
-          npm install -g npm@^11.5.1
-          npm publish "out/exeris-ai-bridge-$VERSION.tgz" --access public
+          for attempt in $(seq 1 60); do
+            if [ "$(npm view "@exeris/ai-bridge@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "@exeris/ai-bridge@$VERSION is live on npm"; exit 0
+            fi
+            sleep 60
+          done
+          echo "::error::@exeris/ai-bridge@$VERSION is not live on npm after 60 minutes. Approve the staged version, then re-run this job." >&2
+          exit 1
 
-      # The registry checks server.json against the published package's mcpName,
-      # so this runs after npm.
       - name: Publish to the MCP Registry
         run: |
           asset="mcp-publisher_linux_amd64.tar.gz"
