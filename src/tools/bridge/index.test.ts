@@ -406,6 +406,31 @@ test("bridge-health reports sdk versionSkew aligned when project matches catalog
   }
 });
 
+test("bridge-health reports the source of an SDK version read from an app-parent project's property", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "bridge-health-app-parent-"));
+  const dataDir = join(tmp, "data");
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    writeFileSync(
+      join(tmp, "pom.xml"),
+      `<project><parent><groupId>eu.exeris</groupId><artifactId>exeris-app-parent</artifactId><version>0.10.0</version></parent><properties><exeris.sdk.version>0.12.0-SNAPSHOT</exeris.sdk.version></properties></project>`,
+      "utf8",
+    );
+    const config: BridgeConfig = {
+      ...LIVE,
+      project: { state: "available", projectRoot: tmp, source: "env" },
+    };
+    const bundle = makeTestSdkBundle(dataDir, "0.12.0-SNAPSHOT");
+    const body = await call(config, "bridge-health", undefined, bundle, dataDir);
+    const sdkFamily = body.families.find((f: any) => f.family === "sdk");
+    assert.ok(sdkFamily);
+    assert.equal(sdkFamily.versionSkew?.status, "aligned");
+    assert.equal(sdkFamily.versionSkew?.source, "property");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("bridge-health reports sdk versionSkew skew_detected when project pins different version", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "bridge-health-skew-"));
   const dataDir = join(tmp, "data");

@@ -20,7 +20,7 @@ import {
 // process boundary is what preserves The Wall (ADR-006) by construction.
 //
 // Scope: runtime kernel state ONLY — provider registry, bootstrap/subsystem
-// DAG, per-subsystem detail. This family is cap-blind: capability composition
+// DAG, per-subsystem detail, resolved JVM ergonomics. This family is cap-blind: capability composition
 // is a build-time tooling/platform surface, NOT a kernel one (ADR-024 2026-06-17
 // "Validation Stamp Lifecycle" amendment; ADR-025 "kernel:* Is Cap-Blind"
 // amendment). Do NOT add a kernel:list_capabilities tool here — if composition

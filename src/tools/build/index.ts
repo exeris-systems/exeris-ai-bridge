@@ -10,8 +10,8 @@ import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
 import {
   looksLikeExerisOutput,
-  matchDiagnostics,
   MAX_DIAGNOSTIC_CHARS,
+  scanDiagnostics,
 } from "./diagnostics.js";
 import {
   explainArtefact,
@@ -372,6 +372,21 @@ const GUIDANCE = {
   not_generated: "Run `mvn exeris:generate` (it is bound to generate-sources, so `mvn compile` runs it too). If it produces nothing, the project declares no @ExerisDomain types, or the codegen plugin is not configured.",
 } as const;
 
+/** exeris-tooling's own table of every identifier, with what to do about each. */
+const DIAGNOSTICS_TABLE =
+  "docs/diagnostics.md in exeris-tooling (https://github.com/exeris-systems/exeris-tooling/blob/main/docs/diagnostics.md)";
+
+/**
+ * The answer for well-formed identifiers the catalogue has no entry for. The
+ * identifier is upstream's closed registry speaking, so the gap is this
+ * catalogue's, and upstream's table is the place that does know it.
+ */
+function identifierGap(ids: readonly string[]): string {
+  const list = ids.join(", ");
+  const verb = ids.length === 1 ? "is a well-formed exeris-tooling identifier" : "are well-formed exeris-tooling identifiers";
+  return `${list} ${verb} (ADR-095) that this bridge's catalogue has no entry for. That is a gap in this bridge's catalogue, not a verdict on the diagnostic. ${DIAGNOSTICS_TABLE} lists every identifier with its meaning and what to do; the message text after the identifier is written to be read on its own.`;
+}
+
 /**
  * Decode a diagnostic the developer pasted.
  *
@@ -388,7 +403,7 @@ function explainDiagnosticTool(handle: BuildFamily): RegisteredTool {
     definition: {
       name: "build-explain_diagnostic",
       description:
-        "Decode an error or warning the Exeris build printed — an annotation-processor message, a codegen plugin failure, a capability-graph or cap-tier Wall refusal, or a missing runtime driver. Paste the diagnostic text verbatim; returns what it means, the rule behind it, and what to do. Matches on message text because the build emits no diagnostic codes, so a diagnostic it does not recognise is reported as not in the catalogue — never as not being an Exeris problem.",
+        "Decode an error, warning or note exeris-tooling printed — an annotation-processor message, a codegen plugin goal failure or warning, a capability-graph or cap-tier Wall refusal, a missing runtime driver, a code-generation pipeline or CodegenMain line, or an exeris-initializr error. Paste the diagnostic text verbatim; returns what it means, the rule behind it, and what to do. Looks each diagnostic up by its stable EXT- identifier (ADR-095), which exeris-tooling prints from 0.9.0, and falls back to message text only for output that carries none. An identifier with no catalogue entry is named back as a catalogue gap, and a diagnostic it does not recognise is reported as not in the catalogue — never as not being an Exeris problem.",
       inputSchema: {
         type: "object",
         properties: {
@@ -412,27 +427,40 @@ function explainDiagnosticTool(handle: BuildFamily): RegisteredTool {
         );
       }
 
-      const matches = matchDiagnostics(text);
+      const { matches, unrecognisedIds } = scanDiagnostics(text);
+      const gap = unrecognisedIds.length > 0 ? identifierGap(unrecognisedIds) : null;
       if (matches.length > 0) {
+        const byIdentifier = matches.some((m) => m.matchedBy === "identifier");
+        const byText = matches.some((m) => m.matchedBy === "text");
+        const note =
+          byIdentifier && !byText
+            ? "Matched by stable EXT- identifier (ADR-095). `extId` is the identifier the build printed; where several entries share one, `matchedOn` shows the text that chose between them. The `id` is this bridge's own label for the entry, not something the build prints."
+            : byIdentifier
+              ? "Matched by EXT- identifier where the paste carried one, and on message text where it did not — exeris-tooling before 0.9.0 prints no identifiers. Each match's `matchedBy` and `matchedOn` say which. The `id` is this bridge's own label for the entry, not something the build prints."
+              : "Matched on message text — the paste carries no EXT- identifier, which exeris-tooling prints from 0.9.0 on, so each match echoes the fragment it keyed on. The `id` is this bridge's own label for the entry, not something the build prints.";
         return jsonResult({
           recognised: true,
           matches,
-          note:
-            "Matched on message text — the build emits no diagnostic codes, so each match echoes the fragment it keyed on. The `id` is this bridge's own label for the entry, not something the build prints.",
+          note,
+          ...(gap === null ? {} : { unrecognisedIds, gap }),
         });
       }
 
-      // Two different misses, and the difference is the whole point: one is
-      // "this is ours and we have no entry", the other is "we cannot tell". The
-      // catalogue's silence is never evidence that the problem is not Exeris's.
+      // Three different misses, and the difference is the whole point: "this
+      // names an identifier we have no entry for", "this is ours and we have no
+      // entry", and "we cannot tell". The catalogue's silence is never evidence
+      // that the problem is not Exeris's.
       return jsonResult({
         recognised: false,
         matches: [],
-        reason: looksLikeExerisOutput(text)
-          ? "This looks like Exeris build output, but no catalogue entry matches it. That is a gap in this bridge's catalogue, not a verdict on the diagnostic."
-          : "Nothing in this text matches a catalogue entry, and it carries no Exeris marker either — no '[Exeris] ' prefix, no eu.exeris reference, no exeris:* goal. It may still be an Exeris problem; this tool only knows what is in its catalogue.",
+        ...(gap === null ? {} : { unrecognisedIds }),
+        reason:
+          gap ??
+          (looksLikeExerisOutput(text)
+            ? "This looks like Exeris build output, but no catalogue entry matches it. That is a gap in this bridge's catalogue, not a verdict on the diagnostic."
+            : "Nothing in this text matches a catalogue entry, and it carries no Exeris marker either — no '[Exeris] ' prefix, no EXT- identifier, no eu.exeris reference, no exeris:* goal. It may still be an Exeris problem; this tool only knows what is in its catalogue."),
         remedy:
-          "Read the message itself: processor diagnostics carry the '[Exeris] ' prefix and name the annotation involved, and plugin failures name the goal. build-explain_artefacts shows what codegen emitted for the entity, and build-get_detach_state shows whether a file it names is generated or owned.",
+          `Read the message itself: everything exeris-tooling prints carries the '[Exeris] ' prefix, from 0.9.0 followed by an EXT- identifier, and ${DIAGNOSTICS_TABLE} lists every identifier with what to do about it. build-explain_artefacts shows what codegen emitted for the entity, and build-get_detach_state shows whether a file it names is generated or owned.`,
       });
     }),
   };

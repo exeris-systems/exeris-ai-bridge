@@ -472,6 +472,70 @@ test("build-explain_diagnostic decodes a processor message", async () => {
   assert.equal(payload.matches[0].reference, "ADR-059");
 });
 
+test("build-explain_diagnostic decodes an EXT- identifier with note reflecting ADR-095", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] EXT-PROC-1001: @ExerisDomain can only be applied to classes",
+  });
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, true);
+  assert.equal(payload.matches[0].id, "processor/wrong-element-kind");
+  assert.equal(payload.matches[0].extId, "EXT-PROC-1001");
+  assert.match(payload.note, /ADR-095/);
+});
+
+test("build-explain_diagnostic decodes an exeris-initializr identifier", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] EXT-INIT-5002: /work/shop is not empty; nothing was written. Pass --force to write over it.",
+  });
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, true);
+  assert.equal(payload.matches[0].id, "initializr/target-not-empty");
+  assert.equal(payload.matches[0].matchedBy, "identifier");
+  assert.equal(payload.unrecognisedIds, undefined);
+});
+
+// A well-formed identifier with no entry is a named gap: the answer says which
+// identifier, and where upstream lists what it means.
+test("an unknown well-formed identifier is named back as a catalogue gap", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[ERROR] Failed to execute goal …: [Exeris] EXT-PLUG-2999: something a later release added",
+  });
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, false);
+  assert.deepEqual(payload.unrecognisedIds, ["EXT-PLUG-2999"]);
+  assert.match(payload.reason, /EXT-PLUG-2999 is a well-formed exeris-tooling identifier/);
+  assert.match(payload.reason, /gap in this bridge's catalogue, not a verdict/);
+  assert.match(payload.reason, /docs\/diagnostics\.md in exeris-tooling/);
+});
+
+test("a paste with known and unknown identifiers answers the known and names the gap", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] EXT-PROC-1001: @ExerisDomain can only be applied to classes\n[Exeris] EXT-PROC-1999: new",
+  });
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.recognised, true);
+  assert.deepEqual(payload.matches.map((m: { id: string }) => m.id), ["processor/wrong-element-kind"]);
+  assert.deepEqual(payload.unrecognisedIds, ["EXT-PROC-1999"]);
+  assert.match(payload.gap, /EXT-PROC-1999/);
+});
+
+test("a paste with no identifier says it matched on text", async () => {
+  const tools = toolsFor(projectWith(BUILT));
+  const res = await tools.get("build-explain_diagnostic")!.handler({
+    text: "[Exeris] @GraphEdge is declared 2 times on field 'depot' (OWNS, SERVES)",
+  });
+  const payload = JSON.parse(text(res));
+  assert.equal(payload.matches[0].matchedBy, "text");
+  assert.match(payload.note, /carries no EXT- identifier/);
+});
+
 // The catalogue not having an entry says nothing about the diagnostic. Turning
 // that into "not an Exeris problem" would send the developer looking in the
 // wrong place, which is worse than admitting the gap.
