@@ -47,13 +47,13 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout the tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       # The engines floor (20) is covered by the build and p2-smoke jobs.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -90,7 +90,7 @@ jobs:
       # GitHub Packages is consulted only while PACKAGES_READ_TOKEN is present,
       # which is what lets this dry run work before Maven Central does.
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25"
@@ -163,7 +163,7 @@ jobs:
         run: sha256sum * > SHA256SUMS && cat SHA256SUMS
 
       - name: Keep the release files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ steps.version.outputs.version }}
           path: out/
@@ -187,7 +187,7 @@ jobs:
       VERSION: ${{ needs.package.outputs.version }}
     steps:
       - name: Fetch the release files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.package.outputs.version }}
           path: out
@@ -198,7 +198,7 @@ jobs:
 
       # registry-url writes an .npmrc for npmjs that reads NODE_AUTH_TOKEN.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -233,10 +233,10 @@ jobs:
       VERSION: ${{ needs.package.outputs.version }}
     steps:
       - name: Checkout the tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch the release files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.package.outputs.version }}
           path: out
