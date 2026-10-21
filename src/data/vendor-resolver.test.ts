@@ -304,3 +304,30 @@ test("collectSources keeps the SDK entries in non-strict mode when the codegen j
   assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema"]);
   assert.ok(warnings.some((w) => /exeris-codegen-java/.test(w)));
 });
+
+test("collectSources keeps the generator catalogue when the SDK jars are missing", () => {
+  const repo = join(tempDir, "tooling-only-repo");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  const warnings: string[] = [];
+  const entries = collectSources({
+    repo,
+    strict: false,
+    warnFn: (m) => warnings.push(m),
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  assert.deepEqual(entries.map((e) => e.id), ["generator-catalogue"]);
+  assert.ok(warnings.some((w) => /SDK jars not found/.test(w)));
+});
+
+test("collectSources refuses a generator catalogue with a pattern outside the portable subset", () => {
+  const row = { ...fixtureRow(), pathPattern: "^(?:[^/]+/)*service/\\w+Service\\.java$" };
+  assert.throws(
+    () =>
+      collectSources({
+        repo: repoWithAllJars(),
+        strict: true,
+        extractFn: extractWith(JSON.stringify({ catalogueFormat: 1, rows: [row], retired: [] })),
+      }),
+    /portable subset/,
+  );
+});

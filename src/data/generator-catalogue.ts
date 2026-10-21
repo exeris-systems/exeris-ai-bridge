@@ -94,6 +94,12 @@ export function parseGeneratorCatalogue(text: string): GeneratorCatalogue {
     ) {
       throw new CatalogueFormatError(`generator catalogue row '${id}' does not have the format-1 shape`);
     }
+    const violation = patternViolation(r.pathPattern);
+    if (violation !== null) {
+      throw new CatalogueFormatError(
+        `generator catalogue row '${id}' has a pathPattern outside the portable subset: ${violation}`,
+      );
+    }
     let pattern: RegExp;
     try {
       pattern = new RegExp(r.pathPattern);
@@ -117,6 +123,41 @@ export function parseGeneratorCatalogue(text: string): GeneratorCatalogue {
   }
   if (rows.length === 0) throw new CatalogueFormatError("the generator catalogue has no usable rows");
   return { catalogueFormat: SUPPORTED_CATALOGUE_FORMAT, rows };
+}
+
+/**
+ * Why a `pathPattern` falls outside the subset ADR-097 allows, or null.
+ *
+ * The publisher fixes one subset that Java's `java.util.regex` and ECMAScript
+ * read the same way: an anchored pattern of literals, `.`, bracket classes,
+ * `?`, `*`, `+`, `{n}`, non-capturing groups and alternation. A pattern outside
+ * it could match different paths here than it does upstream, so it is refused
+ * rather than run. Escapes are limited to punctuation, which rules out the
+ * shorthand and Unicode property classes and backreferences in one step.
+ */
+export function patternViolation(pattern: string): string | null {
+  if (!pattern.startsWith("^") || !pattern.endsWith("$") || pattern.endsWith("\\$")) {
+    return "it is not anchored with ^ and $";
+  }
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern.charAt(i);
+    if (c === "\\") {
+      const next = pattern.charAt(i + 1);
+      if (next === "" || /[A-Za-z0-9]/.test(next)) return `the escape \\${next} is not a punctuation literal`;
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") inClass = false;
+      else if (c === "[") return "a nested bracket class";
+      continue;
+    }
+    if (c === "[") inClass = true;
+    else if (c === "(" && !pattern.startsWith("(?:", i)) return "a group other than a non-capturing group";
+    else if (c === "{" && !/^\{[0-9]+\}/.test(pattern.slice(i))) return "a quantifier other than {n}";
+  }
+  return inClass ? "an unterminated bracket class" : null;
 }
 
 export interface AvailableCatalogue {

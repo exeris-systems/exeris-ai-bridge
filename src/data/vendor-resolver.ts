@@ -326,7 +326,26 @@ export function collectSources(options: CollectSourcesOptions = {}): SourceEntry
     return [];
   }
 
-  const explicitVersion = options.explicitVersion;
+  // The SDK sources and the generator catalogue come from different artifacts
+  // and are collected independently: one being absent in a non-strict run must
+  // not take the other with it.
+  const sources = collectSdkSources({ ...options, repo, warnFn, failFn, findJar, extract, allowSnapshots });
+  const generators = collectGeneratorCatalogue({ ...options, repo, warnFn, failFn, findJar, extract });
+  if (generators) sources.push(generators);
+  return sources;
+}
+
+function collectSdkSources(
+  options: CollectSourcesOptions & {
+    repo: string;
+    warnFn: (msg: string) => void;
+    failFn: (msg: string) => never;
+    findJar: typeof findArtifactJar;
+    extract: typeof extractFromJar;
+    allowSnapshots: boolean;
+  },
+): SourceEntry[] {
+  const { repo, warnFn, failFn, findJar, extract, allowSnapshots, explicitVersion } = options;
   const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.12.0" });
   const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.12.0" });
 
@@ -337,30 +356,23 @@ export function collectSources(options: CollectSourcesOptions = {}): SourceEntry
       );
     }
     warnFn(
-      `[vendor-reference-data] Exeris SDK jars not found in ${repo} (annotations: ${ann ? ann.version : "missing"}, source-model: ${model ? model.version : "missing"}). Emitting empty bundle.`,
+      `[vendor-reference-data] Exeris SDK jars not found in ${repo} (annotations: ${ann ? ann.version : "missing"}, source-model: ${model ? model.version : "missing"}). Emitting no SDK entries.`,
     );
     return [];
   }
 
-  const catalogBytes = extract(ann.jar, "META-INF/exeris/annotation-catalog.json");
-  const schemaBytes = extract(model.jar, "META-INF/exeris/ast-schema.json");
-
-  const sources: SourceEntry[] = [
+  return [
     {
       id: "annotation-catalog",
-      bytes: catalogBytes,
+      bytes: extract(ann.jar, "META-INF/exeris/annotation-catalog.json"),
       sourceArtifact: `eu.exeris:exeris-sdk-annotations:${ann.version}`,
     },
     {
       id: "ast-schema",
-      bytes: schemaBytes,
+      bytes: extract(model.jar, "META-INF/exeris/ast-schema.json"),
       sourceArtifact: `eu.exeris:exeris-sdk-source-model:${model.version}`,
     },
   ];
-
-  const generators = collectGeneratorCatalogue({ ...options, repo, warnFn, failFn, findJar, extract });
-  if (generators) sources.push(generators);
-  return sources;
 }
 
 /**

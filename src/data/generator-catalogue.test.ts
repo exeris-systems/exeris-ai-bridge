@@ -13,6 +13,7 @@ import type { BundleState } from "./bundle.js";
 import {
   CatalogueFormatError,
   loadGeneratorCatalogue,
+  patternViolation,
   parseGeneratorCatalogue,
 } from "./generator-catalogue.js";
 
@@ -58,7 +59,7 @@ test("a row missing a format-1 key, or with a bad pattern, is refused", () => {
   assert.throws(() => parseGeneratorCatalogue(JSON.stringify(broken)), /row 'handler'/);
 
   const badPattern = JSON.parse(catalogueFixtureText());
-  badPattern.rows[3].pathPattern = "^(";
+  badPattern.rows[3].pathPattern = "^a**$";
   assert.throws(() => parseGeneratorCatalogue(JSON.stringify(badPattern)), /regular expression/);
 
   assert.throws(() => parseGeneratorCatalogue("not json"), CatalogueFormatError);
@@ -94,4 +95,40 @@ test("loadGeneratorCatalogue never throws: each failure is a state with a remedy
   const corrupt = loadGeneratorCatalogue(tampered, dir);
   assert.equal(corrupt.state, "unavailable");
   if (corrupt.state === "unavailable") assert.match(corrupt.reason, /integrity check/);
+});
+
+test("every pattern of the committed catalogue is inside the portable subset", () => {
+  for (const row of JSON.parse(catalogueFixtureText()).rows) {
+    assert.equal(patternViolation(row.pathPattern), null, row.id);
+  }
+});
+
+test("a pattern outside the ADR-097 subset is refused", () => {
+  const refused: string[] = [
+    "handler/[^/]+\\.java",
+    "^handler/[^/]+\\.java",
+    "^(?=a)b$",
+    "^(?!a)b$",
+    "^(?<=a)b$",
+    "^(?<n>a)\\k<n>$",
+    "^(a)\\1$",
+    "^(a)$",
+    "^(?i)a$",
+    "^\\w+$",
+    "^\\d+$",
+    "^\\p{L}+$",
+    "^a{1,2}$",
+    "^a{,2}$",
+    "^[a[b]]$",
+    "^[abc$",
+  ];
+  for (const pattern of refused) {
+    assert.notEqual(patternViolation(pattern), null, pattern);
+  }
+  assert.equal(patternViolation("^(?:[^/]+/)*handler/[^/]+Handler\\.java$"), null);
+  assert.equal(patternViolation("^db/migration/V[12][0-9]{6}__create_[^/]+\\.sql$"), null);
+
+  const broken = JSON.parse(catalogueFixtureText());
+  broken.rows[3].pathPattern = "^[^/]+\\w$";
+  assert.throws(() => parseGeneratorCatalogue(JSON.stringify(broken)), /portable subset/);
 });
