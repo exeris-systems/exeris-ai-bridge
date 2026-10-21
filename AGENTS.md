@@ -12,7 +12,7 @@ last-verified: 2026-10-21
 The portable entry point for any AI agent working in this repository. It is an index and a safety
 boundary: the founding decision is [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md), and the detailed
 operating rules — policies, references, role profiles, skills and workflows — live under
-[`.agents/`](.agents). Human-facing description is in [`README.md`](README.md).
+[`.agents/`](.agents). The package description is in [`README.md`](README.md), and building, testing and releasing in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Mission and scope
 
@@ -58,7 +58,9 @@ Conversation with the founder happens in Polish.
   [`cross-repo-adrs`](.agents/references/cross-repo-adrs.md) — when ADR-006, ADR-020, ADR-023,
   ADR-024 and ADR-033 bear on a change.
 - [`ROADMAP.md`](ROADMAP.md) — milestone scope.
-- [`README.md`](README.md) — architecture diagram and client wiring.
+- [`README.md`](README.md) — installation, tools and configuration, as published on npm.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — architecture diagram, build, repository layout and release.
+- [`docs/configuration.md`](docs/configuration.md) — how each `EXERIS_*` variable resolves.
 - The ecosystem ADR registry is `adr-index.md` in `exeris-systems/exeris-docs`; this repository
   holds ADR-025 and link stubs for the cross-repo decisions it consumes: ADR-033, ADR-078, ADR-086,
   ADR-091, ADR-095 and ADR-097 (`docs/adr/*.link.md`).

@@ -8,13 +8,13 @@ name: release
 #              the .mcpb bundle, and keep all of it as a workflow artifact. This
 #              is the dry run, and it is the whole run until publishing is on.
 #   publish  — only for a pushed tag, only when the repository variable
-#              RELEASE_PUBLISH is 'true', and only through the protected `release`
-#              environment: npm (trusted publishing, provenance attached), the MCP
-#              Registry, then a GitHub Release carrying the same files.
+#              RELEASE_PUBLISH is 'true', in the `release` environment: npm
+#              (trusted publishing, provenance attached), the MCP Registry, then a
+#              GitHub Release carrying the same files.
 #
-# Publishing stays off until the eu.exeris artifacts the bridge resolves reach
-# Maven Central: before that, the published package would point application
-# developers at coordinates they cannot resolve without a GitHub Packages token.
+# Publishing needs every eu.exeris artifact the bridge resolves to be on Maven
+# Central: otherwise the published package points application developers at
+# coordinates they cannot resolve without a GitHub Packages token.
 
 on:
   push:
@@ -172,9 +172,9 @@ jobs:
     needs: package
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
-    # Configure this environment with a deployment rule restricted to v* tags and a
-    # required reviewer: it is the only place publishing credentials exist, and a
-    # registry login for the organisation namespace can overwrite any server in it.
+    # The environment carries no protection rule, as in the organisation's other
+    # publishing repositories: pushing a v* tag is the release decision, and only
+    # maintainers push one. It is also the name npm trusted publishing binds to.
     environment: release
     permissions:
       contents: write # the GitHub Release
@@ -203,8 +203,9 @@ jobs:
 
       # Trusted publishing needs npm 11.5.1 or later. It needs no token, and npm
       # attaches provenance by itself. The package must already exist on npm to
-      # configure a trusted publisher for it, so the very first publish uses
-      # NPM_TOKEN from the `release` environment; remove that secret afterwards.
+      # configure a trusted publisher for it, so the first publish authenticates
+      # with the organisation secret NPM_TOKEN; once a trusted publisher is
+      # configured, npm authenticates by OIDC.
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

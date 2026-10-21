@@ -1,302 +1,113 @@
-# exeris-ai-bridge
+# @exeris/ai-bridge
 
-**Model Context Protocol server exposing Exeris ecosystem surfaces to AI agents.**
+> Model Context Protocol server that gives AI agents the context of an Exeris application: what
+> your build emitted, the SDK's authoring contract, the ADR registry, and a running kernel.
 
-`exeris-ai-bridge` is a public, Apache 2.0 MCP server that gives AI agents (Claude Code, Cursor, Copilot Workspace, and any other MCP-aware client) the Exeris context they need. It is built first for **developers building an application on Exeris**, and that is the mode it runs in unless told otherwise:
+Every tool is a read. The bridge never writes to your project, never calls a model API, and runs
+as a separate process from the Java kernel. It is built for developers writing an application on
+Exeris, and works without a checkout of the ecosystem: the reference data it needs ships inside
+the package.
 
-- **Your project's build** (`build:*`, `caps:*`) — the `DomainMetadata` the processor emitted, which files codegen generated and which of them you may edit, what a build diagnostic means, and the capability composition the build validated.
-- **The authoring contract** (`sdk:*`) — every SDK annotation with its attributes and deprecations, the `@Field` vs `@Validation` scoping rules, the AST schema, and whether your project pins a different SDK than the one answering.
-- **Docs / ADR registry** (`docs:*`) — the ADRs, HLA, whitepaper and templates, from a snapshot bundled in the package; no checkout needed.
-- **Kernel introspection** (`kernel:*`) — read-only inspection of a running kernel's provider registry, bootstrap/subsystem DAG, and per-subsystem detail (via the `KernelDiagnostics` SPI), launched from the published jar in your local Maven repository. Cap-blind by design: capability composition is a build-time tooling/platform surface, not a kernel one (see [ADR-024](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-024-capability-composition-model.md) 2026-06-17 amendment and ADR-025 §"`kernel:*` Is Cap-Blind").
+## Installation
 
-**Contributors to Exeris itself** work from the sibling repositories checked out side by side. That checkout is what lights the Studio / LSP bridge (`lsp:*`: `@ExerisDomain` types and action signatures from an `exeris-platform-lsp` session), which has no published artifact yet, so `lsp:*` needs the sibling checkout (or an explicit `EXERIS_LSP_COMMAND` / `EXERIS_LSP_JAR`) whatever the mode. Setting `EXERIS_BRIDGE_MODE=contributor` changes one thing: the source tree wins over published jars when a child process is launched. See [Wiring into an agent](#wiring-into-an-agent).
+Run the server inside your project, so it finds your `pom.xml`.
 
-The repo is named *bridge*, not *mcp*: MCP is the first protocol surface, but the mission is "bridge Exeris semantic surfaces to AI agents" — adjacent integrations (Claude Skills bundles, agent-SDK adapters, future protocols) live here when they share that responsibility.
-
-See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md) for the founding decision.
-
-## Status
-
-**0.8.0 — mutation preview (canonical edits, still zero writes), associations and a concurrency token in domain descriptions, diagnostics resolved by `EXT-` identifier, artefacts explained from the generator's own catalogue, and SDK skew through the application BOM.** ADR-025 ACCEPTED (2026-05-15), ten amendments since. All seven tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (4 tools, bound to the `exeris/*` slice in `exeris-platform-lsp` — read-only, including `lsp-preview_mutation`, which returns the canonical diff and never writes), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `build:*` (5 tools, reading the `DomainMetadata` the developer's own build emitted, the codegen output tree beside it, and the diagnostics the build printed, looked up by their `EXT-` identifier), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the same project), `sdk:*` (5 tools, reading the bundled reference annotation catalog, deprecations, scoping rules, AST schema, and project version skew, including for projects whose SDK version arrives through the application BOM), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
-
-What 0.6.0 added is the P2 half of the surface, and one discipline runs through all of it: **the bridge reads what the pipeline recorded, and does not recompute it.** `caps:*` reads the emitted `cap-manifest.json` rather than re-resolving the `@Requires`→`@Provides` DAG. `build-get_domain_metadata` validates the envelope and passes the AST through verbatim rather than re-declaring 40+ record components in TypeScript. `build-explain_artefacts` reads the codegen output manifest rather than predicting emission, and explains each path from the generator catalogue `exeris-tooling` publishes (ADR-097) and the bridge vendors, rather than from a table of its own; most generators decide what to emit inside `generate(...)`, where no mirror could read the condition. Each of those would have been a second implementation of a contract another repo owns, wrong the first time it moved. `build-explain_diagnostic` keys on the stable `EXT-<AREA>-<NNNN>` identifier `exeris-tooling` prints on every diagnostic (ADR-095), with one entry for each of the 54 identifiers of tooling 0.10.0 and two it retired; an identifier the catalogue does not know is reported in `unrecognisedIds` with a pointer to upstream's table, and text anchors remain only for output from tooling before 0.9.0. In `sdk:*`, the scoping rules (`sdk-get_scoping_rules`) are the exception: authored locally from `package-info` and ADR-054 rather than emitted by an upstream artifact, they can lag the SDK, and version-skew detection reads the project's Maven `pom.xml`: a direct SDK dependency, an `exeris.sdk.version` property, or the `exeris-app-parent` → `exeris-app-bom` chain read from the local Maven repository (offline; a chain not yet in `~/.m2` reports `unknown` with the coordinate to fetch).
-
-What 0.5.0 added is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
-
-One upstream dependency remains open and is documented rather than papered over: `exeris-platform-lsp` publishes no runnable jar, so `lsp:*` has no local-repository rung and stays contributor-only. The `kernel:*` child launches from `exeris-kernel-diagnostics-cli:0.12.0` on Maven Central (see the note under [Wiring into an agent](#wiring-into-an-agent)). MCP resources + prompts are at 0.9.0. **0.8.0 is the first release published to npm**, after kernel 0.12.0, `exeris-sdk` 0.12.0 and `exeris-tooling` 0.9.0 reached Maven Central: every `eu.exeris:*` artifact the launch ladder resolves is on Central, so an application developer needs no GitHub Packages token. The bridge targets `exeris-tooling` 0.10.0 (the generator catalogue and the `EXT-` registry).
-
-Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
-
-## Stack
-
-- **Node 20+**, TypeScript 5.6+, ES2023 target.
-- [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) for the MCP server runtime.
-- Stdio transport for local agent integration; a Streamable HTTP transport for a hosted endpoint serving the public families (`docs:*`, `sdk:*`, `bridge:*`) is planned for 0.10.0.
-
-## Architecture in one line
-
-The bridge is a **separate process in a separate language** from the Java kernel. This is intentional and preserves [ADR-006 (The Wall)](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-006-spring-free-kernel-boundary.md) by construction — no AI-tooling code ever links into the kernel classpath.
-
-```
-┌─────────────────────┐      MCP/stdio       ┌────────────────────┐
-│   Agent (Claude,    │ ───────────────────► │ exeris-ai-bridge   │
-│   Cursor, Copilot)  │                      │  (Node 20+, TS)    │
-└─────────────────────┘                      └────────┬───────────┘
-                                                      │
-                              ┌───────────────────────┼─────────────────────────┐
-                              │                       │                         │
-                              ▼                       ▼                         ▼
-                   ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────────────┐
-                   │ exeris-docs/     │   │ exeris-platform- │   │ Running Exeris kernel    │
-                   │ (filesystem)     │   │ lsp (JSON-RPC)   │   │ (JSON-over-stdio adapter │
-                   │                  │   │                  │   │  to KernelDiagnostics)   │
-                   └──────────────────┘   └──────────────────┘   └──────────────────────────┘
-```
-
-## Build & run
+**Claude Code**
 
 ```sh
-npm install
-npm run build
-npm start                    # stdio MCP server
+claude mcp add exeris -- npx -y @exeris/ai-bridge
 ```
 
-For development with auto-reload:
+**Claude Desktop**: install `exeris-ai-bridge-<version>.mcpb` from the
+[GitHub Releases](https://github.com/exeris-systems/exeris-ai-bridge/releases). Desktop does not
+start the server inside a project, so set **Project root** in the extension's settings to use the
+`build-*` and `caps-*` tools.
 
-```sh
-npm run dev
-```
-
-Tests, and the zero-checkout check that CI runs on every PR:
-
-```sh
-npm test                     # unit + shape tests (builds first)
-npm run test:coverage        # the same tests under c8; writes coverage/lcov.info for Sonar
-npm run lint                 # type-aware ESLint over src/ and scripts/
-npm run smoke:p2             # pack, install into a scratch dir, speak MCP to the tarball
-```
-
-`smoke:p2` is the one test that does not run against the source tree. It builds the real
-package, installs it somewhere that has only an application project, points `HOME` at an
-empty directory and scrubs every `EXERIS_*` variable — the machine an application developer
-actually has. It must be launched through npm (`npm run smoke:p2 -- --keep` leaves the scratch
-directory behind for inspection) — that is how it resolves the npm binary to an
-absolute path instead of a `PATH` lookup, and it guarantees the pack and the
-install run on the same npm that manages the project.
-
-## Installing
-
-Install from npm (the `eu.exeris` artifacts the package resolves are on Maven Central):
-
-- **Claude Code** — run this inside your project, so the server starts there and finds your `pom.xml`:
-
-  ```sh
-  claude mcp add exeris -- npx -y @exeris/ai-bridge
-  ```
-
-- **Claude Desktop** — install `exeris-ai-bridge-<version>.mcpb` from the [GitHub Release](https://github.com/exeris-systems/exeris-ai-bridge/releases). Desktop does not start the server inside a project, so set **Project root** in the extension's settings to use `build-*` and `caps-*`.
-- **Any other MCP client** — the command is `npx -y @exeris/ai-bridge` over stdio. The server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.exeris-systems/ai-bridge`.
-
-Nothing else is needed: the ADR registry snapshot, the SDK reference data and the generator catalogue ship inside the package. To run from a clone instead, see below.
-
-## Wiring into an agent
-
-To run from a clone, add an entry to your `.claude/settings.json` MCP servers list. For an application, nothing needs setting — start the agent inside your project and the bridge finds its `pom.xml`:
+**Any other MCP client** (Cursor, VS Code, Copilot): the command is `npx -y @exeris/ai-bridge`
+over stdio.
 
 ```json
 {
   "mcpServers": {
-    "exeris": {
-      "command": "node",
-      "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"]
-    }
+    "exeris": { "command": "npx", "args": ["-y", "@exeris/ai-bridge"] }
   }
 }
 ```
 
-A contributor working on the ecosystem itself chooses contributor mode explicitly and points at the checkout:
+The server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.exeris-systems/ai-bridge`.
 
-```json
-{
-  "mcpServers": {
-    "exeris": {
-      "command": "node",
-      "args": ["/abs/path/to/exeris-ai-bridge/dist/server.js"],
-      "env": {
-        "EXERIS_BRIDGE_MODE": "contributor",
-        "EXERIS_DOCS_ROOT": "/abs/path/to/exeris-docs"
-      }
-    }
-  }
-}
-```
+## Requirements
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 31 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
+- Node 20 or newer.
+- `kernel-*` only: JDK 25 or newer, and `eu.exeris:exeris-kernel-diagnostics-cli` in your local
+  Maven repository, which a build of an Exeris application puts there.
+- No network at run time. The bridge reads artefacts already in `~/.m2` and never downloads.
 
-**Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
+## Tools
 
-**The server also ships `instructions`.** MCP delivers them in the `initialize` response, so the client can put them in front of the model *before* it calls anything — which is the only point at which a wrong architectural assumption is still cheap. They stay a route rather than a cheat sheet: what this server is, that every tool is a read, which family answers which question, the state each family resolved to in this session, and one correction that an agent trained mostly on Spring needs first — Exeris has no Spring context, no DI container, and no JPA or Hibernate anywhere in the kernel, SDK or build tooling. Framework facts themselves stay in the documents the tools serve; copied into the instructions they would be a second, unversioned copy that drifts.
+Tool names are `family-tool`. All 31 are listed in every session; a family whose dependency is
+missing answers with a structured `family_unavailable` result naming the reason and the remedy.
 
-When something is dark, **`bridge-health` is the tool to call**. It reports the resolved mode, every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. `bridge-version` identifies the build the answer came from. Both are read-only, cost nothing, and are never themselves gated: a diagnostic that goes dark along with what it diagnoses would be worthless. Deliberately absent is a "probe" that spawns the children to check they launch — the families' own tools answer that by doing the real work, and the outcome then shows up in the next `bridge-health`.
+| Family | Answers | Tools |
+| --- | --- | --- |
+| `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic` |
+| `caps-*` | The capability composition your build validated | `caps-list_capabilities`, `caps-describe_composition` |
+| `sdk-*` | The SDK's annotations, deprecations, scoping rules and AST schema; whether your project pins a different SDK | `sdk-list_annotations`, `sdk-describe_annotation`, `sdk-list_deprecations`, `sdk-get_scoping_rules`, `sdk-get_ast_schema` |
+| `docs-*` | The Exeris ADRs, the high-level architecture, the whitepaper and the decision templates | `docs-list_adrs`, `docs-get_adr`, `docs-search`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template`, `docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc` |
+| `kernel-*` | A running kernel's providers, bootstrap DAG, subsystems and JVM ergonomics | `kernel-list_providers`, `kernel-get_bootstrap_dag`, `kernel-describe_subsystem`, `kernel-get_jvm_ergonomics` |
+| `lsp-*` | `@ExerisDomain` types and actions from the Studio language server, and a preview of a source edit as a diff | `lsp-list_domains`, `lsp-describe_domain`, `lsp-list_actions`, `lsp-preview_mutation` |
+| `bridge-*` | The server itself: version, bundled data, and why a family is unavailable | `bridge-version`, `bridge-health` |
 
-`EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` answers from the **registry snapshot bundled in the published package**: `adr-index.md`, every public record it links from a repository whose licence permits redistribution, the HLA, the whitepaper and the templates, read from each repository's default branch when the package was packed (`data/docs/NOTICE.md` lists the commits and licences). `bridge-health` reports which source answered. The per-repository tools (`docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc`) need a checkout, and a record from a repository the snapshot leaves out answers with its GitHub URL. An `EXERIS_DOCS_ROOT` that is set but does not resolve takes `docs:*` dark rather than falling back to the snapshot.
+`docs-list_repos`, `docs-list_repo_docs` and `docs-get_repo_doc` need a checkout of the Exeris
+repositories; the other `docs-*` tools answer from a registry snapshot bundled in the package.
+`lsp-*` needs a locally built `exeris-platform-lsp`, which publishes no runnable jar yet.
 
-`EXERIS_PROJECT_ROOT` points at **the developer's own project** — the tree `build:*` and `caps:*` report on. It is optional: with nothing set, the bridge walks up from its working directory to the nearest `pom.xml`, which is the right answer when an agent starts the server inside the project it is working on, and lands on the owning module rather than the aggregator in a multi-module build. Set it explicitly when the agent's working directory is somewhere else. An explicit root is taken as given and is **not** required to contain a `pom.xml` — naming it is how you escape our guessing. Reads are sandboxed to this root exactly as `docs:*` reads are sandboxed to the docs root, including for paths the bridge builds itself.
+## Configuration
 
-`EXERIS_BRIDGE_MODE` (optional, `app` | `contributor`, default `app`) says which persona the bridge serves. **The default is the application developer, and contributor mode is chosen, never inferred**: a checkout next to the install does not switch it, because an application developer may well clone `exeris-docs` to read it. The one thing the mode changes is which launch rung wins (below). It is otherwise **descriptive, not a mask**: pinning `app` does not hide `docs:*` when the docs checkout is present, because availability has exactly one source of truth (did the dependency resolve). What pinning `contributor` does buy you is a louder failure — missing roots are then reported as a misconfiguration rather than as the ordinary application-developer state.
+Nothing needs setting for an application. Every variable is optional, and none can stop the server
+from booting.
 
-Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `EXERIS_PROJECT_ROOT` | nearest `pom.xml` above the working directory | The project `build-*`, `caps-*` and `sdk-*` report on |
+| `EXERIS_MAVEN_REPO` | `<localRepository>` in `~/.m2/settings.xml`, then `~/.m2/repository` | Where published jars are looked up |
+| `EXERIS_KERNEL_VERSION` | newest release in the local repository | The diagnostics CLI version to launch |
+| `EXERIS_KERNEL_COMMAND` / `EXERIS_KERNEL_JAR` | resolved from the local repository | Launch the kernel diagnostics CLI explicitly |
+| `EXERIS_LSP_COMMAND` / `EXERIS_LSP_JAR` | none | Launch `exeris-platform-lsp` |
+| `EXERIS_LSP_WORKSPACE` | the working directory | The workspace the language server indexes |
+| `EXERIS_DOCS_ROOT` | the bundled snapshot | An `exeris-docs` checkout to read instead |
+| `EXERIS_BRIDGE_MODE` | `app` | `contributor` for work on Exeris itself: source checkouts win over published jars |
 
-| rung | how | `source` in `bridge-health` |
-|---|---|---|
-| 1 | `EXERIS_LSP_COMMAND` / `EXERIS_KERNEL_COMMAND` — a full command line | `env-command` |
-| 2 | `EXERIS_LSP_JAR` / `EXERIS_KERNEL_JAR` — a jar you already have | `env-jar` |
-| 3 | a published jar in your local Maven repository, by coordinate | `m2` |
-| 4 | `mvn exec:java` against the sibling module, if its pom is there | `source-tree` |
+How each variable resolves, the launch ladder for the Java children, and the bundled reference
+data are described in the
+[configuration reference](docs/configuration.md).
 
-Rungs 3 and 4 **swap order by mode**: in contributor mode the source tree wins, because someone with the checkout is working *on* that tree and a released jar would quietly answer for code they are not editing; in app mode the published jar wins. That is preference, not gating — whichever is second still fires when the first cannot.
+## Troubleshooting
 
-Rung 3 finds the local repository at `EXERIS_MAVEN_REPO`, then `<localRepository>` in `~/.m2/settings.xml`, then `~/.m2/repository`. The version is the newest **release** of the anchor artifact present there (`exeris-kernel-core` for the kernel CLI) — not the version your project's dependency graph resolves, which would require a Maven invocation on the boot path. `EXERIS_KERNEL_VERSION` pins it when those differ. Jar launches use `$JAVA_HOME/bin/java` when `JAVA_HOME` is set, else `java`; rung 1 is the escape hatch when you need something else. `lsp:*` has no rung 3 yet: the published `exeris-platform-lsp` jar carries no `Main-Class`, so probing for it would produce a launch that fails at startup.
+Call `bridge-health`. It reports every family's state, with the reason and the remedy for each
+one that is unavailable, without starting any child process. `bridge-version` reports the build
+and the upstream releases its bundled data came from. The server also writes a one-line summary
+(`mode=… docs=… lsp=… kernel=… build=… caps=…`) to stderr, which MCP clients show in their logs.
 
-`EXERIS_LSP_COMMAND` (optional) is how the `lsp:*` family launches its `exeris-platform-lsp` child — a whitespace-separated command + args (no shell quoting; the process is exec'd directly). The source-tree rung runs `mvn -q -f <ecosystemRoot>/exeris-platform/exeris-platform-lsp/pom.xml exec:java` (`-q` keeps Maven's own logging off the JSON-RPC stdout). The child is spawned lazily on the first `lsp:*` call and cached; its stderr is inherited into the bridge's logs. `lsp:*` calls return validated data against a running server; a server build predating the `exeris/*` slice yields a structured "update the LSP server" result rather than failing. The integration test confirms the default `exec:java` launch keeps protocol frames clean on stdout (the JVM logs to stderr), so no `exec:exec` workaround is needed.
+## Versioning
 
-`EXERIS_LSP_WORKSPACE` (optional) is the workspace root the LSP server indexes for `@ExerisDomain` sources, sent as `rootUri` in the `initialize` handshake. It defaults to the bridge's working directory (the project it was spawned in). With no resolvable workspace the server returns an empty index, so `lsp:*` tools answer `[]`.
+The package follows semver. Until 1.0, a minor release may change a tool's output shape; the
+release notes list every change a client may notice. At 1.0 the tool names and input schemas are
+frozen.
 
-`EXERIS_KERNEL_COMMAND` (optional) is how the `kernel:*` family launches its `exeris-kernel-diagnostics-cli` child — a whitespace-separated command + args (no shell quoting; exec'd directly), spawned lazily on the first `kernel:*` call and cached. It defaults to `mvn -q -f <ecosystemRoot>/exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml exec:java -Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli` (`-q` keeps Maven's logging off the NDJSON stdout; the CLI logs to stderr, which is inherited into the bridge's logs). The CLI boots the kernel in **read-only inspect mode** and speaks newline-delimited JSON; the bridge correlates responses FIFO and validates each snapshot against its `KernelDiagnostics` wire shape. A pre-built shaded jar is the faster override, and **from kernel 0.11.0 it needs no special flags**: `EXERIS_KERNEL_COMMAND="java -jar /abs/…/exeris-kernel-diagnostics-cli-<ver>.jar"`. The kernel went preview-clean at 0.11.0 (ADR-066: "the DISTRIBUTED artifact is preview-clean" — preview is now bound to test-compile and surefire only), and the published jars put the boundary exactly there: `0.10.2` has 12 preview-stamped classes out of 799, `0.11.0` has 0 out of 897. On an **older** jar you need `java --enable-preview -jar …` and the JDK it was built on; the JVM says so itself (`UnsupportedClassVersionError: Preview features are not enabled … Try running with '--enable-preview'`) and the bridge passes that message through. The same jar is published, so the path may equally be a local Maven repo coordinate — which is what the ladder's `m2` rung resolves for you.
+0.8.0 targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.12.0 and `exeris-tooling` 0.10.0, all on Maven
+Central.
 
-> The diagnostics CLI boots the kernel in **read-only inspect mode** and speaks NDJSON over stdio; responses correlate FIFO and validate against the `KernelDiagnostics` wire shapes. In zero-checkout mode it launches as the shaded jar `eu.exeris:exeris-kernel-diagnostics-cli:0.12.0` through the ladder's `m2` rung as plain `java -jar` — the published jar is preview-clean, so no `--enable-preview` — or through an explicit `EXERIS_KERNEL_COMMAND`. If the CLI is not found or fails to start, `kernel:*` calls return a structured `family_unavailable` result rather than crashing.
+## Links
 
-### Bundled reference data
-
-The published package carries a small read-only corpus so an application developer with **no ecosystem checkout and no network** still gets grounded answers. It is generated at pack time by `scripts/vendor-reference-data.mjs`, and `data/` is deliberately **not committed** — which means a bridge run from a source checkout has no bundle, and reports that plainly rather than pretending.
-
-`bridge-version` reports which state you are in:
-
-```jsonc
-"bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 3, "sourceArtifacts": ["eu.exeris:exeris-sdk-annotations:0.12.0", "eu.exeris:exeris-sdk-source-model:0.12.0", "eu.exeris:exeris-codegen-java:0.10.0"] }
-```
-
-At 0.8.0 the bundle ships with the **annotation catalog and AST schema** (from the released `exeris-sdk` jars) and the **generator catalogue** (from the released `exeris-codegen-java` jar), all generated at prepack time. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
-
-For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
-
-## Try it (end-to-end)
-
-Once wired in, the bridge answers ecosystem-introspection questions directly from `exeris-docs`. A representative session — *"list all ADR-024-related context"*:
-
-| Agent intent | Tool call | Returns |
-|:---|:---|:---|
-| Enumerate the registry | `docs-list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
-| Read the decision in full | `docs-get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
-| Find every mention | `docs-search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
-
-You can drive the same handshake without an agent — pipe newline-delimited JSON-RPC straight at the stdio server:
-
-```sh
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.0.0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"docs-get_adr","arguments":{"number":24}}}' \
-  | node dist/server.js
-```
-
-`tools/list` advertises all 31 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 5 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
-
-## Repo layout
-
-```
-src/
-  server.ts                  MCP server entry, tool registry, stdio transport
-  instructions.ts            the `initialize` instructions handed to the model at connect time
-  config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
-  config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
-  fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
-  transport/
-    lsp-framing.ts           LSP base-protocol (Content-Length) message codec
-    lsp-client.ts            JSON-RPC client over a child exeris-platform-lsp process
-    ndjson-framing.ts        newline-delimited JSON message codec (kernel CLI)
-    kernel-adapter.ts        NDJSON client over a child exeris-kernel-diagnostics-cli process
-  tools/
-    types.ts                 Shared ToolDefinition / ToolHandler types
-    unavailable.ts           per-family availability guard for dark families
-    docs/
-      index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
-                             HLA, whitepaper, search, per-repo docs surface)
-      adr-index.ts           parser for exeris-docs/adr-index.md
-    lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions,
-                             lsp-preview_mutation — LSP proxy (bound to the exeris/* slice,
-                             shape-validated; preview_mutation calls exeris/previewMutation and
-                             never writes)
-    lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription
-                             with relationships[] and sourceDigest / ActionSummary / MutationPreview)
-    kernel/index.ts          kernel-list_providers, kernel-get_bootstrap_dag, kernel-describe_subsystem,
-                             kernel-get_jvm_ergonomics — KernelDiagnostics proxy over NDJSON, one tool
-                             per SPI method (cap-blind — no list_capabilities)
-    kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
-                             Subsystem/RuntimeErgonomics)
-    build/index.ts           build-list_domains, build-get_domain_metadata,
-                             build-explain_artefacts, build-get_detach_state,
-                             build-explain_diagnostic — reads the
-                             annotation processor's own output in target/classes/exeris-metadata
-                             and the codegen output tree in src/main/generated/java
-    build/shapes.ts          envelope validation (schemaVersion + ADR-042 sourceDigest) and the
-                             filename-prefix decoding; the AST body passes through verbatim
-    build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
-                             what drove it, candidates[] when a path is ambiguous), from the
-                             vendored generator catalogue; reads what was emitted, never predicts it
-    build/diagnostics.ts     catalogue of the build's own diagnostics, keyed on the ADR-095
-                             EXT-<AREA>-<NNNN> identifier (text anchors only for output from
-                             tooling before 0.9.0); an unknown identifier is reported, not guessed
-    caps/index.ts            caps-list_capabilities, caps-describe_composition — reads the
-                             build-time cap-manifest.json of the user's own project; never
-                             re-resolves the @Requires→@Provides DAG
-    caps/shapes.ts           cap-manifest wire shapes + validators (CapManifest/Stamp/Module)
-    sdk/index.ts             sdk-list_annotations, sdk-describe_annotation, sdk-get_scoping_rules,
-                             sdk-list_deprecations, sdk-get_ast_schema — the bundled annotation
-                             catalog, AST schema, deprecations and authored scoping rules
-    sdk/shapes.ts            annotation catalog and AST schema wire shapes and parsers
-    sdk/rules.ts             the authored scoping rules (@Field vs @Validation, …)
-    sdk/skew.ts              project SDK version and skew from pom.xml — a direct dependency, an
-                             exeris.sdk.version property, or the app BOM chain in the local ~/.m2
-    bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
-                             surface (never gated, never spawns)
-  data/bundle.ts             reader for the bundled reference corpus — manifest parse,
-                             per-entry SHA-256 verification, sandboxed to data/
-  data/generator-catalogue.ts  loader and matcher for the vendored exeris-tooling generator
-                             catalogue (ADR-097); never throws, reports why it is absent
-scripts/
-  vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
-  p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
-                             the tarball on a scrubbed environment (CI job `p2-smoke`)
-  build-mcpb.mjs             builds the Claude Desktop bundle (.mcpb) from the npm tarball
-server.json                  MCP Registry entry; held equal to package.json by a test
-docs/
-  adr/
-    ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)
-```
-
-## Releasing
-
-A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java` (`0.10.0`). Both jars are fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only when set, for a release not yet on Central. The `publish` job additionally needs `RELEASE_PUBLISH`, below.
-
-The `publish` job runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, and only through the `release` environment. It publishes to npm with provenance, then to the MCP Registry, then creates the GitHub Release with the tarball, the bundle and the checksums. Before turning it on:
-
-1. The `@exeris` scope on npm belongs to the project.
-2. The `release` environment exists, restricted to `v*` tags, with a required reviewer.
-3. The first publish uses an `NPM_TOKEN` secret on that environment. Afterwards, configure npm trusted publishing for the package (workflow `release.yml`, environment `release`) and delete the secret: every later publish authenticates by OIDC and carries provenance.
-
-The MCP Registry needs no secret: it verifies the organisation through GitHub OIDC and checks `server.json` against the published package's `mcpName`. `src/release-metadata.test.ts` holds the two equal on every change.
+- [Source](https://github.com/exeris-systems/exeris-ai-bridge)
+- [Roadmap](ROADMAP.md)
+- [Configuration reference](docs/configuration.md)
+- [Contributing](CONTRIBUTING.md)
+- [ADR-025, the founding decision](docs/adr/ADR-025-ai-agent-bridge.md)
+- [Issues](https://github.com/exeris-systems/exeris-ai-bridge/issues)
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
-
-This repo is consistently licensed with `exeris-kernel`, `exeris-sdk`, and `exeris-tooling`. Commercial protection of the ecosystem is enforced at the capability and SKU layer per [ADR-023](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-023-capability-licensing-taxonomy.md), not at the agent-bridge layer.
-
-## Where this repo fits
-
-This is the twentieth active sibling repository in `~/exeris-systems/`. It is **not** a Tier 2 `exeris-caps-*` capability, **not** a Tier 3 `exeris-sku-*` product, and **not** part of the Tier 1 substrate. It is developer-facing tooling — structurally closer to `exeris-tooling` than to anything else in the map.
-
-See the top-level `~/exeris-systems/CLAUDE.md` sub-repo map and the founding [ADR-025](docs/adr/ADR-025-ai-agent-bridge.md) for the full rationale.
+Apache-2.0
