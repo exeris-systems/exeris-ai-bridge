@@ -763,6 +763,44 @@ test("app BOM chain missing from the local repository is unknown, with the coord
   assert.match(report.reason ?? "", /never downloads/);
 });
 
+test("a parent version that walks out of the local repository is refused, even when a pom waits there", () => {
+  const repo = join(work, "repo-traversal");
+  mkdirSync(repo, { recursive: true });
+  const version = "../../../../escape";
+  // The path the chain would read if the coordinate were trusted, computed the same way.
+  const escaped = join(repo, "eu", "exeris", "exeris-app-parent", version, `exeris-app-parent-${version}.pom`);
+  assert.ok(!escaped.startsWith(repo), "the fixture must point outside the repository");
+  mkdirSync(join(escaped, ".."), { recursive: true });
+  writeFileSync(
+    escaped,
+    `<project><properties><exeris.sdk.version>6.6.6</exeris.sdk.version></properties></project>`,
+    "utf8",
+  );
+  const projectDir = writeProject("proj-traversal", appPom("eu.exeris", version));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "unknown");
+  assert.equal(report.projectSdkVersion, undefined);
+});
+
+test("a symlinked BOM pom pointing outside the local repository is refused", () => {
+  const repo = fakeRepo("repo-symlink", "eu.exeris", "0.10.0", "0.12.0");
+  const bomPom = join(repo, "eu", "exeris", "exeris-app-bom", "0.10.0", "exeris-app-bom-0.10.0.pom");
+  const outsideDir = join(work, "outside-repo");
+  mkdirSync(outsideDir, { recursive: true });
+  const outsidePom = join(outsideDir, "bom.pom");
+  writeFileSync(
+    outsidePom,
+    `<project><properties><exeris.sdk.version>6.6.6</exeris.sdk.version></properties></project>`,
+    "utf8",
+  );
+  rmSync(bomPom);
+  symlinkSync(outsidePom, bomPom);
+  const projectDir = writeProject("proj-symlink-bom", appPom("eu.exeris", "0.10.0"));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "unknown");
+  assert.equal(report.projectSdkVersion, undefined);
+});
+
 test("eu.exeris.tooling groupId (tooling 0.9.0) is supported", () => {
   const repo = fakeRepo("repo-090", "eu.exeris.tooling", "0.9.0", "0.11.0");
   const projectDir = writeProject("proj-090", appPom("eu.exeris.tooling", "0.9.0"));
