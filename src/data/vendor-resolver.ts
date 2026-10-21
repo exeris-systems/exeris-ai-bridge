@@ -3,6 +3,12 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import {
+  CatalogueFormatError,
+  GENERATOR_CATALOGUE_ENTRY,
+  parseGeneratorCatalogue,
+} from "./generator-catalogue.js";
+
 /**
  * Strips XML comments iteratively until fixed-point, guaranteeing that no
  * comment sequence survives in the output.
@@ -284,7 +290,10 @@ export interface SourceEntry {
 
 export interface CollectSourcesOptions {
   repo?: string | null;
+  /** Version of the exeris-sdk jars; EXERIS_SDK_VERSION. */
   explicitVersion?: string;
+  /** Version of the exeris-codegen-java jar; EXERIS_TOOLING_VERSION. */
+  toolingVersion?: string;
   strict?: boolean;
   allowSnapshots?: boolean;
   findJarFn?: typeof findArtifactJar;
@@ -294,7 +303,8 @@ export interface CollectSourcesOptions {
 }
 
 /**
- * Collect reference data sources (annotation-catalog and ast-schema).
+ * Collect reference data sources: the SDK annotation catalog and AST schema,
+ * and the codegen pipeline's generator catalogue.
  */
 export function collectSources(options: CollectSourcesOptions = {}): SourceEntry[] {
   const warnFn = options.warnFn ?? console.warn;
@@ -335,7 +345,7 @@ export function collectSources(options: CollectSourcesOptions = {}): SourceEntry
   const catalogBytes = extract(ann.jar, "META-INF/exeris/annotation-catalog.json");
   const schemaBytes = extract(model.jar, "META-INF/exeris/ast-schema.json");
 
-  return [
+  const sources: SourceEntry[] = [
     {
       id: "annotation-catalog",
       bytes: catalogBytes,
@@ -347,4 +357,53 @@ export function collectSources(options: CollectSourcesOptions = {}): SourceEntry
       sourceArtifact: `eu.exeris:exeris-sdk-source-model:${model.version}`,
     },
   ];
+
+  const generators = collectGeneratorCatalogue({ ...options, repo, warnFn, failFn, findJar, extract });
+  if (generators) sources.push(generators);
+  return sources;
+}
+
+/**
+ * The generator catalogue, from `eu.exeris:exeris-codegen-java`. Pinned by the
+ * `catalogueFormat` it declares, not by the jar version: a format this build
+ * does not read is refused here so it never reaches a published tarball.
+ */
+function collectGeneratorCatalogue(
+  options: CollectSourcesOptions & {
+    repo: string;
+    warnFn: (msg: string) => void;
+    failFn: (msg: string) => never;
+    findJar: typeof findArtifactJar;
+    extract: typeof extractFromJar;
+  },
+): SourceEntry | null {
+  const { repo, warnFn, failFn, findJar, extract } = options;
+  const version = options.toolingVersion;
+  const jar = findJar(repo, "exeris-codegen-java", version, {
+    allowSnapshots: Boolean(version || options.allowSnapshots),
+    minVersion: "0.10.0",
+  });
+  if (!jar) {
+    if (options.strict) {
+      failFn(
+        `Could not find the exeris-codegen-java jar in ${repo}. Set EXERIS_TOOLING_VERSION to the released exeris-tooling version this release vendors.`,
+      );
+    }
+    warnFn(`[vendor-reference-data] exeris-codegen-java jar not found in ${repo}. Emitting no generator catalogue.`);
+    return null;
+  }
+  const bytes = extract(jar.jar, "META-INF/exeris/generator-catalogue.json");
+  try {
+    parseGeneratorCatalogue(bytes.toString("utf8"));
+  } catch (err) {
+    if (err instanceof CatalogueFormatError) {
+      return failFn(`exeris-codegen-java ${jar.version}: ${err.message}`);
+    }
+    throw err;
+  }
+  return {
+    id: GENERATOR_CATALOGUE_ENTRY,
+    bytes,
+    sourceArtifact: `eu.exeris:exeris-codegen-java:${jar.version}`,
+  };
 }

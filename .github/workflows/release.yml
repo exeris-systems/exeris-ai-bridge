@@ -119,18 +119,36 @@ jobs:
               -DremoteRepositories="$repos"
           done
 
+      # The generator catalogue the build-* tools explain artefacts with ships in
+      # the exeris-codegen-java jar (ADR-097). It is on Maven Central, and the
+      # bridge pins to the catalogueFormat it declares, not to this version:
+      # prepack refuses a format it does not read. EXERIS_TOOLING_VERSION names the
+      # released exeris-tooling version this release vendors it from.
+      - name: Fetch the exeris-codegen-java jar the generator catalogue is vendored from
+        env:
+          EXERIS_TOOLING_VERSION: ${{ vars.EXERIS_TOOLING_VERSION }}
+        run: |
+          if [ -z "$EXERIS_TOOLING_VERSION" ]; then
+            echo "::error::set the repository variable EXERIS_TOOLING_VERSION to the released exeris-tooling version this release vendors the generator catalogue from"; exit 1
+          fi
+          mvn -B -q dependency:get \
+            -Dartifact="eu.exeris:exeris-codegen-java:$EXERIS_TOOLING_VERSION" -Dtransitive=false \
+            -DremoteRepositories="central::default::https://repo.maven.apache.org/maven2"
+
       - name: Test
         run: npm test
 
       - name: Zero-checkout smoke
         run: npm run smoke:p2
 
-      # prepack builds, vendors both corpora strictly (the SDK data from the jars
-      # above, the docs registry snapshot from GitHub at each repository's
-      # default-branch head) and verifies them before npm writes the tarball.
+      # prepack builds, vendors the corpora strictly (the SDK data and the
+      # generator catalogue from the jars above, the docs registry snapshot from
+      # GitHub at each repository's default-branch head) and verifies them before
+      # npm writes the tarball.
       - name: Pack
         env:
           EXERIS_SDK_VERSION: ${{ vars.EXERIS_SDK_VERSION }}
+          EXERIS_TOOLING_VERSION: ${{ vars.EXERIS_TOOLING_VERSION }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p out
