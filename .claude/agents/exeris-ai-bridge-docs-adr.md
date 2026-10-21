@@ -13,7 +13,7 @@ model: inherit
 Maintain knowledge integrity between MCP server implementation and its strategic documentation.
 
 ## Primary Responsibilities
-- Detect drift between code and `docs/adr/ADR-025-ai-agent-bridge.md`, `README.md` (architecture + tool families + wiring snippet), `ROADMAP.md` milestone scope.
+- Detect drift between code and `docs/adr/ADR-025-ai-agent-bridge.md`, `README.md` (tool families + installation + configuration table), `CONTRIBUTING.md` (architecture + repository layout), `docs/configuration.md`, `ROADMAP.md` milestone scope.
 - Decide whether a change triggers an ADR-025 amendment, a new cross-repo ADR (e.g. ADR-024 capability composition surfacing), a link-stub update in sibling repos, a ROADMAP entry, or nothing.
 - Reserve ADR numbers in `adr-index.md` of `exeris-systems/exeris-docs` BEFORE drafting (`../exeris-docs/adr-index.md` in a sibling checkout).
 - Maintain link stubs in `exeris-kernel/docs/adr/`, `exeris-platform/docs/adr/` when ADR-025 is amended.
