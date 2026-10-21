@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -145,6 +145,10 @@ test(
         ["submit"],
       );
       assert.ok(description.artefacts.includes("rest") && description.artefacts.includes("graphql"));
+      // Relationships facet: absent/undefined or empty array [] per ADR-025 2026-10-06 amendment
+      assert.ok(description.relationships === undefined || Array.isArray(description.relationships));
+      // Concurrency token: sourceDigest string per ADR-025 2026-10-07 amendment
+      assert.ok(typeof description.sourceDigest === "string" || description.sourceDigest === undefined || description.sourceDigest === null);
 
       const actions = parseJson(await tools.get("lsp-list_actions")!.handler({}));
       assert.equal(actions.length, 1);
@@ -153,6 +157,22 @@ test(
       assert.equal(actions[0].httpMethod, "POST");
       assert.equal(actions[0].resultType, null); // submit returns void → null result type
       assert.deepEqual(actions[0].params, [{ name: "reason", type: "String", required: true }]);
+
+      // Live mutation preview: tests exeris/previewMutation end-to-end
+      const preview = parseJson(
+        await tools.get("lsp-preview_mutation")!.handler({
+          qualifiedName: "com.example.shop.Order",
+          op: { op: "removeField", path: "/entities/Order/fields/code" },
+          concurrencyToken: description.sourceDigest ?? undefined,
+        }),
+      );
+      assert.ok(preview.result, "preview must return a result object");
+      assert.equal(typeof preview.diff, "string", "preview must return a diff string");
+      assert.equal(preview.result.outcome, "SUCCESS");
+      assert.match(preview.diff, /-\s+private String code;/);
+      // Read-only invariant check: assert that Order.java on disk was NOT modified by the preview
+      const onDiskSource = readFileSync(join(workspace, "com", "example", "shop", "Order.java"), "utf-8");
+      assert.equal(onDiskSource, ORDER_SOURCE, "preview must NOT modify on-disk source");
     } finally {
       client.dispose();
       rmSync(workspace, { recursive: true, force: true });
