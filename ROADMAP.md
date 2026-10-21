@@ -173,7 +173,7 @@ The single highest-value item is the **`@Field` vs `@Validation` scoping rule**.
 - [x] **Catalog generation is upstream-owned, not hand-maintained** — the SDK emits the catalog; the bridge vendors it at release via `scripts/vendor-reference-data.mjs`. The scoping rules in `sdk-get_scoping_rules` are authored locally from `package-info` and ADR-054.
 - [x] **Version-skew handling** — the bundled catalog carries the SDK version it was generated from; when the user's project pins a different one in `pom.xml`, tools and `bridge-health` report `versionSkew: { status: "skew_detected", ... }` rather than answering confidently from the wrong contract.
 
-## 0.8.0 — mutation preview (canonical edits, still zero writes) — COMPLETED RELEASE_DATE
+## 0.8.0 — mutation preview (canonical edits, still zero writes) — COMPLETED 2026-10-21
 
 > Goal: when an agent adds a field to an entity, the *canonical* SDK writer decides what the source looks like — not the agent's guess at annotation style. The bridge still never writes.
 
