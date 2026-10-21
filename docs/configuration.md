@@ -43,7 +43,7 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:
 
 | rung | how | `source` in `bridge-health` |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `EXERIS_LSP_COMMAND` / `EXERIS_KERNEL_COMMAND` — a full command line | `env-command` |
 | 2 | `EXERIS_LSP_JAR` / `EXERIS_KERNEL_JAR` — a jar you already have | `env-jar` |
 | 3 | a published jar in your local Maven repository, by coordinate | `m2` |

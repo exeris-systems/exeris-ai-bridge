@@ -50,7 +50,7 @@ Tool names are `family-tool`. All 31 are listed in every session; a family whose
 missing answers with a structured `family_unavailable` result naming the reason and the remedy.
 
 | Family | Answers | Tools |
-|---|---|---|
+| --- | --- | --- |
 | `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic` |
 | `caps-*` | The capability composition your build validated | `caps-list_capabilities`, `caps-describe_composition` |
 | `sdk-*` | The SDK's annotations, deprecations, scoping rules and AST schema; whether your project pins a different SDK | `sdk-list_annotations`, `sdk-describe_annotation`, `sdk-list_deprecations`, `sdk-get_scoping_rules`, `sdk-get_ast_schema` |
@@ -69,7 +69,7 @@ Nothing needs setting for an application. Every variable is optional, and none c
 from booting.
 
 | Variable | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `EXERIS_PROJECT_ROOT` | nearest `pom.xml` above the working directory | The project `build-*`, `caps-*` and `sdk-*` report on |
 | `EXERIS_MAVEN_REPO` | `<localRepository>` in `~/.m2/settings.xml`, then `~/.m2/repository` | Where published jars are looked up |
 | `EXERIS_KERNEL_VERSION` | newest release in the local repository | The diagnostics CLI version to launch |
@@ -81,7 +81,7 @@ from booting.
 
 How each variable resolves, the launch ladder for the Java children, and the bundled reference
 data are described in the
-[configuration reference](https://github.com/exeris-systems/exeris-ai-bridge/blob/main/docs/configuration.md).
+[configuration reference](docs/configuration.md).
 
 ## Troubleshooting
 
@@ -102,10 +102,10 @@ Central.
 ## Links
 
 - [Source](https://github.com/exeris-systems/exeris-ai-bridge)
-- [Roadmap](https://github.com/exeris-systems/exeris-ai-bridge/blob/main/ROADMAP.md)
-- [Configuration reference](https://github.com/exeris-systems/exeris-ai-bridge/blob/main/docs/configuration.md)
-- [Contributing](https://github.com/exeris-systems/exeris-ai-bridge/blob/main/CONTRIBUTING.md)
-- [ADR-025, the founding decision](https://github.com/exeris-systems/exeris-ai-bridge/blob/main/docs/adr/ADR-025-ai-agent-bridge.md)
+- [Roadmap](ROADMAP.md)
+- [Configuration reference](docs/configuration.md)
+- [Contributing](CONTRIBUTING.md)
+- [ADR-025, the founding decision](docs/adr/ADR-025-ai-agent-bridge.md)
 - [Issues](https://github.com/exeris-systems/exeris-ai-bridge/issues)
 
 ## License

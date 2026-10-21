@@ -17,7 +17,7 @@ and the milestones are in [`ROADMAP.md`](ROADMAP.md).
 
 The bridge is a **separate process in a separate language** from the Java kernel. This is intentional and preserves [ADR-006 (The Wall)](https://github.com/exeris-systems/exeris-docs/blob/main/adr/ADR-006-spring-free-kernel-boundary.md) by construction — no AI-tooling code ever links into the kernel classpath.
 
-```
+```text
 ┌─────────────────────┐      MCP/stdio       ┌────────────────────┐
 │   Agent (Claude,    │ ───────────────────► │ exeris-ai-bridge   │
 │   Cursor, Copilot)  │                      │  (Node 20+, TS)    │
@@ -115,7 +115,7 @@ reference data until `npm run vendor:data` runs; `bridge-version` says which sta
 Once wired in, the bridge answers ecosystem-introspection questions directly from `exeris-docs`. A representative session — *"list all ADR-024-related context"*:
 
 | Agent intent | Tool call | Returns |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | Enumerate the registry | `docs-list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
 | Read the decision in full | `docs-get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
 | Find every mention | `docs-search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
@@ -135,7 +135,7 @@ printf '%s\n' \
 
 ## Repository layout
 
-```
+```text
 src/
   server.ts                  MCP server entry, tool registry, stdio transport
   instructions.ts            the `initialize` instructions handed to the model at connect time
