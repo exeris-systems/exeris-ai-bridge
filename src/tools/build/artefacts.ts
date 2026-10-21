@@ -48,29 +48,36 @@ export const GITIGNORE_ENTRY = "src/main/generated";
 /** Which output tree a manifest sits in; the catalogue's `outputRoot`. */
 export type OutputRoot = "main" | "test";
 
+export interface ArtefactCandidate {
+  readonly id: string;
+  readonly generator: string;
+  readonly artefact: string;
+  readonly condition: string;
+}
+
 export interface ArtefactExplanation {
   /** Path relative to the output root, as the manifest records it, without a leading `./`. */
   readonly path: string;
   readonly artefact: string;
-  /** Null when no catalogue row matches, or no catalogue is loaded. Joined with " or " when the match is ambiguous. */
+  /** One generator's class name, only when exactly one catalogue row matches; null for no match or an ambiguous one. */
   readonly generator: string | null;
   readonly driver: string;
-  readonly scope: "entity" | "project";
-  /** `id` of the first matching catalogue row; null when none matches. */
+  /** The row's scope; null when the file is unknown, or the candidates disagree. */
+  readonly scope: "entity" | "project" | null;
+  /** `id` of the matching row, only when exactly one matches. */
   readonly catalogueId: string | null;
-  /** The matching row's `pathTemplate`. */
+  /** The matching row's `pathTemplate`, when exactly one matches. */
   readonly pathTemplate: string | null;
-  /** The matching row's `cardinality`. */
+  /** The matching row's `cardinality`, when exactly one matches. */
   readonly cardinality: string | null;
-  /** The ADR that fixes the artefact's shape, when the row names one. */
+  /** The ADR that fixes the artefact's shape, when the single matching row names one. */
   readonly adr: string | null;
-  /** Other rows whose pattern also matches this path; empty when the match is unambiguous. */
-  readonly ambiguousWith: readonly {
-    readonly id: string;
-    readonly generator: string;
-    readonly artefact: string;
-    readonly condition: string;
-  }[];
+  /**
+   * Every row that can have written this path, the catalogue's first match at
+   * index 0. Empty: unrecognised (or no catalogue). One: unambiguous. Several:
+   * ambiguous.
+   */
+  readonly candidates: readonly ArtefactCandidate[];
 }
 
 /**
@@ -118,12 +125,17 @@ function isSafeManifestEntry(entry: string): boolean {
  * Where the path's shape cannot separate generators, the first row lists the
  * others in `ambiguousWith`. Those candidates are REPORTED, not resolved:
  * resolving them from entity names would be a second implementation of the
- * pipeline's naming. Only candidates whose own pattern also matches this path
- * are reported — a row's `ambiguousWith` is a statement about shapes in
- * general, and a candidate that cannot match this path would be noise.
+ * pipeline's naming. A candidate is reported only when its own pattern also
+ * matches this path — the reading ADR-097 gives a consumer ("the row whose
+ * pattern also matches the path") — because `ambiguousWith` states which
+ * shapes overlap in general, not that this path is one of them.
  *
- * `condition` is never evaluated. It is prose for a person; a tool that
- * evaluated it would be predicting emission.
+ * `candidates` is the answer's one statement of who wrote the file: empty when
+ * nothing matches, one row when the match is unambiguous, several when the
+ * catalogue admits that the path cannot say. `generator` and the row-derived
+ * fields are set only for a single candidate, so no field claims more than the
+ * catalogue does. `condition` is never evaluated; it is prose for a person, and
+ * evaluating it would be predicting emission.
  *
  * With no catalogue the path is still listed, and the answer says the catalogue
  * is what is missing — a different fact from the catalogue not knowing the path.
@@ -140,36 +152,47 @@ export function explainArtefact(
   const first = rows.find((row) => row.pattern.test(path));
   if (first === undefined) return { path, ...UNRECOGNISED };
 
-  const candidates = first.ambiguousWith
+  const others = first.ambiguousWith
     .map((id) => rows.find((row) => row.id === id))
     .filter((row): row is GeneratorRow => row !== undefined && row.pattern.test(path));
+  const matched = [first, ...others];
+  const candidates = matched.map((row) => ({
+    id: row.id,
+    generator: row.generator,
+    artefact: row.artefact,
+    condition: row.condition,
+  }));
 
-  const generators = [...new Set([first, ...candidates].map((row) => row.generator))];
-  const conditionText = `Emitted when: ${first.condition}.`;
-  const adrText = first.adr === null ? "" : ` Shape fixed by ${first.adr}.`;
-  const driver =
-    candidates.length === 0
-      ? `${conditionText}${adrText}`
-      : `${conditionText}${adrText} AMBIGUOUS: this path shape also fits ${candidates
-          .map((c) => `'${c.id}' (${c.generator})`)
-          .join(", ")}, and the path alone cannot say which wrote it. The first listed is the catalogue's first match.`;
+  if (others.length === 0) {
+    const adrText = first.adr === null ? "" : ` Shape fixed by ${first.adr}.`;
+    return {
+      path,
+      artefact: first.artefact,
+      generator: first.generator,
+      driver: `Emitted when: ${first.condition}.${adrText}`,
+      scope: first.scope,
+      catalogueId: first.id,
+      pathTemplate: first.pathTemplate,
+      cardinality: first.cardinality,
+      adr: first.adr,
+      candidates,
+    };
+  }
 
+  const scopes = new Set(matched.map((row) => row.scope));
   return {
     path,
-    artefact: first.artefact,
-    generator: generators.join(" or "),
-    driver,
-    scope: first.scope,
-    catalogueId: first.id,
-    pathTemplate: first.pathTemplate,
-    cardinality: first.cardinality,
-    adr: first.adr,
-    ambiguousWith: candidates.map((c) => ({
-      id: c.id,
-      generator: c.generator,
-      artefact: c.artefact,
-      condition: c.condition,
-    })),
+    artefact: "Generated file — the path shape fits several generators",
+    generator: null,
+    driver: `The generator catalogue lists ${matched.length} rows whose pattern matches this path (${matched
+      .map((row) => `'${row.id}'`)
+      .join(", ")}), and the path alone cannot say which wrote it. See \`candidates\`, first match first; each carries its own condition.`,
+    scope: scopes.size === 1 ? first.scope : null,
+    catalogueId: null,
+    pathTemplate: null,
+    cardinality: null,
+    adr: null,
+    candidates,
   };
 }
 
@@ -180,12 +203,12 @@ const NO_CATALOGUE: Body = {
   generator: null,
   driver:
     "The codegen manifest lists this path, so the pipeline owns it and will rewrite it — do not hand-edit it. This bridge has no generator catalogue loaded, so it cannot say which generator wrote it; see `catalogue` in this answer.",
-  scope: "entity",
+  scope: null,
   catalogueId: null,
   pathTemplate: null,
   cardinality: null,
   adr: null,
-  ambiguousWith: [],
+  candidates: [],
 };
 
 const UNRECOGNISED: Body = {
@@ -193,12 +216,12 @@ const UNRECOGNISED: Body = {
   generator: null,
   driver:
     "The codegen manifest lists this path, so the pipeline owns it and will rewrite it — but it matches no row of the generator catalogue this bridge carries. That is a gap in the catalogue, or a pipeline newer than the catalogue. Treat it as generated, and do not hand-edit it.",
-  scope: "entity",
+  scope: null,
   catalogueId: null,
   pathTemplate: null,
   cardinality: null,
   adr: null,
-  ambiguousWith: [],
+  candidates: [],
 };
 
 /**

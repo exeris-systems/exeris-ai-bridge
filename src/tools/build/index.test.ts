@@ -513,3 +513,17 @@ test("build-explain_diagnostic is dark with the rest of its family", async () =>
   assert.equal(res.isError, true);
   assert.equal(JSON.parse(text(res)).family, "build");
 });
+
+// A file the catalogue cannot place has no scope, and a filter that dropped it
+// would hide a pipeline-owned file from the agent that asked to narrow.
+test("the entity filter keeps files whose scope is unknown", async () => {
+  const root = generatedProject([...L1_FILES, `${PKG}/mystery/Whatever.java`]);
+  const res = await toolsFor(root).get("build-explain_artefacts")!.handler({ entity: "Station" });
+  const payload = JSON.parse(text(res));
+  const paths = payload.artefacts.map((a: { path: string }) => a.path);
+  assert.ok(paths.includes(`${PKG}/mystery/Whatever.java`));
+  assert.ok(!paths.includes(`${PKG}/handler/DepotHandler.java`));
+  const unknown = payload.artefacts.find((a: { path: string }) => a.path.endsWith("Whatever.java"));
+  assert.equal(unknown.scope, null);
+  assert.deepEqual(unknown.candidates, []);
+});

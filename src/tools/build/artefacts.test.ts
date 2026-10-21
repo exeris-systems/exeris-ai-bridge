@@ -9,6 +9,7 @@ const catalogue = fixtureCatalogue();
 
 const main = (path: string) => explainArtefact(path, catalogue, "main");
 const tests = (path: string) => explainArtefact(path, catalogue, "test");
+const ids = (e: { candidates: readonly { id: string }[] }) => e.candidates.map((c) => c.id);
 
 test("parseCodegenManifest reads the format OutputWriter writes", () => {
   const raw = [
@@ -66,8 +67,7 @@ test("every row of the catalogue is reached by the path its own template names",
   for (const row of catalogue.rows) {
     const path = fill(row.pathTemplate);
     const explained = explainArtefact(path, catalogue, row.outputRoot);
-    const reached = [explained.catalogueId, ...explained.ambiguousWith.map((a) => a.id)];
-    assert.ok(reached.includes(row.id), `${row.id}: ${path} -> ${explained.catalogueId}`);
+    assert.ok(ids(explained).includes(row.id), `${row.id}: ${path} -> ${ids(explained).join(",")}`);
   }
 });
 
@@ -87,7 +87,7 @@ test("an unambiguous path carries its row's generator, scope and cardinality", (
     assert.equal(explained.generator, generator, path);
     assert.equal(explained.catalogueId, id, path);
     assert.equal(explained.scope, "entity", path);
-    assert.deepEqual(explained.ambiguousWith, [], path);
+    assert.deepEqual(ids(explained), [id], path);
   }
   assert.match(main(`${PKG}/event/StationEventPublisher.java`).driver, /DomainEvent/);
   assert.equal(main(`${PKG}/handler/StationHandler.java`).cardinality, "one");
@@ -115,22 +115,21 @@ test("the domain errors of one package are told apart by their own rows", () => 
     const explained = main(`${PKG}/repository/${stem}.java`);
     assert.equal(explained.catalogueId, id, stem);
     assert.equal(explained.generator, "KernelErrorGenerator", stem);
-    assert.deepEqual(explained.ambiguousWith, [], stem);
+    assert.deepEqual(ids(explained), [id], stem);
   }
   assert.match(main(`${PKG}/repository/StationTenantMismatchException.java`).artefact, /another tenant/);
   assert.equal(main(`${PKG}/repository/StationTenantMismatchException.java`).adr, "ADR-090");
 });
 
 test("a reference-not-found exception is not labelled the 404 not-found exception", () => {
+  // The shapes overlap, so the path cannot say which row wrote it: no single
+  // generator or label is claimed, and both rows are reported, first match first.
   const reference = main(`${PKG}/repository/StationReferenceNotFoundException.java`);
-  assert.equal(reference.catalogueId, "reference-not-found-exception");
-  assert.match(reference.artefact, /422/);
+  assert.deepEqual(ids(reference), ["reference-not-found-exception", "not-found-exception"]);
+  assert.equal(reference.generator, null);
+  assert.equal(reference.catalogueId, null);
   assert.doesNotMatch(reference.artefact, /404/);
-  // The shapes overlap, so the other row is reported rather than dropped.
-  assert.deepEqual(
-    reference.ambiguousWith.map((a) => a.id),
-    ["not-found-exception"],
-  );
+  assert.match(reference.candidates[0].artefact, /422/);
 
   const plain = main(`${PKG}/repository/StationNotFoundException.java`);
   assert.equal(plain.catalogueId, "not-found-exception");
@@ -139,35 +138,30 @@ test("a reference-not-found exception is not labelled the 404 not-found exceptio
 
 test("a spectate stream handler is its own row, ahead of the stream handlers", () => {
   const explained = main(`${PKG}/handler/StationSpectateStreamHandler.java`);
-  assert.equal(explained.catalogueId, "spectate-stream-handler");
-  assert.match(explained.generator ?? "", /^KernelSpectateStreamHandlerGenerator/);
-  assert.match(explained.driver, /realTimeApi/);
-  // Every later stream pattern also fits the name, so those are reported too.
-  assert.deepEqual(
-    explained.ambiguousWith.map((a) => a.id),
-    ["stream-handler", "action-stream-handler", "handler"],
-  );
+  // Every later stream pattern also fits the name, so all are reported.
+  assert.deepEqual(ids(explained), ["spectate-stream-handler", "stream-handler", "action-stream-handler", "handler"]);
+  assert.equal(explained.candidates[0].generator, "KernelSpectateStreamHandlerGenerator");
+  assert.match(explained.candidates[0].condition, /realTimeApi/);
+  assert.equal(explained.generator, null);
 });
 
 test("a stream-handler shape reports every candidate instead of guessing", () => {
   // `StationRefuelStreamHandler` is a per-action handler of Station or the
   // entity-level handler of an entity named StationRefuel; the path cannot say.
   const explained = main(`${PKG}/handler/StationRefuelStreamHandler.java`);
-  assert.equal(explained.catalogueId, "stream-handler");
+  assert.deepEqual(ids(explained), ["stream-handler", "action-stream-handler", "handler"]);
   assert.deepEqual(
-    explained.ambiguousWith.map((a) => a.id),
-    ["action-stream-handler", "handler"],
+    explained.candidates.map((c) => c.generator),
+    ["KernelStreamHandlerGenerator", "KernelActionStreamHandlerGenerator", "KernelHandlerGenerator"],
   );
-  assert.equal(
-    explained.generator,
-    "KernelStreamHandlerGenerator or KernelActionStreamHandlerGenerator or KernelHandlerGenerator",
-  );
-  assert.match(explained.driver, /AMBIGUOUS/);
+  assert.equal(explained.generator, null);
+  assert.equal(explained.scope, "entity");
+  assert.doesNotMatch(JSON.stringify(explained), / or Kernel/);
   assert.match(explained.driver, /action-stream-handler/);
 });
 
 test("a plain handler does not claim candidates whose pattern cannot match it", () => {
-  assert.deepEqual(main(`${PKG}/handler/StationHandler.java`).ambiguousWith, []);
+  assert.deepEqual(ids(main(`${PKG}/handler/StationHandler.java`)), ["handler"]);
 });
 
 test("project-wide artefacts are marked project-wide, with the route policy among them", () => {
@@ -234,6 +228,8 @@ test("an unrecognised path is still reported as pipeline-owned, as a catalogue g
   const explained = main(`${PKG}/mystery/Whatever.java`);
   assert.equal(explained.generator, null);
   assert.equal(explained.catalogueId, null);
+  assert.equal(explained.scope, null);
+  assert.deepEqual(explained.candidates, []);
   assert.match(explained.driver, /pipeline owns it/);
   assert.match(explained.driver, /gap in the catalogue/);
   assert.match(explained.driver, /do not hand-edit/i);

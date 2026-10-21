@@ -219,7 +219,7 @@ function explainArtefactsTool(handle: BuildFamily, catalogue: CatalogueState): R
     definition: {
       name: "build-explain_artefacts",
       description:
-        "List the files Exeris codegen has generated into this project, each with the generator that produced it and when that generator emits — handlers, services, repositories, domain errors, event publishers, graph projections, sagas, Flyway migrations, OpenAPI specs, and the project-wide bootstrap. Ask this BEFORE hand-writing SQL, a DTO or a controller for an Exeris entity: the build usually already emits it. Optional `entity` narrows to one entity's artefacts. Reports what the pipeline actually emitted, read from its own output manifest and explained by the generator catalogue exeris-tooling publishes with its codegen jar. A path whose shape several generators share lists every candidate rather than guessing; a path no catalogue row matches is reported as unrecognised. A project that has not run codegen returns present:false.",
+        "List the files Exeris codegen has generated into this project, each with the generator that produced it and when that generator emits — handlers, services, repositories, domain errors, event publishers, graph projections, sagas, Flyway migrations, OpenAPI specs, and the project-wide bootstrap. Ask this BEFORE hand-writing SQL, a DTO or a controller for an Exeris entity: the build usually already emits it. Optional `entity` narrows to one entity's artefacts. Reports what the pipeline actually emitted, read from its own output manifest and explained by the generator catalogue exeris-tooling publishes with its codegen jar. Each artefact carries `candidates`: every catalogue row that can have written the path, first match first. One candidate means `generator` names it; several mean the path shape is shared and `generator` is null rather than a guess; none means the path is unrecognised. A project that has not run codegen returns present:false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -258,7 +258,7 @@ function explainArtefactsTool(handle: BuildFamily, catalogue: CatalogueState): R
       const selected =
         filter === null
           ? all
-          : all.filter((a) => a.scope === "project" || matchesEntity(a.path, filter));
+          : all.filter((a) => a.scope !== "entity" || matchesEntity(a.path, filter));
 
       const missing = all
         .filter((a) => !existsInProject(project, `${a.root}/${a.path}`))
@@ -274,7 +274,7 @@ function explainArtefactsTool(handle: BuildFamily, catalogue: CatalogueState): R
           ? {}
           : {
               matched: selected.length,
-              note: `Filtered to '${filter}' by filename match, plus every project-wide artefact. A Flyway migration is named after the SQL table, so an entity with an explicit @ExerisDomain(tableName) override can miss this filter — call without 'entity' to see everything.`,
+              note: `Filtered to '${filter}' by filename match, plus every project-wide artefact and every file whose scope is not known. A Flyway migration is named after the SQL table, so an entity with an explicit @ExerisDomain(tableName) override can miss this filter — call without 'entity' to see everything.`,
             }),
         artefacts: selected,
         ...(missing.length === 0
