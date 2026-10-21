@@ -8,7 +8,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BundleState } from "../../data/bundle.js";
 import { registerSdkTools, resolveSdkHandle } from "./index.js";
-import { computeVersionSkew, detectProjectSdkVersion } from "./skew.js";
+import { computeVersionSkew, detectProjectSdkVersion, resolveProjectSdkVersion } from "./skew.js";
 
 const SAMPLE_CATALOG = {
   catalogFormat: 1,
@@ -675,5 +675,200 @@ test("registerSdkTools attaches detected versionSkew across all tools", async ()
     const data = payload(res);
     assert.equal(data.versionSkew?.status, "skew_detected", `skew not reported on ${tool.definition.name}`);
     assert.equal(data.versionSkew?.projectSdkVersion, "0.9.0");
+    assert.equal(data.versionSkew?.source, "dependency");
+  }
+});
+
+// ---- app BOM chain (exeris-initializr projects declare no direct SDK dependency) ----
+
+function appPom(group: string, parentVersion: string, extra = ""): string {
+  return `<project>
+  <parent>
+    <groupId>${group}</groupId>
+    <artifactId>exeris-app-parent</artifactId>
+    <version>${parentVersion}</version>
+    <relativePath/>
+  </parent>
+  <groupId>com.example</groupId>
+  <artifactId>demo</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  ${extra}
+  <dependencies>
+    <dependency><groupId>${group}</groupId><artifactId>exeris-app-starter</artifactId><type>pom</type></dependency>
+  </dependencies>
+</project>`;
+}
+
+/** A fake local Maven repository holding app-parent -> app-bom for one version. */
+function fakeRepo(name: string, group: string, version: string, sdkVersion: string): string {
+  const repo = join(work, name);
+  const dir = (artifact: string): string => join(repo, ...group.split("."), artifact, version);
+  mkdirSync(dir("exeris-app-parent"), { recursive: true });
+  mkdirSync(dir("exeris-app-bom"), { recursive: true });
+  writeFileSync(
+    join(dir("exeris-app-parent"), `exeris-app-parent-${version}.pom`),
+    `<project><parent><groupId>${group}</groupId><artifactId>exeris-app-bom</artifactId><version>${version}</version></parent><artifactId>exeris-app-parent</artifactId></project>`,
+    "utf8",
+  );
+  writeFileSync(
+    join(dir("exeris-app-bom"), `exeris-app-bom-${version}.pom`),
+    `<project><groupId>${group}</groupId><artifactId>exeris-app-bom</artifactId><version>${version}</version>
+  <properties><!-- <exeris.sdk.version>9.9.9</exeris.sdk.version> --><exeris.tooling.version>${version}</exeris.tooling.version><exeris.sdk.version>${sdkVersion}</exeris.sdk.version></properties></project>`,
+    "utf8",
+  );
+  return repo;
+}
+
+function writeProject(name: string, pom: string): string {
+  const projectDir = join(work, name);
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, "pom.xml"), pom, "utf8");
+  return projectDir;
+}
+
+test("app-parent project resolves the SDK version through the app BOM in the local repository", () => {
+  const repo = fakeRepo("repo-0100", "eu.exeris", "0.10.0", "0.12.0");
+  const projectDir = writeProject("proj-initializr", appPom("eu.exeris", "0.10.0"));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "aligned");
+  assert.equal(report.projectSdkVersion, "0.12.0");
+  assert.equal(report.source, "app-bom");
+  assert.equal(report.sourceCoordinate, "eu.exeris:exeris-app-bom:0.10.0");
+  const skewed = computeVersionSkew("0.13.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(skewed.status, "skew_detected");
+  assert.equal(skewed.source, "app-bom");
+});
+
+test("a project-level exeris.sdk.version overrides the inherited one without touching the repository", () => {
+  const projectDir = writeProject(
+    "proj-override",
+    appPom("eu.exeris", "0.10.0", "<properties><exeris.sdk.version>0.11.0</exeris.sdk.version></properties>"),
+  );
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: join(work, "no-such-repo") });
+  assert.equal(report.status, "skew_detected");
+  assert.equal(report.projectSdkVersion, "0.11.0");
+  assert.equal(report.source, "property");
+  assert.equal(report.sourceCoordinate, undefined);
+});
+
+test("app BOM chain missing from the local repository is unknown, with the coordinates and the remedy", () => {
+  const emptyRepo = join(work, "repo-empty");
+  mkdirSync(emptyRepo, { recursive: true });
+  const projectDir = writeProject("proj-missing-chain", appPom("eu.exeris", "0.10.0"));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: emptyRepo });
+  assert.equal(report.status, "unknown");
+  assert.equal(report.projectSdkVersion, undefined);
+  assert.match(report.reason ?? "", /eu\.exeris:exeris-app-parent:0\.10\.0/);
+  assert.match(report.reason ?? "", /mvn/);
+  assert.match(report.reason ?? "", /never downloads/);
+});
+
+test("a parent version that walks out of the local repository is refused, even when a pom waits there", () => {
+  const repo = join(work, "repo-traversal");
+  mkdirSync(repo, { recursive: true });
+  const version = "../../../../escape";
+  // The path the chain would read if the coordinate were trusted, computed the same way.
+  const escaped = join(repo, "eu", "exeris", "exeris-app-parent", version, `exeris-app-parent-${version}.pom`);
+  assert.ok(!escaped.startsWith(repo), "the fixture must point outside the repository");
+  mkdirSync(join(escaped, ".."), { recursive: true });
+  writeFileSync(
+    escaped,
+    `<project><properties><exeris.sdk.version>6.6.6</exeris.sdk.version></properties></project>`,
+    "utf8",
+  );
+  const projectDir = writeProject("proj-traversal", appPom("eu.exeris", version));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "unknown");
+  assert.equal(report.projectSdkVersion, undefined);
+});
+
+test("a symlinked BOM pom pointing outside the local repository is refused", () => {
+  const repo = fakeRepo("repo-symlink", "eu.exeris", "0.10.0", "0.12.0");
+  const bomPom = join(repo, "eu", "exeris", "exeris-app-bom", "0.10.0", "exeris-app-bom-0.10.0.pom");
+  const outsideDir = join(work, "outside-repo");
+  mkdirSync(outsideDir, { recursive: true });
+  const outsidePom = join(outsideDir, "bom.pom");
+  writeFileSync(
+    outsidePom,
+    `<project><properties><exeris.sdk.version>6.6.6</exeris.sdk.version></properties></project>`,
+    "utf8",
+  );
+  rmSync(bomPom);
+  symlinkSync(outsidePom, bomPom);
+  const projectDir = writeProject("proj-symlink-bom", appPom("eu.exeris", "0.10.0"));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "unknown");
+  assert.equal(report.projectSdkVersion, undefined);
+});
+
+test("eu.exeris.tooling groupId (tooling 0.9.0) is supported", () => {
+  const repo = fakeRepo("repo-090", "eu.exeris.tooling", "0.9.0", "0.11.0");
+  const projectDir = writeProject("proj-090", appPom("eu.exeris.tooling", "0.9.0"));
+  const resolution = resolveProjectSdkVersion(projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(resolution.version, "0.11.0");
+  assert.equal(resolution.source, "app-bom");
+  assert.equal(resolution.coordinate, "eu.exeris.tooling:exeris-app-bom:0.9.0");
+});
+
+test("a project importing exeris-app-bom in dependencyManagement resolves through it", () => {
+  const repo = fakeRepo("repo-import", "eu.exeris", "0.10.0", "0.12.0");
+  const projectDir = writeProject(
+    "proj-import",
+    `<project><dependencyManagement><dependencies><dependency>
+      <groupId>eu.exeris</groupId><artifactId>exeris-app-bom</artifactId><version>0.10.0</version>
+      <type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement></project>`,
+  );
+  assert.equal(detectProjectSdkVersion(projectDir, { EXERIS_MAVEN_REPO: repo }), "0.12.0");
+});
+
+test("an unresolvable parent version or BOM property is unknown, never guessed", () => {
+  const repo = fakeRepo("repo-unresolvable", "eu.exeris", "0.10.0", "${some.other}");
+  const projectDir = writeProject("proj-unresolvable", appPom("eu.exeris", "0.10.0"));
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.status, "unknown");
+  assert.match(report.reason ?? "", /cannot resolve/);
+  const unbound = writeProject("proj-unbound-parent", appPom("eu.exeris", "${tooling}"));
+  assert.equal(computeVersionSkew("0.12.0", unbound, { EXERIS_MAVEN_REPO: repo }).status, "unknown");
+});
+
+test("direct dependency keeps reporting source dependency and wins over the BOM chain", () => {
+  const repo = fakeRepo("repo-direct", "eu.exeris", "0.10.0", "0.12.0");
+  const projectDir = writeProject(
+    "proj-direct-wins",
+    appPom(
+      "eu.exeris",
+      "0.10.0",
+      "<dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-sdk-annotations</artifactId><version>0.9.0</version></dependency></dependencies>",
+    ),
+  );
+  const report = computeVersionSkew("0.12.0", projectDir, { EXERIS_MAVEN_REPO: repo });
+  assert.equal(report.projectSdkVersion, "0.9.0");
+  assert.equal(report.source, "dependency");
+});
+
+test("sdk tools surface the app BOM skew and its provenance", async () => {
+  const repo = fakeRepo("repo-tools", "eu.exeris", "0.10.0", "0.11.0");
+  const projectDir = writeProject("proj-tools", appPom("eu.exeris", "0.10.0"));
+  const saved = process.env.EXERIS_MAVEN_REPO;
+  process.env.EXERIS_MAVEN_REPO = repo;
+  try {
+    const projectConfig = {
+      state: "available" as const,
+      source: "cwd" as const,
+      projectRoot: projectDir,
+      pomXml: join(projectDir, "pom.xml"),
+    };
+    const tools = registerSdkTools(createBundle(true), projectConfig, root);
+    for (const tool of tools) {
+      const args = tool.definition.name === "sdk-describe_annotation" ? { annotation: "ExerisDomain" } : {};
+      const data = payload(await tool.handler(args));
+      assert.equal(data.versionSkew?.status, "skew_detected", tool.definition.name);
+      assert.equal(data.versionSkew?.projectSdkVersion, "0.11.0");
+      assert.equal(data.versionSkew?.source, "app-bom");
+      assert.equal(data.versionSkew?.sourceCoordinate, "eu.exeris:exeris-app-bom:0.10.0");
+    }
+  } finally {
+    if (saved === undefined) delete process.env.EXERIS_MAVEN_REPO;
+    else process.env.EXERIS_MAVEN_REPO = saved;
   }
 });
