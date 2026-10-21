@@ -7,12 +7,12 @@
     "url": "https://github.com/exeris-systems/exeris-ai-bridge",
     "source": "github"
   },
-  "version": "0.7.0",
+  "version": "0.8.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@exeris/ai-bridge",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "transport": {
         "type": "stdio"
       },
