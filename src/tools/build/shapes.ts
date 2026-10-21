@@ -11,11 +11,12 @@
 // absent key is normal rather than a defect, so a hand-written mirror would
 // mostly encode guesses about optionality.
 //
-// The right source exists and is coming: `exeris-sdk` 0.12.0 emits
+// The right source for a deeper check is the SDK's own
 // `META-INF/exeris/ast-schema.json` (`AstSchemaProcessor`, `schemaFormat: 1`),
-// which the bundle vendors at 0.7.0. When it lands, validation deepens from
-// envelope to full without the tool surface changing. Until then, claiming to
-// validate the AST would be claiming more than this repo can check.
+// which the bundle vendors from `exeris-sdk-annotations` and
+// `sdk-get_ast_schema` serves. Validating against it would deepen the check
+// from envelope to full without the tool surface changing. Until this module
+// does that, claiming to validate the AST would claim more than it checks.
 //
 // What IS checked is what the bridge itself depends on and what ADR-042 pins.
 
