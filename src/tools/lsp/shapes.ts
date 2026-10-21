@@ -1,11 +1,8 @@
 // Wire shapes for the read-only `exeris/*` LSP slice, mirrored 1:1 from the
 // authoritative records in exeris-platform-lsp
-// (eu.exeris.platform.lsp.ExerisProtocolExtensions, projected by
-// ProtocolProjections). The bridge validates the server's JSON-RPC result
-// against these shapes and re-emits ONLY the contract fields in canonical
-// order, so the agent-facing output is pinned to the documented surface
-// (extra/renamed server fields surface as a clear shape error, not silent
-// drift). Source: exeris-platform `feat/lsp-readonly-slice`.
+// (eu.exeris.platform.lsp.ExerisProtocolExtensions). The bridge validates
+// JSON-RPC results against these shapes and re-emits contract fields in
+// canonical order.
 
 export interface ParamSummary {
   name: string;
@@ -46,11 +43,26 @@ export interface DomainSummary {
   sourcePath: string;
 }
 
+export interface RelationshipDescription {
+  name: string;
+  targetEntity: string;
+  type: string | null;
+}
+
 /** Returned by `exeris/domainDescribe` — full read-only view of one domain. */
 export interface DomainDescription extends DomainSummary {
   fields: FieldDescription[];
   actions: ActionDescription[];
   artefacts: string[];
+  relationships?: RelationshipDescription[] | null;
+  sourceDigest?: string | null;
+}
+
+/** Returned by `exeris/previewMutation` — in-memory mutation diff and SDK outcome. */
+export interface MutationPreview {
+  result: Record<string, unknown>;
+  sourcePath: string | null;
+  diff: string;
 }
 
 /**
@@ -154,17 +166,54 @@ export function parseDomainSummaries(result: unknown): DomainSummary[] {
   return asArray(result, "domains").map((d, i) => parseDomainSummary(d, `domains[${i}]`));
 }
 
+function parseRelationship(value: unknown, path: string): RelationshipDescription {
+  const o = asObject(value, path);
+  return {
+    name: asString(o.name, `${path}.name`),
+    targetEntity: asString(o.targetEntity, `${path}.targetEntity`),
+    type: asNullableString(o.type, `${path}.type`),
+  };
+}
+
 /** Validate an `exeris/domainDescribe` result into a canonical `DomainDescription`. */
 export function parseDomainDescription(result: unknown): DomainDescription {
   const o = asObject(result, "domain");
   const summary = parseDomainSummary(o, "domain");
-  return {
+  const description: DomainDescription = {
     ...summary,
     fields: asArray(o.fields, "domain.fields").map((f, i) => parseField(f, `domain.fields[${i}]`)),
     actions: asArray(o.actions, "domain.actions").map((a, i) => parseAction(a, `domain.actions[${i}]`)),
     artefacts: asArray(o.artefacts, "domain.artefacts").map((a, i) =>
       asString(a, `domain.artefacts[${i}]`),
     ),
+  };
+  if (o.relationships !== undefined) {
+    if (o.relationships === null) {
+      description.relationships = null;
+    } else {
+      description.relationships = asArray(o.relationships, "domain.relationships").map((r, i) =>
+        parseRelationship(r, `domain.relationships[${i}]`),
+      );
+    }
+  }
+  if (o.sourceDigest !== undefined) {
+    description.sourceDigest = asNullableString(o.sourceDigest, "domain.sourceDigest");
+  }
+  return description;
+}
+
+/** Validate an `exeris/previewMutation` result into a canonical `MutationPreview`. */
+export function parseMutationPreview(result: unknown): MutationPreview {
+  const o = asObject(result, "preview");
+  const resObj = asObject(o.result, "preview.result");
+  const outcome = asString(resObj.outcome, "preview.result.outcome");
+  return {
+    result: {
+      ...resObj,
+      outcome,
+    },
+    sourcePath: asNullableString(o.sourcePath, "preview.sourcePath"),
+    diff: asString(o.diff, "preview.diff"),
   };
 }
 

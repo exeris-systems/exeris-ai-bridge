@@ -49,7 +49,8 @@ Tool names are \`family-tool\`:
             contracts, scoping rules, deprecations, AST schema; use \`sdk-describe_annotation\`
             for attribute contracts, \`sdk-get_scoping_rules\` for @Field vs @Validation
             scoping rules, and \`sdk-list_deprecations\` for replacement guidance
-  lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions
+  lsp-*     the \`@ExerisDomain\` source model — domains, fields, relations, actions,
+            and in-memory mutation preview (\`lsp-preview_mutation\`)
   kernel-*  read-only introspection of a RUNNING kernel (providers, bootstrap
             DAG, subsystem detail, resolved JVM ergonomics)
   build-*   what YOUR OWN project's last build emitted — the DomainMetadata AST

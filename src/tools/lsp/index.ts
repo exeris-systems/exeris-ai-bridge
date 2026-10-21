@@ -12,25 +12,19 @@ import {
   parseActionSummaries,
   parseDomainDescription,
   parseDomainSummaries,
+  parseMutationPreview,
 } from "./shapes.js";
 
 // lsp:* — bridges agent queries to a child exeris-platform-lsp process over
 // JSON-RPC (see ../../transport/lsp-client.ts). Exposes @ExerisDomain types,
-// their source-model descriptions, and @Action signatures.
-//
-// Phase 3a (ROADMAP 0.3.0) shipped the transport, discovery, and resilient
-// error model. The companion read-only `exeris/*` slice now exists in
-// exeris-platform-lsp (the three requests below); each result is validated
-// against its wire shape (./shapes.ts) before being returned. A server that
-// predates the slice answers "method not found", which we translate into a
-// clear "update the LSP server" result rather than a crash. The bridge
-// surface — tool names and input schemas — is final and read-only; the
-// write-back method (`exeris/applyMutation`) is deliberately NOT consumed
-// (ADR-025 §"no mutation of kernel state" generalises to no mutation, period).
+// their source-model descriptions, @Action signatures, and in-memory mutation
+// previews. Results are validated against wire shapes (./shapes.ts). The bridge
+// surface is read-only; mutation preview computes diffs in-memory without disk writes.
 
 const METHOD_LIST_DOMAINS = "exeris/domains";
 const METHOD_DESCRIBE_DOMAIN = "exeris/domainDescribe";
 const METHOD_LIST_ACTIONS = "exeris/actions";
+const METHOD_PREVIEW_MUTATION = "exeris/previewMutation";
 
 /**
  * The lsp:* family handle: a client bound to a launch spec, or the structured
@@ -45,7 +39,12 @@ export function registerLspTools(config: BridgeConfig, clientOverride?: LspClien
   // An injected client IS a transport, so it overrides config-time
   // unavailability: the test seam must not depend on the environment.
   const handle = resolveLspFamily(config, clientOverride);
-  return [listDomainsTool(handle), describeDomainTool(handle), listActionsTool(handle)];
+  return [
+    listDomainsTool(handle),
+    describeDomainTool(handle),
+    listActionsTool(handle),
+    previewMutationTool(handle),
+  ];
 }
 
 function resolveLspFamily(config: BridgeConfig, clientOverride?: LspClient): LspFamily {
@@ -76,7 +75,7 @@ function describeDomainTool(handle: LspFamily): RegisteredTool {
     definition: {
       name: "lsp-describe_domain",
       description:
-        "Return the source-model description of an @ExerisDomain type: fields, actions, generated artefacts.",
+        "Return the source-model description of an @ExerisDomain type: fields, actions, relationships, generated artefacts, and the `sourceDigest` that `lsp-preview_mutation` takes as its concurrency token.",
       inputSchema: {
         type: "object",
         properties: {
@@ -105,6 +104,67 @@ function listActionsTool(handle: LspFamily): RegisteredTool {
     handler: guard("lsp", handle, async ({ client }) =>
       callLsp(client, METHOD_LIST_ACTIONS, undefined, parseActionSummaries),
     ),
+  };
+}
+
+function previewMutationTool(handle: LspFamily): RegisteredTool {
+  return {
+    definition: {
+      name: "lsp-preview_mutation",
+      description:
+        "Preview how the SDK's canonical writer would change an @ExerisDomain source file for one mutation, applied in memory. Returns `{ result, sourcePath, diff }`: a unified diff and the SDK outcome in `result.outcome` — SUCCESS, CONFLICT (the source drifted from the baseline; the result carries baseline, current and intended values), VALIDATION_ERROR, or NO_BASELINE. Nothing is written: apply the diff with your own file tools. For a stale-free preview, pass the entity's last-emitted metadata as `baselineJson` and the `sourceDigest` from `lsp-describe_domain` as `concurrencyToken`.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          qualifiedName: {
+            type: "string",
+            description: "Fully-qualified Java class name of the target domain.",
+          },
+          op: {
+            type: "object",
+            description:
+              'One SDK MutationOp, discriminated by `op`: addField, removeField, renameField, changeFieldType, addRelationship, removeRelationship, changeRelationshipCardinality, addAction, removeAction. Every op carries a `path`, e.g. {"op":"renameField","path":"/entities/Order/fields/total","newName":"amount"}.',
+          },
+          baselineJson: {
+            type: "string",
+            description:
+              "The entity's last-emitted `target/classes/exeris-metadata/<entity>.json` (see `build-get_domain_metadata`), as a string. The base of the three-way drift check.",
+          },
+          concurrencyToken: {
+            type: "string",
+            description: "The `sourceDigest` returned by `lsp-describe_domain` for this domain.",
+          },
+        },
+        required: ["qualifiedName", "op"],
+      },
+    },
+    handler: guard("lsp", handle, async ({ client }, args) => {
+      const qualifiedName = args.qualifiedName;
+      if (typeof qualifiedName !== "string" || qualifiedName.trim().length === 0) {
+        return errorResult("Invalid input: 'qualifiedName' must be a non-empty string");
+      }
+      const op = args.op;
+      if (typeof op !== "object" || op === null || Array.isArray(op)) {
+        return errorResult("Invalid input: 'op' must be an object");
+      }
+      const params: Record<string, unknown> = {
+        qualifiedName,
+        op,
+      };
+      if (args.baselineJson !== undefined) {
+        if (typeof args.baselineJson !== "string") {
+          return errorResult("Invalid input: 'baselineJson' must be a string");
+        }
+        params.baselineJson = args.baselineJson;
+      }
+      if (args.concurrencyToken !== undefined) {
+        if (typeof args.concurrencyToken !== "string") {
+          return errorResult("Invalid input: 'concurrencyToken' must be a string");
+        }
+        params.concurrencyToken = args.concurrencyToken;
+      }
+      return callLsp(client, METHOD_PREVIEW_MUTATION, params, parseMutationPreview);
+    }),
   };
 }
 
