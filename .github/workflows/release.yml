@@ -211,7 +211,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm install -g npm@^11.5.1
-          npm publish "out/exeris-ai-bridge-$VERSION.tgz" --access public
+          # The leading ./ makes npm read a file: without it, `out/<name>.tgz` parses
+          # as a GitHub owner/repo shorthand and npm runs git ls-remote against it.
+          npm publish "./out/exeris-ai-bridge-$VERSION.tgz" --access public
 
       # The registry checks server.json against the published package's mcpName,
       # so this runs after npm.
