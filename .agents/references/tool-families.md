@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-10-04
+last-verified: 2026-10-21
 ---
 
 # Reference — the tool families
@@ -20,7 +20,7 @@ ADR-025 disagree, ADR-025 wins and this file is the defect. The registered tools
 | `lsp:*`    | `@ExerisDomain` source model, action signatures, codegen artefacts — read-only | `exeris-platform-lsp` via JSON-RPC |
 | `kernel:*` | Provider registry, bootstrap/subsystem DAG, per-subsystem detail, resolved JVM ergonomics — read-only, one tool per `KernelDiagnostics` method (**cap-blind**; no capability composition) | Running kernel via `KernelDiagnostics` |
 | `sdk:*`    | Annotation catalog, attribute contracts, `@Field`/`@Validation` scoping, deprecations, AST schema, project version skew — read-only, 0.7.0 complete | Released/reference `exeris-sdk` artifacts vendored into the package; scoping rules authored in-repo from `package-info` and ADR-054 |
-| `build:*`  | The **user's own project**: emitted `DomainMetadata`, the codegen output tree with a per-file explanation, L1/L2 ownership, and a decoder for the diagnostics the build printed — read-only, 0.6.0 complete. Reads what the pipeline emitted; never predicts what it would emit | `<projectRoot>/target/classes/exeris-metadata/`, `<projectRoot>/src/main/generated/java/`, and a catalogue that ships in this package |
+| `build:*`  | The **user's own project**: emitted `DomainMetadata`, the codegen output tree with a per-file explanation, L1/L2 ownership, and a decoder for the diagnostics the build printed — read-only, 0.6.0 complete. Reads what the pipeline emitted; never predicts what it would emit | `<projectRoot>/target/classes/exeris-metadata/`, `<projectRoot>/src/{main,test}/generated/java/`; the generator catalogue vendored from `eu.exeris:exeris-codegen-java` (ADR-097); the diagnostic catalogue authored in this repo |
 | `caps:*`   | `cap-manifest.json` + `CompositionStamp` for the user's own project — read-only; reads manifests, never re-resolves the `@Requires`→`@Provides` DAG | `<projectRoot>/src/main/generated/java/cap-manifest.json` |
 | `bridge:*` | The **bridge itself**, not Exeris: resolved persona mode, per-family availability with reason + remedy, child-process state. Read-only, **zero spawns**, frozen at 2 tools | This server's own boot-time state |
 

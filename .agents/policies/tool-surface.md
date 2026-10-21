@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-10-04
+last-verified: 2026-10-21
 ---
 
 # Policy — the MCP tool surface
@@ -50,9 +50,10 @@ it does not know individual tool names.
   discouraged.
 - `kernel:*` is **cap-blind** (ADR-024 2026-06-17 amendment): there is no `kernel-list_capabilities`,
   and any composition surface sources from build-time artefacts under its own family.
-- `build:*` **reads what the pipeline emitted; it never predicts what it would emit.** Only 2 of the
-  13 generators state their gate in `supports()`; the rest decide by a null sentinel inside
-  `generate(...)`, so a prediction here would be a second implementation of eleven internal guards.
+- `build:*` **reads what the pipeline emitted; it never predicts.** Most generators decide inside
+  `generate(...)`, so a prediction would re-implement their guards. Which generator wrote an
+  emitted path comes from the generator catalogue exeris-tooling publishes (ADR-097), matched
+  against manifest paths only; `condition` is never evaluated.
   `build-preview_generation` does not break this: it runs the released generator itself, into a
   directory the bridge owns, and reports what that run emitted (ADR-025 2026-10-04 amendment).
   `caps:*` likewise reads manifests and never re-resolves the `@Requires`→`@Provides` DAG.
