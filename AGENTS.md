@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-10-21
 ---
 
 # exeris-ai-bridge: the MCP server that publishes Exeris surfaces to AI agents
@@ -60,7 +60,8 @@ Conversation with the founder happens in Polish.
 - [`ROADMAP.md`](ROADMAP.md) — milestone scope.
 - [`README.md`](README.md) — architecture diagram and client wiring.
 - The ecosystem ADR registry is `adr-index.md` in `exeris-systems/exeris-docs`; this repository
-  holds ADR-025 and a link stub for ADR-033.
+  holds ADR-025 and link stubs for the cross-repo decisions it consumes: ADR-033, ADR-078, ADR-086,
+  ADR-091, ADR-095 and ADR-097 (`docs/adr/*.link.md`).
 
 ## `.agents/` — the canonical agent material
 

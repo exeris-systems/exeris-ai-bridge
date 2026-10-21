@@ -18,6 +18,10 @@ import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.j
 //   --strict   fail hard if no repository or SDK jars are found, or the docs
 //              registry snapshot cannot be built (required in prepack)
 //
+// The generator catalogue (data/generator-catalogue.json) is read from the
+// eu.exeris:exeris-codegen-java jar at EXERIS_TOOLING_VERSION and accepted by the
+// catalogueFormat it declares; a format this build does not read fails the run.
+//
 // The docs registry snapshot (data/docs/, ADR-025 2026-09-30 amendment) is read
 // from GitHub — each repository's default branch at one recorded commit — or,
 // when EXERIS_DOCS_SNAPSHOT_SOURCE names a directory laid out as <repo>/<path>,
@@ -38,6 +42,7 @@ async function emit(strict = false) {
   mkdirSync(DATA_DIR, { recursive: true });
 
   const explicitVersion = process.env.EXERIS_SDK_VERSION?.trim();
+  const toolingVersion = process.env.EXERIS_TOOLING_VERSION?.trim();
   const repo = resolveMavenRepo({
     explicitVersion,
     checkArtifacts: ["exeris-sdk-annotations", "exeris-sdk-source-model"],
@@ -49,6 +54,7 @@ async function emit(strict = false) {
     sources = collectSources({
       repo,
       explicitVersion,
+      toolingVersion,
       strict,
       failFn: (msg) => fail(msg),
     });

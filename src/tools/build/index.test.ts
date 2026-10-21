@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import type { BridgeConfig } from "../../config/env.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { BundleState } from "../../data/bundle.js";
+import { writeCatalogueBundle } from "../../data/__tests__/generator-catalogue-fixture.js";
 import { registerBuildTools } from "./index.js";
 
 const METADATA_REL = "target/classes/exeris-metadata";
@@ -53,8 +55,16 @@ function configFor(root: string | null): BridgeConfig {
   };
 }
 
+/** The vendored catalogue, as the bundle would carry it, in a scratch directory. */
+function catalogueBundle(): { bundle: BundleState; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "exeris-build-bundle-"));
+  roots.push(dir);
+  return { bundle: writeCatalogueBundle(dir), dir };
+}
+
 function toolsFor(root: string | null) {
-  return new Map(registerBuildTools(configFor(root)).map((t) => [t.definition.name, t]));
+  const { bundle, dir } = catalogueBundle();
+  return new Map(registerBuildTools(configFor(root), bundle, dir).map((t) => [t.definition.name, t]));
 }
 
 function text(res: CallToolResult): string {
@@ -229,7 +239,7 @@ const L1_FILES = [
   `${PKG}/service/StationService.java`,
   `${PKG}/repository/StationRepository.java`,
   `${PKG}/repository/StationNotFoundException.java`,
-  "db/migration/V3__create_stations.sql",
+  "db/migration/V2123456__create_stations.sql",
   "openapi/station-api.yaml",
   `${PKG}/handler/DepotHandler.java`,
   "com/example/Application.java",
@@ -269,8 +279,46 @@ test("build-explain_artefacts explains every emitted path", async () => {
   const byPath = new Map<string, Explained>(
     (payload.artefacts as Explained[]).map((a) => [a.path, a]),
   );
-  assert.equal(byPath.get("db/migration/V3__create_stations.sql")?.generator, "KernelFlywayGenerator");
+  assert.equal(byPath.get("db/migration/V2123456__create_stations.sql")?.generator, "KernelFlywayGenerator");
   assert.equal(byPath.get("com/example/Application.java")?.scope, "project");
+  assert.deepEqual(payload.catalogue, {
+    state: "available",
+    catalogueFormat: 1,
+    sourceArtifact: "eu.exeris:exeris-codegen-java:0.10.0",
+  });
+  assert.equal(byPath.get("openapi/station-api.yaml")?.generator, "KernelOpenApiGenerator");
+});
+
+// A bridge with no usable catalogue still tells the agent the files are the
+// pipeline's; what it cannot do is name the generator, and it says why.
+test("without a catalogue the paths are listed, unexplained, with the reason", async () => {
+  const absent: BundleState = { state: "unavailable", reason: "no bundle (test)", remedy: "pack it (test)" };
+  const tools = new Map(registerBuildTools(configFor(generatedProject()), absent).map((t) => [t.definition.name, t]));
+  const res = await tools.get("build-explain_artefacts")!.handler({});
+  assert.ok(!res.isError, text(res));
+  const payload = JSON.parse(text(res));
+  assert.deepEqual(payload.catalogue, { state: "unavailable", reason: "no bundle (test)", remedy: "pack it (test)" });
+  assert.equal(payload.total, L1_FILES.length);
+  for (const a of payload.artefacts) {
+    assert.equal(a.generator, null);
+    assert.match(a.driver, /do not hand-edit/);
+  }
+});
+
+test("a catalogue of an unknown format is refused at load, not half-read", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "exeris-build-bundle-"));
+  roots.push(dir);
+  const future = JSON.stringify({ catalogueFormat: 2, rows: [] });
+  const tools = new Map(
+    registerBuildTools(configFor(generatedProject()), writeCatalogueBundle(dir, future), dir).map((t) => [
+      t.definition.name,
+      t,
+    ]),
+  );
+  const payload = JSON.parse(text(await tools.get("build-explain_artefacts")!.handler({})));
+  assert.equal(payload.catalogue.state, "unavailable");
+  assert.match(payload.catalogue.reason, /catalogueFormat 2/);
+  assert.equal(payload.artefacts[0].generator, null);
 });
 
 // The tool exists because a generated CREATE TABLE was not discoverable from
@@ -283,7 +331,7 @@ test("the migration for an entity is findable by the entity name", async () => {
   const payload = JSON.parse(text(res));
 
   const paths = payload.artefacts.map((a: { path: string }) => a.path);
-  assert.ok(paths.includes("db/migration/V3__create_stations.sql"));
+  assert.ok(paths.includes("db/migration/V2123456__create_stations.sql"));
   assert.ok(!paths.includes(`${PKG}/handler/DepotHandler.java`));
   assert.equal(payload.filter, "Station");
   assert.equal(payload.total, L1_FILES.length);
@@ -305,7 +353,7 @@ test("the generated-test root is reported alongside the main one", async () => {
   const payload = JSON.parse(text(res));
   assert.equal(payload.roots.length, 2);
   const test = payload.artefacts.find((a: { root: string }) => a.root === "src/test/generated/java");
-  assert.equal(test.artefact, "Generated test");
+  assert.equal(test.generator, "KernelHandlerTestGenerator");
 });
 
 test("a manifest path that is gone from disk is reported rather than implied", async () => {
@@ -528,4 +576,18 @@ test("build-explain_diagnostic is dark with the rest of its family", async () =>
   const res = await toolsFor(null).get("build-explain_diagnostic")!.handler({ text: "[Exeris] anything" });
   assert.equal(res.isError, true);
   assert.equal(JSON.parse(text(res)).family, "build");
+});
+
+// A file the catalogue cannot place has no scope, and a filter that dropped it
+// would hide a pipeline-owned file from the agent that asked to narrow.
+test("the entity filter keeps files whose scope is unknown", async () => {
+  const root = generatedProject([...L1_FILES, `${PKG}/mystery/Whatever.java`]);
+  const res = await toolsFor(root).get("build-explain_artefacts")!.handler({ entity: "Station" });
+  const payload = JSON.parse(text(res));
+  const paths = payload.artefacts.map((a: { path: string }) => a.path);
+  assert.ok(paths.includes(`${PKG}/mystery/Whatever.java`));
+  assert.ok(!paths.includes(`${PKG}/handler/DepotHandler.java`));
+  const unknown = payload.artefacts.find((a: { path: string }) => a.path.endsWith("Whatever.java"));
+  assert.equal(unknown.scope, null);
+  assert.deepEqual(unknown.candidates, []);
 });

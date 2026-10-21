@@ -206,20 +206,128 @@ test("collectSources returns empty array in non-strict mode when jars are missin
   assert.ok(warnings.length > 0);
 });
 
-test("collectSources extracts entries when jars are found", () => {
+const CATALOGUE_TEXT = JSON.stringify({ catalogueFormat: 1, rows: [fixtureRow()], retired: [] });
+
+function fixtureRow() {
+  return {
+    id: "service",
+    generator: "KernelServiceGenerator",
+    artefact: "The domain service.",
+    outputRoot: "main",
+    pathPattern: "^(?:[^/]+/)*service/[^/]+Service\\.java$",
+    pathTemplate: "{base}/service/{E}Service.java",
+    scope: "entity",
+    cardinality: "one",
+    condition: "every entity",
+    ambiguousWith: [],
+    adr: null,
+    since: "0.10.0",
+  };
+}
+
+function extractWith(catalogue: string) {
+  return (_jar: string, entry: string) =>
+    Buffer.from(entry.endsWith("generator-catalogue.json") ? catalogue : `extracted ${entry}`);
+}
+
+function repoWithAllJars(): string {
   const repo = join(tempDir, "valid-repo");
   createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
   createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  return repo;
+}
 
+test("collectSources extracts entries when jars are found", () => {
   const entries = collectSources({
-    repo,
+    repo: repoWithAllJars(),
     strict: true,
-    extractFn: (_jar, entry) => Buffer.from(`extracted ${entry}`),
+    extractFn: extractWith(CATALOGUE_TEXT),
   });
 
-  assert.equal(entries.length, 2);
+  assert.equal(entries.length, 3);
   assert.equal(entries[0].id, "annotation-catalog");
   assert.equal(entries[0].sourceArtifact, "eu.exeris:exeris-sdk-annotations:0.12.0");
   assert.equal(entries[1].id, "ast-schema");
   assert.equal(entries[1].sourceArtifact, "eu.exeris:exeris-sdk-source-model:0.12.0");
+  assert.equal(entries[2].id, "generator-catalogue");
+  assert.equal(entries[2].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
+  assert.equal(entries[2].bytes.toString("utf8"), CATALOGUE_TEXT);
+});
+
+test("the tooling version is pinned separately from the SDK version", () => {
+  const repo = repoWithAllJars();
+  createFakeArtifact(repo, "exeris-codegen-java", "0.11.0");
+  const entries = collectSources({
+    repo,
+    explicitVersion: "0.12.0",
+    toolingVersion: "0.10.0",
+    strict: true,
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  assert.equal(entries[2].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
+});
+
+test("collectSources refuses a generator catalogue of a format it does not read", () => {
+  assert.throws(
+    () =>
+      collectSources({
+        repo: repoWithAllJars(),
+        strict: true,
+        extractFn: extractWith(JSON.stringify({ catalogueFormat: 2, rows: [] })),
+      }),
+    /catalogueFormat 2/,
+  );
+});
+
+test("collectSources fails in strict mode when the codegen jar is missing", () => {
+  const repo = join(tempDir, "sdk-only-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  assert.throws(
+    () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
+    /exeris-codegen-java jar.*EXERIS_TOOLING_VERSION/,
+  );
+});
+
+test("collectSources keeps the SDK entries in non-strict mode when the codegen jar is missing", () => {
+  const repo = join(tempDir, "sdk-only-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  const warnings: string[] = [];
+  const entries = collectSources({
+    repo,
+    strict: false,
+    warnFn: (m) => warnings.push(m),
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema"]);
+  assert.ok(warnings.some((w) => /exeris-codegen-java/.test(w)));
+});
+
+test("collectSources keeps the generator catalogue when the SDK jars are missing", () => {
+  const repo = join(tempDir, "tooling-only-repo");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  const warnings: string[] = [];
+  const entries = collectSources({
+    repo,
+    strict: false,
+    warnFn: (m) => warnings.push(m),
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  assert.deepEqual(entries.map((e) => e.id), ["generator-catalogue"]);
+  assert.ok(warnings.some((w) => /SDK jars not found/.test(w)));
+});
+
+test("collectSources refuses a generator catalogue with a pattern outside the portable subset", () => {
+  const row = { ...fixtureRow(), pathPattern: "^(?:[^/]+/)*service/\\w+Service\\.java$" };
+  assert.throws(
+    () =>
+      collectSources({
+        repo: repoWithAllJars(),
+        strict: true,
+        extractFn: extractWith(JSON.stringify({ catalogueFormat: 1, rows: [row], retired: [] })),
+      }),
+    /portable subset/,
+  );
 });

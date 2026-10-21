@@ -210,6 +210,11 @@ function assertZeroCheckout(project, home) {
     "the installed package is missing data/manifest.json — prepack did not run, or `files` dropped data/",
   );
   assert.equal(
+    existsSync(join(project, "node_modules", "@exeris", "ai-bridge", "data", "generator-catalogue.json")),
+    true,
+    "the installed package is missing the generator catalogue — prepack did not vendor it from exeris-codegen-java",
+  );
+  assert.equal(
     existsSync(join(project, "node_modules", "@exeris", "ai-bridge", "data", "docs", "manifest.json")),
     true,
     "the installed package is missing the docs registry snapshot — prepack did not build it, or `files` dropped it",
@@ -250,7 +255,7 @@ function assertBootsDark({
   // The bundle ships inside the tarball, so unlike every other surface it is
   // live on a bare machine, carrying reference data entries for the P2 families.
   assert.equal(version.bundle.state, "available", "the bundled reference data did not survive packaging");
-  assert.equal(version.bundle.entryCount, 2);
+  assert.equal(version.bundle.entryCount, 3); // annotation catalog, AST schema, generator catalogue
   assert.equal(version.bundle.bridgeVersion, PKG.version);
 
   assert.equal(health.mode, "app");

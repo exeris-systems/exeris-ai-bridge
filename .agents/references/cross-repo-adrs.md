@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-09-29
+last-verified: 2026-10-21
 ---
 
 # Reference — when to consult the cross-repo ADRs
@@ -29,5 +29,12 @@ ADR text is the authority.
   Amendments to it are treated like amendments to a constitution.
 - **ADR-033** — every change to the kernel adapter or `kernel:*` handlers; its consumer-side
   obligations are in `docs/adr/ADR-033.link.md`.
+- **ADR-095** (stable diagnostic identifiers, `exeris-tooling`) — every change to
+  `build-explain_diagnostic` or its catalogue; its consumer-side obligation is in
+  `docs/adr/ADR-095.link.md`.
+- **ADR-097** (generator catalogue and launchable generator, `exeris-tooling`) — every change to
+  `build-explain_artefacts`, to the vendored generator catalogue (`scripts/vendor-reference-data.mjs`,
+  `src/data/generator-catalogue.ts`) or to `build-preview_generation`'s launch of the generator; its
+  consumer-side obligations are in `docs/adr/ADR-097.link.md`.
 
 An ADR number is reserved in `adr-index.md` before its content is written.
