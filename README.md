@@ -17,13 +17,13 @@ See [`docs/adr/ADR-025-ai-agent-bridge.md`](docs/adr/ADR-025-ai-agent-bridge.md)
 
 ## Status
 
-**0.7.0 — the authoring contract: SDK annotations, AST schema, deprecation tracking, and project version skew.** ADR-025 ACCEPTED (2026-05-15), five amendments since. All seven tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (3 tools, bound to the read-only `exeris/*` slice in `exeris-platform-lsp`), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `build:*` (5 tools, reading the `DomainMetadata` the developer's own build emitted, the codegen output tree beside it, and the diagnostics the build printed), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the same project), `sdk:*` (5 tools, reading the bundled reference annotation catalog, deprecations, scoping rules, AST schema, and project version skew), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
+**0.8.0 — mutation preview (canonical edits, still zero writes), associations and a concurrency token in domain descriptions, diagnostics resolved by `EXT-` identifier, artefacts explained from the generator's own catalogue, and SDK skew through the application BOM.** ADR-025 ACCEPTED (2026-05-15), ten amendments since. All seven tool families are implemented and verified end-to-end: `docs:*` (9 tools, filesystem-bound against `exeris-docs`), `lsp:*` (4 tools, bound to the `exeris/*` slice in `exeris-platform-lsp` — read-only, including `lsp-preview_mutation`, which returns the canonical diff and never writes), `kernel:*` (4 tools, one per `KernelDiagnostics` SPI method, over NDJSON — read-only and cap-blind by construction, so no `kernel-list_capabilities`), `build:*` (5 tools, reading the `DomainMetadata` the developer's own build emitted, the codegen output tree beside it, and the diagnostics the build printed, looked up by their `EXT-` identifier), `caps:*` (2 tools, reading the build-time `cap-manifest.json` of the same project), `sdk:*` (5 tools, reading the bundled reference annotation catalog, deprecations, scoping rules, AST schema, and project version skew, including for projects whose SDK version arrives through the application BOM), and `bridge:*` (2 tools, the server's own diagnostic surface). Both child families keep an opt-in live integration test (`EXERIS_LSP_IT=1`, `EXERIS_KERNEL_IT=1`).
 
-What 0.6.0 adds is the P2 half of the surface, and one discipline runs through all of it: **the bridge reads what the pipeline recorded, and does not recompute it.** `caps:*` reads the emitted `cap-manifest.json` rather than re-resolving the `@Requires`→`@Provides` DAG. `build-get_domain_metadata` validates the envelope and passes the AST through verbatim rather than re-declaring 40+ record components in TypeScript. `build-explain_artefacts` reads the codegen output manifest rather than predicting emission — only 2 of the 13 generators state their condition where a mirror could read it, and the other eleven decide by a null sentinel inside `generate(...)`. Each of those would have been a second implementation of a contract another repo owns, wrong the first time it moved. The one place with no recorded answer to read is `build-explain_diagnostic`, because the build emits no diagnostic codes — so it matches on message text, anchors on the SDK's own public vocabulary rather than on prose, keeps a table of real upstream messages that fails the build when an anchor stops finding its own message, and reports a miss as a gap in its catalogue rather than as a verdict on the diagnostic. In `sdk:*`, the scoping rules (`sdk-get_scoping_rules`) are the exception: authored locally from `package-info` and ADR-054 rather than emitted by an upstream artifact, they can lag the SDK, and version-skew detection currently covers only Maven `pom.xml` descriptors.
+What 0.6.0 added is the P2 half of the surface, and one discipline runs through all of it: **the bridge reads what the pipeline recorded, and does not recompute it.** `caps:*` reads the emitted `cap-manifest.json` rather than re-resolving the `@Requires`→`@Provides` DAG. `build-get_domain_metadata` validates the envelope and passes the AST through verbatim rather than re-declaring 40+ record components in TypeScript. `build-explain_artefacts` reads the codegen output manifest rather than predicting emission, and explains each path from the generator catalogue `exeris-tooling` publishes (ADR-097) and the bridge vendors, rather than from a table of its own; most generators decide what to emit inside `generate(...)`, where no mirror could read the condition. Each of those would have been a second implementation of a contract another repo owns, wrong the first time it moved. `build-explain_diagnostic` keys on the stable `EXT-<AREA>-<NNNN>` identifier `exeris-tooling` prints on every diagnostic (ADR-095), with one entry for each of the 54 identifiers of tooling 0.10.0 and two it retired; an identifier the catalogue does not know is reported in `unrecognisedIds` with a pointer to upstream's table, and text anchors remain only for output from tooling before 0.9.0. In `sdk:*`, the scoping rules (`sdk-get_scoping_rules`) are the exception: authored locally from `package-info` and ADR-054 rather than emitted by an upstream artifact, they can lag the SDK, and version-skew detection reads the project's Maven `pom.xml`: a direct SDK dependency, an `exeris.sdk.version` property, or the `exeris-app-parent` → `exeris-app-bom` chain read from the local Maven repository (offline; a chain not yet in `~/.m2` reports `unknown` with the coordinate to fetch).
 
 What 0.5.0 added is not tools but the ability to run without the ecosystem: `loadConfig()` never throws, a dependency that does not resolve takes its own family dark with a `reason` and a `remedy`, `tools/list` stays invariant so the 1.0 freeze remains implementable, each child is resolved through a launch ladder (`EXERIS_*_COMMAND` → `EXERIS_*_JAR` → local Maven repository → source tree) whose rung order follows the persona, and a read-only reference corpus ships inside the package. A CI job (`scripts/p2-smoke.mjs`) packs the tarball, installs it into a scratch directory holding only an application project, and speaks MCP to it with an empty `HOME` and no `EXERIS_*` set — the P2 claim is tested, not asserted.
 
-Two upstream dependencies remain open and are documented rather than papered over: `exeris-platform-lsp` publishes no runnable jar, so `lsp:*` has no local-repository rung and stays contributor-only; and the published `exeris-kernel-diagnostics-cli:0.11.0` jar does not boot — **fixed upstream on the 0.12 development line, so the remedy arrives with kernel 0.12.0 rather than with a change here** (see the note under [Wiring into an agent](#wiring-into-an-agent)). `sdk:*` (0.7.0) is implemented against reference data from the `exeris-sdk` 0.12.0-SNAPSHOT development line. MCP resources + prompts are at 0.9.0. **0.7.0 is not published to npm.** Publication waits on kernel 0.12.0, sdk 0.12.0 and tooling 0.9.0 reaching Maven Central. What makes that gate matter: until they do, every `eu.exeris:*` artifact the launch ladder resolves lives in GitHub Packages, which needs a `PACKAGES_READ_TOKEN` — so a first npm release would reach exactly the P2 developers who cannot resolve what it points at.
+One upstream dependency remains open and is documented rather than papered over: `exeris-platform-lsp` publishes no runnable jar, so `lsp:*` has no local-repository rung and stays contributor-only. The `kernel:*` child launches from `exeris-kernel-diagnostics-cli:0.12.0` on Maven Central (see the note under [Wiring into an agent](#wiring-into-an-agent)). MCP resources + prompts are at 0.9.0. **0.8.0 is the first release published to npm**, after kernel 0.12.0, `exeris-sdk` 0.12.0 and `exeris-tooling` 0.9.0 reached Maven Central: every `eu.exeris:*` artifact the launch ladder resolves is on Central, so an application developer needs no GitHub Packages token. The bridge targets `exeris-tooling` 0.10.0 (the generator catalogue and the `EXT-` registry).
 
 Full milestone breakdown: [`ROADMAP.md`](ROADMAP.md) — from 0.1.0 (scaffold) through 1.0.0 GA (stable MCP tool surface).
 
@@ -86,7 +86,7 @@ install run on the same npm that manages the project.
 
 ## Installing
 
-The package is not on npm yet: publication waits until the `eu.exeris` artifacts it resolves are on Maven Central (see [Releasing](#releasing)). Once it is:
+Install from npm (the `eu.exeris` artifacts the package resolves are on Maven Central):
 
 - **Claude Code** — run this inside your project, so the server starts there and finds your `pom.xml`:
 
@@ -97,7 +97,7 @@ The package is not on npm yet: publication waits until the `eu.exeris` artifacts
 - **Claude Desktop** — install `exeris-ai-bridge-<version>.mcpb` from the [GitHub Release](https://github.com/exeris-systems/exeris-ai-bridge/releases). Desktop does not start the server inside a project, so set **Project root** in the extension's settings to use `build-*` and `caps-*`.
 - **Any other MCP client** — the command is `npx -y @exeris/ai-bridge` over stdio. The server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.exeris-systems/ai-bridge`.
 
-Nothing else is needed: the ADR registry snapshot and the SDK reference data ship inside the package. Until then, run it from a clone as below.
+Nothing else is needed: the ADR registry snapshot, the SDK reference data and the generator catalogue ship inside the package. To run from a clone instead, see below.
 
 ## Wiring into an agent
 
@@ -131,7 +131,7 @@ A contributor working on the ecosystem itself chooses contributor mode explicitl
 }
 ```
 
-**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 25 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
+**Every one of these variables is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 31 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=…`) goes to stderr, which MCP clients surface in their logs.
 
 **Tool names use `family-tool`, not `family:tool`.** The families are still namespaced — `docs:*`, `lsp:*`, `kernel:*`, `bridge:*` name the *family* throughout this repo and in ADR-025 — but the name that goes on the wire separates the two halves with a hyphen, because MCP clients do not reliably resolve a `:` in a tool name. Nothing else about the surface changed: the prefix still identifies the family, and `bridge-health` still reports per-family state under its family key.
 
@@ -164,7 +164,7 @@ Rung 3 finds the local repository at `EXERIS_MAVEN_REPO`, then `<localRepository
 
 `EXERIS_KERNEL_COMMAND` (optional) is how the `kernel:*` family launches its `exeris-kernel-diagnostics-cli` child — a whitespace-separated command + args (no shell quoting; exec'd directly), spawned lazily on the first `kernel:*` call and cached. It defaults to `mvn -q -f <ecosystemRoot>/exeris-kernel/exeris-kernel-diagnostics-cli/pom.xml exec:java -Dexec.mainClass=eu.exeris.kernel.diagnostics.cli.DiagnosticsCli` (`-q` keeps Maven's logging off the NDJSON stdout; the CLI logs to stderr, which is inherited into the bridge's logs). The CLI boots the kernel in **read-only inspect mode** and speaks newline-delimited JSON; the bridge correlates responses FIFO and validates each snapshot against its `KernelDiagnostics` wire shape. A pre-built shaded jar is the faster override, and **from kernel 0.11.0 it needs no special flags**: `EXERIS_KERNEL_COMMAND="java -jar /abs/…/exeris-kernel-diagnostics-cli-<ver>.jar"`. The kernel went preview-clean at 0.11.0 (ADR-066: "the DISTRIBUTED artifact is preview-clean" — preview is now bound to test-compile and surefire only), and the published jars put the boundary exactly there: `0.10.2` has 12 preview-stamped classes out of 799, `0.11.0` has 0 out of 897. On an **older** jar you need `java --enable-preview -jar …` and the JDK it was built on; the JVM says so itself (`UnsupportedClassVersionError: Preview features are not enabled … Try running with '--enable-preview'`) and the bridge passes that message through. The same jar is published, so the path may equally be a local Maven repo coordinate — which is what the ladder's `m2` rung resolves for you.
 
-> **Known upstream issue — fixed upstream, not yet released (verified 2026-08-27).** The published `exeris-kernel-diagnostics-cli:0.11.0` shaded jar boots the kernel and then fails in `CommunityJsonMappers` with `NoClassDefFoundError: com/fasterxml/jackson/annotation/JsonSerializeAs`. The CLI declared its own Jackson 2 protocol codec while the kernel it boots uses Jackson 3 (`tools.jackson`), and the two are not independent: they **share** the `com.fasterxml.jackson.core:jackson-annotations` artifact, of which Maven resolves exactly one version. The CLI's direct Jackson 2 dependency sat a level nearer than the kernel's transitive Jackson 3, so nearest-wins pinned annotations to 2.18.7 — below the 2.21 that `jackson-databind` 3.x needs. Unrelated to preview: identical with and without the flag. **Fixed upstream on the 0.12 development line** (the CLI drops its own Jackson and uses the BOM-managed one), so the remedy ships with kernel 0.12.0; nothing changes in this repo. Until that release, the `m2` rung resolves a launch that fails on first call, and `EXERIS_KERNEL_COMMAND` pointed at a source-tree build is the way round it. If the CLI is missing or fails to boot, `kernel:*` calls return a structured "set EXERIS_KERNEL_COMMAND / start the CLI" result rather than crashing.
+> The diagnostics CLI boots the kernel in **read-only inspect mode** and speaks NDJSON over stdio; responses correlate FIFO and validate against the `KernelDiagnostics` wire shapes. In zero-checkout mode it launches as the shaded jar `eu.exeris:exeris-kernel-diagnostics-cli:0.12.0` through the ladder's `m2` rung as plain `java -jar` — the published jar is preview-clean, so no `--enable-preview` — or through an explicit `EXERIS_KERNEL_COMMAND`. If the CLI is not found or fails to start, `kernel:*` calls return a structured `family_unavailable` result rather than crashing.
 
 ### Bundled reference data
 
@@ -174,10 +174,10 @@ The published package carries a small read-only corpus so an application develop
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.7.0", "entryCount": 2, "sourceArtifacts": ["eu.exeris:exeris-sdk:0.12.0-SNAPSHOT", "eu.exeris:exeris-sdk:0.12.0-SNAPSHOT"] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 3, "sourceArtifacts": ["eu.exeris:exeris-sdk-annotations:0.12.0", "eu.exeris:exeris-sdk-source-model:0.12.0", "eu.exeris:exeris-codegen-java:0.10.0"] }
 ```
 
-At 0.7.0 the bundle ships with the **annotation catalog and AST schema** (generated at prepack time from SDK reference data). Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
+At 0.8.0 the bundle ships with the **annotation catalog and AST schema** (from the released `exeris-sdk` jars) and the **generator catalogue** (from the released `exeris-codegen-java` jar), all generated at prepack time. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
 
 For other MCP-aware clients, point at the same `node dist/server.js` invocation over stdio.
 
@@ -202,7 +202,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 25 tool definitions (9 `docs:*`, 3 `lsp:*`, 4 `kernel:*`, 5 `build:*`, 2 `caps:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 31 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 5 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repo layout
 
@@ -225,9 +225,12 @@ src/
       index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
                              HLA, whitepaper, search, per-repo docs surface)
       adr-index.ts           parser for exeris-docs/adr-index.md
-    lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions — LSP proxy
-                             (Phase 3b: bound to the exeris/* slice, shape-validated)
-    lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription / ActionSummary)
+    lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions,
+                             lsp-preview_mutation — LSP proxy (bound to the exeris/* slice,
+                             shape-validated; preview_mutation calls exeris/previewMutation and
+                             never writes)
+    lsp/shapes.ts            exeris/* wire shapes + validators (DomainSummary / DomainDescription
+                             with relationships[] and sourceDigest / ActionSummary / MutationPreview)
     kernel/index.ts          kernel-list_providers, kernel-get_bootstrap_dag, kernel-describe_subsystem,
                              kernel-get_jvm_ergonomics — KernelDiagnostics proxy over NDJSON, one tool
                              per SPI method (cap-blind — no list_capabilities)
@@ -241,17 +244,28 @@ src/
     build/shapes.ts          envelope validation (schemaVersion + ADR-042 sourceDigest) and the
                              filename-prefix decoding; the AST body passes through verbatim
     build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
-                             what drove it); reads what was emitted, never predicts it
-    build/diagnostics.ts     catalogue of the build's own diagnostics, matched on message text
-                             because the build emits no codes; a miss is a catalogue gap
+                             what drove it, candidates[] when a path is ambiguous), from the
+                             vendored generator catalogue; reads what was emitted, never predicts it
+    build/diagnostics.ts     catalogue of the build's own diagnostics, keyed on the ADR-095
+                             EXT-<AREA>-<NNNN> identifier (text anchors only for output from
+                             tooling before 0.9.0); an unknown identifier is reported, not guessed
     caps/index.ts            caps-list_capabilities, caps-describe_composition — reads the
                              build-time cap-manifest.json of the user's own project; never
                              re-resolves the @Requires→@Provides DAG
     caps/shapes.ts           cap-manifest wire shapes + validators (CapManifest/Stamp/Module)
+    sdk/index.ts             sdk-list_annotations, sdk-describe_annotation, sdk-get_scoping_rules,
+                             sdk-list_deprecations, sdk-get_ast_schema — the bundled annotation
+                             catalog, AST schema, deprecations and authored scoping rules
+    sdk/shapes.ts            annotation catalog and AST schema wire shapes and parsers
+    sdk/rules.ts             the authored scoping rules (@Field vs @Validation, …)
+    sdk/skew.ts              project SDK version and skew from pom.xml — a direct dependency, an
+                             exeris.sdk.version property, or the app BOM chain in the local ~/.m2
     bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
                              surface (never gated, never spawns)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,
                              per-entry SHA-256 verification, sandboxed to data/
+  data/generator-catalogue.ts  loader and matcher for the vendored exeris-tooling generator
+                             catalogue (ADR-097); never throws, reports why it is absent
 scripts/
   vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
   p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
@@ -265,7 +279,7 @@ docs/
 
 ## Releasing
 
-A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs the repository variable `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the reference data is vendored from — and, until that release is on Maven Central, the secret `PACKAGES_READ_TOKEN` to fetch it from GitHub Packages.
+A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java` (`0.10.0`). Both jars are fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only when set, for a release not yet on Central. The `publish` job additionally needs `RELEASE_PUBLISH`, below.
 
 The `publish` job runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, and only through the `release` environment. It publishes to npm with provenance, then to the MCP Registry, then creates the GitHub Release with the tarball, the bundle and the checksums. Before turning it on:
 
