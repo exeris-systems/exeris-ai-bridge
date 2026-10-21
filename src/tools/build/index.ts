@@ -2,6 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BridgeConfig, ProjectConfig, Unavailable } from "../../config/env.js";
+import { loadBundle, type BundleState } from "../../data/bundle.js";
+import { loadGeneratorCatalogue, type CatalogueState } from "../../data/generator-catalogue.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RegisteredTool } from "../types.js";
@@ -47,7 +49,18 @@ const KINDS: readonly MetadataKind[] = ["domain", "enum", "capability", "view"];
 
 type BuildFamily = { readonly state: "available"; readonly project: ProjectConfig } | Unavailable;
 
-export function registerBuildTools(config: BridgeConfig): RegisteredTool[] {
+/**
+ * `bundle` and `rootOverride` are injectable for tests; production reads the
+ * bundle shipped in the package. The generator catalogue is loaded once, here,
+ * so a catalogue the bridge cannot use is a state every call reports rather
+ * than a failure each call rediscovers.
+ */
+export function registerBuildTools(
+  config: BridgeConfig,
+  bundle: BundleState = loadBundle(),
+  rootOverride?: string,
+): RegisteredTool[] {
+  const catalogue = loadGeneratorCatalogue(bundle, rootOverride);
   const handle: BuildFamily =
     config.project.state === "available"
       ? { state: "available", project: config.project }
@@ -55,7 +68,7 @@ export function registerBuildTools(config: BridgeConfig): RegisteredTool[] {
   return [
     listDomainsTool(handle),
     getDomainMetadataTool(handle),
-    explainArtefactsTool(handle),
+    explainArtefactsTool(handle, catalogue),
     getDetachStateTool(handle),
     explainDiagnosticTool(handle),
   ];
@@ -201,12 +214,12 @@ function getDomainMetadataTool(handle: BuildFamily): RegisteredTool {
  * discoverable from inside the agent's session — so this turns "run the build
  * and look" into a question with an answer.
  */
-function explainArtefactsTool(handle: BuildFamily): RegisteredTool {
+function explainArtefactsTool(handle: BuildFamily, catalogue: CatalogueState): RegisteredTool {
   return {
     definition: {
       name: "build-explain_artefacts",
       description:
-        "List the files Exeris codegen has generated into this project, each with the generator that produced it and what drove it — handlers, services, repositories, domain errors, event publishers, graph projections, sagas, Flyway CREATE TABLE migrations, OpenAPI specs, and the project-wide bootstrap. Ask this BEFORE hand-writing SQL, a DTO or a controller for an Exeris entity: the build usually already emits it. Optional `entity` narrows to one entity's artefacts. Reports what the pipeline actually emitted, read from its own output manifest — a project that has not run codegen returns present:false.",
+        "List the files Exeris codegen has generated into this project, each with the generator that produced it and when that generator emits — handlers, services, repositories, domain errors, event publishers, graph projections, sagas, Flyway migrations, OpenAPI specs, and the project-wide bootstrap. Ask this BEFORE hand-writing SQL, a DTO or a controller for an Exeris entity: the build usually already emits it. Optional `entity` narrows to one entity's artefacts. Reports what the pipeline actually emitted, read from its own output manifest and explained by the generator catalogue exeris-tooling publishes with its codegen jar. A path whose shape several generators share lists every candidate rather than guessing; a path no catalogue row matches is reported as unrecognised. A project that has not run codegen returns present:false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -235,9 +248,12 @@ function explainArtefactsTool(handle: BuildFamily): RegisteredTool {
       }
       if (roots.length === 0) return notGeneratedAnswer();
 
-      const known = knownEntityNames(project);
+      const generators = catalogue.state === "available" ? catalogue.catalogue : null;
       const all = roots.flatMap(({ root, entries }) =>
-        entries.map((path) => ({ root, ...explainArtefact(path, known, root === TEST_GENERATED_ROOT) })),
+        entries.map((path) => ({
+          root,
+          ...explainArtefact(path, generators, root === TEST_GENERATED_ROOT ? "test" : "main"),
+        })),
       );
       const selected =
         filter === null
@@ -250,6 +266,7 @@ function explainArtefactsTool(handle: BuildFamily): RegisteredTool {
 
       return jsonResult({
         present: true,
+        catalogue: describeCatalogue(catalogue),
         roots: roots.map(({ root, entries }) => ({ root, generatedFiles: entries.length })),
         total: all.length,
         filter,
@@ -460,18 +477,16 @@ function gitignoreCarriesGeneratedEntry(project: ProjectConfig): boolean | null 
   }
 }
 
-/** Domain names from the last build, or an empty list when it has not run. */
-function knownEntityNames(project: ProjectConfig): string[] {
-  const dir = resolveMetadataDir(project);
-  if (dir.kind !== "ok") return [];
-  try {
-    return readdirSync(dir.path)
-      .map(classifyMetadataFile)
-      .filter((e): e is MetadataEntry => e !== null && e.kind === "domain")
-      .map((e) => e.name);
-  } catch {
-    return [];
+/** Where the explanations come from, or why there are none. */
+function describeCatalogue(catalogue: CatalogueState) {
+  if (catalogue.state === "unavailable") {
+    return { state: "unavailable", reason: catalogue.reason, remedy: catalogue.remedy };
   }
+  return {
+    state: "available",
+    catalogueFormat: catalogue.catalogue.catalogueFormat,
+    sourceArtifact: catalogue.sourceArtifact,
+  };
 }
 
 function existsInProject(project: ProjectConfig, rel: string): boolean {

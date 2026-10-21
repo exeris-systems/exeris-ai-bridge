@@ -4,28 +4,36 @@
 // THE DECISION IN THIS FILE: this reads what the pipeline emitted; it does not
 // predict what the pipeline would emit.
 //
-// Predicting looks tempting — there are thirteen registered generators and each
-// one has a condition. But only two of them state that condition where a mirror
-// could read it (`supports()`, on the stream-handler pair). The other eleven
-// decide by returning a null sentinel from inside `generate(...)`, on
-// `hasEvents()`, `hasGraphMetadata()`, `isSaga()`, `versioned()` and so on. A
-// TypeScript prediction would therefore be a second implementation of eleven
-// generators' internal guards, wrong the first time any of them moved — the
-// same trap `caps:*` refuses for the @Requires→@Provides DAG and
-// `build-get_domain_metadata` refuses for the AST.
+// Predicting looks tempting — every generator has a condition. But most of them
+// state it nowhere a mirror could read: they decide by returning a null
+// sentinel from inside `generate(...)`, on `hasEvents()`, `hasGraphMetadata()`,
+// `isSaga()`, `versioned()` and so on. A TypeScript prediction would therefore
+// be a second implementation of every generator's internal guards, wrong the
+// first time any of them moved — the same trap `caps:*` refuses for the
+// @Requires→@Provides DAG and `build-get_domain_metadata` refuses for the AST.
 //
 // The producer already writes the answer down. `OutputWriter` records every
 // path it emits into `.exeris-codegen-manifest` at the root of each output
 // tree, sorted, precisely so the next run knows which files it owns. That file
 // is the pipeline's own statement of ownership, so it is what this module
-// reads. What is hand-maintained here is only the EXPLANATION attached to an
-// observed path — which generator produced this shape and what drives it —
-// and a stale explanation misleads where a stale prediction would lie.
+// reads.
+//
+// The EXPLANATION attached to an observed path is the pipeline's too: the
+// generator catalogue that exeris-tooling publishes with its codegen jar (ADR-097)
+// and this package vendors. This module holds no table of generators, so a
+// generator added, renamed or reshaped upstream reaches the answer by
+// re-vendoring, not by an edit here.
+
+import type { GeneratorCatalogue, GeneratorRow } from "../../data/generator-catalogue.js";
 
 /** Root of the L1 tree, relative to the project root (`exeris.outputDir`). */
 export const GENERATED_ROOT = "src/main/generated/java";
 
-/** The second output root, written only under `-Dexeris.tests=true` (ADR-058). */
+/**
+ * The second output root, where the generated tests go (ADR-058). It is written
+ * when test generation is on (`exeris.tests`), which an Initializr project sets
+ * in its POM; a project that does not set it has no such tree.
+ */
 export const TEST_GENERATED_ROOT = "src/test/generated/java";
 
 /** Where `exeris:detach` promotes L1 files to (`exeris.targetDir`). */
@@ -37,14 +45,32 @@ export const MANIFEST_NAME = ".exeris-codegen-manifest";
 /** `DetachMojo.ignoreEntry` default — the line detach strips once the tree is owned. */
 export const GITIGNORE_ENTRY = "src/main/generated";
 
+/** Which output tree a manifest sits in; the catalogue's `outputRoot`. */
+export type OutputRoot = "main" | "test";
+
 export interface ArtefactExplanation {
-  /** Path relative to the output root, exactly as the manifest records it. */
+  /** Path relative to the output root, as the manifest records it, without a leading `./`. */
   readonly path: string;
   readonly artefact: string;
-  /** Null when the shape matches no generator this bridge knows. */
+  /** Null when no catalogue row matches, or no catalogue is loaded. Joined with " or " when the match is ambiguous. */
   readonly generator: string | null;
   readonly driver: string;
   readonly scope: "entity" | "project";
+  /** `id` of the first matching catalogue row; null when none matches. */
+  readonly catalogueId: string | null;
+  /** The matching row's `pathTemplate`. */
+  readonly pathTemplate: string | null;
+  /** The matching row's `cardinality`. */
+  readonly cardinality: string | null;
+  /** The ADR that fixes the artefact's shape, when the row names one. */
+  readonly adr: string | null;
+  /** Other rows whose pattern also matches this path; empty when the match is unambiguous. */
+  readonly ambiguousWith: readonly {
+    readonly id: string;
+    readonly generator: string;
+    readonly artefact: string;
+    readonly condition: string;
+  }[];
 }
 
 /**
@@ -63,12 +89,17 @@ export interface ArtefactExplanation {
 export function parseCodegenManifest(text: string): string[] {
   const seen = new Set<string>();
   for (const line of text.split("\n")) {
-    const trimmed = line.trim();
+    const trimmed = stripLeadingDotSlash(line.trim());
     if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
     if (!isSafeManifestEntry(trimmed)) continue;
     seen.add(trimmed);
   }
   return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/** A leading `./` names the same path; the catalogue's patterns are anchored without it. */
+function stripLeadingDotSlash(path: string): string {
+  return path.startsWith("./") ? path.slice(2) : path;
 }
 
 function isSafeManifestEntry(entry: string): boolean {
@@ -77,261 +108,97 @@ function isSafeManifestEntry(entry: string): boolean {
 }
 
 /**
- * Explain one emitted path.
+ * Explain one emitted path against the generator catalogue.
  *
- * `knownEntities` comes from the metadata directory and is used for exactly one
- * distinction the path alone cannot make: an entity-level SSE handler
- * (`<Entity>StreamHandler`) and a per-action one (`<Entity><Action>StreamHandler`)
- * differ only by whether the stem is an entity name plus the suffix. With no
- * metadata on disk the two stay merged and the answer says so, rather than
- * picking one.
+ * The rule is the publisher's own: take the first row, in catalogue order,
+ * whose `outputRoot` is the tree the manifest sits in and whose `pathPattern`
+ * matches the path with a leading `./` removed. Nothing else decides — not the
+ * package, not the file suffix, not the entity names on disk.
  *
- * `isTestRoot` is the second output root (ADR-058). It is not a hint to weigh
- * against the path: nothing a test generator emits ever lands in src/main, and
- * the generated tests reuse the very package names the main artefacts use — so
- * the root decides, and the package dispatch never sees these paths.
+ * Where the path's shape cannot separate generators, the first row lists the
+ * others in `ambiguousWith`. Those candidates are REPORTED, not resolved:
+ * resolving them from entity names would be a second implementation of the
+ * pipeline's naming. Only candidates whose own pattern also matches this path
+ * are reported — a row's `ambiguousWith` is a statement about shapes in
+ * general, and a candidate that cannot match this path would be noise.
+ *
+ * `condition` is never evaluated. It is prose for a person; a tool that
+ * evaluated it would be predicting emission.
+ *
+ * With no catalogue the path is still listed, and the answer says the catalogue
+ * is what is missing — a different fact from the catalogue not knowing the path.
  */
 export function explainArtefact(
   relPath: string,
-  knownEntities: readonly string[] = [],
-  isTestRoot = false,
+  catalogue: GeneratorCatalogue | null,
+  root: OutputRoot = "main",
 ): ArtefactExplanation {
-  const segments = relPath.split("/");
-  const file = segments[segments.length - 1] ?? relPath;
-  const pkg = segments.length > 1 ? (segments[segments.length - 2] ?? "") : "";
-  const dot = file.lastIndexOf(".");
-  const stem = dot > 0 ? file.slice(0, dot) : file;
-  const ext = dot > 0 ? file.slice(dot + 1) : "";
+  const path = stripLeadingDotSlash(relPath);
+  if (catalogue === null) return { path, ...NO_CATALOGUE };
 
-  const built = isTestRoot ? TEST_ARTEFACT : classify(relPath, file, pkg, stem, ext, knownEntities);
-  return { path: relPath, ...built };
+  const rows = catalogue.rows.filter((row) => row.outputRoot === root);
+  const first = rows.find((row) => row.pattern.test(path));
+  if (first === undefined) return { path, ...UNRECOGNISED };
+
+  const candidates = first.ambiguousWith
+    .map((id) => rows.find((row) => row.id === id))
+    .filter((row): row is GeneratorRow => row !== undefined && row.pattern.test(path));
+
+  const generators = [...new Set([first, ...candidates].map((row) => row.generator))];
+  const conditionText = `Emitted when: ${first.condition}.`;
+  const adrText = first.adr === null ? "" : ` Shape fixed by ${first.adr}.`;
+  const driver =
+    candidates.length === 0
+      ? `${conditionText}${adrText}`
+      : `${conditionText}${adrText} AMBIGUOUS: this path shape also fits ${candidates
+          .map((c) => `'${c.id}' (${c.generator})`)
+          .join(", ")}, and the path alone cannot say which wrote it. The first listed is the catalogue's first match.`;
+
+  return {
+    path,
+    artefact: first.artefact,
+    generator: generators.join(" or "),
+    driver,
+    scope: first.scope,
+    catalogueId: first.id,
+    pathTemplate: first.pathTemplate,
+    cardinality: first.cardinality,
+    adr: first.adr,
+    ambiguousWith: candidates.map((c) => ({
+      id: c.id,
+      generator: c.generator,
+      artefact: c.artefact,
+      condition: c.condition,
+    })),
+  };
 }
 
 type Body = Omit<ArtefactExplanation, "path">;
 
-function classify(
-  relPath: string,
-  file: string,
-  pkg: string,
-  stem: string,
-  ext: string,
-  knownEntities: readonly string[],
-): Body {
-  if (file === "cap-manifest.json" && !relPath.includes("/")) {
-    return {
-      artefact: "Capability composition manifest",
-      generator: "CodegenPipeline",
-      driver:
-        "Written whenever the project composes capabilities. Read it with caps-list_capabilities rather than by hand.",
-      scope: "project",
-    };
-  }
-
-  if (ext === "sql") {
-    if (stem.endsWith("__foreign_keys")) {
-      return {
-        artefact: "Flyway migration — cross-table foreign keys",
-        generator: "KernelApplicationGenerator",
-        driver:
-          "One trailing migration carrying every cross-table FOREIGN KEY, emitted after the per-entity tables so no creation order can fail.",
-        scope: "project",
-      };
-    }
-    return {
-      artefact: "Flyway migration — CREATE TABLE",
-      generator: "KernelFlywayGenerator",
-      driver:
-        "Emitted for every entity. Carries the column list, CHECK constraints, indexes, and an RLS policy when the entity is tenant-partitioned. This file is the schema the build produces — column names are snake_case, so a hand-written DDL alongside it will disagree.",
-      scope: "entity",
-    };
-  }
-
-  if (ext === "yaml" || ext === "yml") {
-    return {
-      artefact: "OpenAPI 3.1 specification",
-      generator: "KernelOpenApiGenerator",
-      driver: "Emitted for every entity.",
-      scope: "entity",
-    };
-  }
-
-  if (ext === "java") {
-    const project = PROJECT_WIDE_TYPES.get(stem);
-    if (project) return project;
-
-    const byPackage = classifyJavaByPackage(pkg, stem, knownEntities);
-    if (byPackage) return byPackage;
-  }
-
-  return UNRECOGNISED;
-}
-
-const TEST_ARTEFACT: Body = {
-  artefact: "Generated test",
-  generator: "one of the Kernel*TestGenerator family (KernelTestSupportGenerator for shared scaffolding)",
+const NO_CATALOGUE: Body = {
+  artefact: "Generated file (generator catalogue unavailable)",
+  generator: null,
   driver:
-    "Emitted only under -Dexeris.tests=true, into the second output root src/test/generated/java (ADR-058), which is why the root and not the class name identifies it. It never lands in src/main.",
+    "The codegen manifest lists this path, so the pipeline owns it and will rewrite it — do not hand-edit it. This bridge has no generator catalogue loaded, so it cannot say which generator wrote it; see `catalogue` in this answer.",
   scope: "entity",
+  catalogueId: null,
+  pathTemplate: null,
+  cardinality: null,
+  adr: null,
+  ambiguousWith: [],
 };
-
-const PROJECT_WIDE_TYPES = new Map<string, Body>([
-  [
-    "Application",
-    {
-      artefact: "Application bootstrap",
-      generator: "KernelApplicationGenerator",
-      driver:
-        "Project-wide: emitted once from the full domain list, not per entity, so it is written after the per-entity loop.",
-      scope: "project",
-    },
-  ],
-  [
-    "RuntimeComponents",
-    {
-      artefact: "Runtime component wiring",
-      generator: "KernelApplicationGenerator",
-      driver: "Project-wide: the composition root's open half, emitted once from the full domain list.",
-      scope: "project",
-    },
-  ],
-  [
-    "RuntimeLifecycle",
-    {
-      artefact: "Runtime lifecycle",
-      generator: "KernelApplicationGenerator",
-      driver: "Project-wide: composes the per-entity Repository → Service → Handler chain, emitted once.",
-      scope: "project",
-    },
-  ],
-]);
-
-/**
- * The generators derive their target package from the entity's own, by
- * substituting the `.domain` suffix — `.repository`, `.service`, `.handler`,
- * `.event`, `.graph`, `.saga`, `.client`. So the last path segment identifies
- * the generator far more reliably than the class-name suffix alone, and the
- * suffix only has to separate the artefacts that share a package.
- */
-function classifyJavaByPackage(
-  pkg: string,
-  stem: string,
-  knownEntities: readonly string[],
-): Body | null {
-  switch (pkg) {
-    case "repository":
-      if (stem.endsWith("VersionConflictException")) {
-        return {
-          artefact: "Domain error — version conflict",
-          generator: "KernelErrorGenerator",
-          driver:
-            "Emitted only for a versioned entity, @ExerisDomain(versioned = true). Raised by the repository and mapped to 409 by the handler (ADR-076).",
-          scope: "entity",
-        };
-      }
-      if (stem.endsWith("NotFoundException")) {
-        return {
-          artefact: "Domain error — not found",
-          generator: "KernelErrorGenerator",
-          driver: "Emitted for every entity. Raised by the repository and mapped to 404 by the handler (ADR-076).",
-          scope: "entity",
-        };
-      }
-      return {
-        artefact: "Repository",
-        generator: "KernelRepositoryGenerator",
-        driver: "Emitted for every entity, against the persistence SPI.",
-        scope: "entity",
-      };
-    case "service":
-      return {
-        artefact: "Domain service",
-        generator: "KernelServiceGenerator",
-        driver: "Emitted for every entity. A POJO delegating to the repository; it touches no kernel API directly.",
-        scope: "entity",
-      };
-    case "handler":
-      if (stem.endsWith("StreamHandler")) return streamHandler(stem, knownEntities);
-      return {
-        artefact: "HTTP handler",
-        generator: "KernelHandlerGenerator",
-        driver: "Emitted for every entity, against the HTTP SPI.",
-        scope: "entity",
-      };
-    case "event":
-      if (stem.endsWith("EventSubscriber")) {
-        return {
-          artefact: "Domain-event subscriber",
-          generator: "KernelEventHandlerGenerator",
-          driver: "Emitted only when the entity declares events.",
-          scope: "entity",
-        };
-      }
-      return {
-        artefact: "Domain-event publisher",
-        generator: "KernelEventGenerator",
-        driver: "Emitted only when the entity declares events.",
-        scope: "entity",
-      };
-    case "graph":
-      return {
-        artefact: "Graph-sync projection",
-        generator: "KernelGraphSyncGenerator",
-        driver: "Emitted only when the entity carries graph metadata.",
-        scope: "entity",
-      };
-    case "saga":
-      return {
-        artefact: "Saga skeleton",
-        generator: "KernelSagaGenerator",
-        driver:
-          "Emitted only for a saga entity. The class name is the declared saga name, given a Flow suffix unless it already ends in one — so it need not match the entity name.",
-        scope: "entity",
-      };
-    case "client":
-      return {
-        artefact: "Service-to-service HTTP client",
-        generator: "KernelClientGenerator",
-        driver: "Emitted for every entity, against the tier-neutral KernelWebClient facade (ADR-034).",
-        scope: "entity",
-      };
-    default:
-      return null;
-  }
-}
-
-function streamHandler(stem: string, knownEntities: readonly string[]): Body {
-  const entityLevel = knownEntities.some((e) => stem === `${e}StreamHandler`);
-  if (entityLevel) {
-    return {
-      artefact: "SSE live-view stream handler (entity-level)",
-      generator: "KernelStreamHandlerGenerator",
-      driver: "Emitted only for @ExerisDomain(realTimeApi = true) (ADR-043).",
-      scope: "entity",
-    };
-  }
-  if (knownEntities.length > 0) {
-    return {
-      artefact: "SSE stream handler (per action)",
-      generator: "KernelActionStreamHandlerGenerator",
-      driver: "One per @Action(streaming = true); the stem is the entity name followed by the action name (ADR-044).",
-      scope: "entity",
-    };
-  }
-  return {
-    artefact: "SSE stream handler",
-    generator: "KernelStreamHandlerGenerator or KernelActionStreamHandlerGenerator",
-    driver:
-      "Either entity-level, from @ExerisDomain(realTimeApi = true), or one per @Action(streaming = true). Telling them apart needs the entity names, which come from target/classes/exeris-metadata — build the project and ask again for the exact one.",
-    scope: "entity",
-  };
-}
 
 const UNRECOGNISED: Body = {
   artefact: "Unrecognised generated file",
   generator: null,
   driver:
-    "The codegen manifest lists this path, so the pipeline owns it and will rewrite it — but its shape matches no generator this bridge knows. Treat it as generated, and do not hand-edit it.",
+    "The codegen manifest lists this path, so the pipeline owns it and will rewrite it — but it matches no row of the generator catalogue this bridge carries. That is a gap in the catalogue, or a pipeline newer than the catalogue. Treat it as generated, and do not hand-edit it.",
   scope: "entity",
+  catalogueId: null,
+  pathTemplate: null,
+  cardinality: null,
+  adr: null,
+  ambiguousWith: [],
 };
 
 /**
