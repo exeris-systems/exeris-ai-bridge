@@ -365,10 +365,11 @@ function assertBootsDark({
     ["java", previewJava],
     ["ts", previewTs],
   ]) {
-    assert.equal(result.isError, true, `build-preview_generation (${target}) ran a generator on a machine with none`);
+    assert.equal(result.isError, true, `build-preview_generation (${target}) ran on a project that was never built`);
     const preview = JSON.parse(result.content[0].text);
-    assert.equal(preview.error, "generator_unavailable", `build-preview_generation (${target}): ${result.content[0].text}`);
+    assert.equal(preview.error, "metadata_missing", `build-preview_generation (${target}): ${result.content[0].text}`);
     assert.equal(preview.target, target);
+    assert.match(preview.remedy, /mvn compile/);
     assert.ok(preview.reason?.length > 0 && preview.remedy?.length > 0, `${target} preview is unavailable without a reason or remedy`);
     for (const secret of [scratch, tmpdir()]) {
       assert.equal(result.content[0].text.includes(secret), false, `${target} preview leaks a machine path`);
@@ -557,8 +558,8 @@ async function interrogate(project, home, extraEnv) {
       arguments: { variant: "both" },
     });
 
-    // Nothing here pins a generator or installs one, so the preview has nothing to run: it
-    // answers each target with the structured reason and remedy, not a transport error and
+    // The project was never built and no generator is pinned or installed, so the preview has nothing to run: it
+    // answers each target with the structured metadata_missing reason and remedy, not a transport error and
     // not a generator of some other version.
     const previewJava = await client.request("tools/call", {
       name: "build-preview_generation",
