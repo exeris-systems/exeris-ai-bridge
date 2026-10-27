@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        No <parent> (ADR-091 obligation 4). exeris-app-parent inherits this POM, and a consumer
+        inherits exeris-app-parent, so anything above this one would reach every consumer: the
+        reactor root's enforcer messages, pluginManagement, distributionManagement and `release`
+        profile, and through exeris-tooling-parent every internal pin.
+
+        It is still a module of the tooling reactor and carries the reactor's version. Because it
+        has no parent, that version is written here as a literal, and so is every version below.
+    -->
+    <groupId>eu.exeris</groupId>
+    <artifactId>exeris-app-bom</artifactId>
+    <version>0.10.0</version>
+    <packaging>pom</packaging>
+
+    <name>Exeris Tooling :: Application BOM</name>
+    <description>
+        The tooling, kernel and SDK versions one exeris-tooling release was built and tested
+        against, for an application whose sources exeris-tooling generates. Import it, or build on
+        exeris-app-parent, which inherits it.
+    </description>
+    <url>https://github.com/exeris-systems/exeris-tooling</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>arkstack-dev</id>
+            <name>Arkadiusz Przychocki</name>
+            <email>oss@exeris.eu</email>
+            <organization>Exeris Systems</organization>
+            <organizationUrl>https://exeris.eu</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm child.scm.connection.inherit.append.path="false"
+         child.scm.developerConnection.inherit.append.path="false"
+         child.scm.url.inherit.append.path="false">
+        <connection>scm:git:https://github.com/exeris-systems/exeris-tooling.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/exeris-systems/exeris-tooling.git</developerConnection>
+        <url>https://github.com/exeris-systems/exeris-tooling</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <!-- No <distributionManagement>: a consumer inherits this POM through exeris-app-parent, and
+         must not inherit a deploy target. Publishing is the `exeris-tooling-release` profile
+         below. -->
+
+    <!--
+        Literals only, never ${project.version} or anything derived from it. exeris-app-parent
+        passes these properties on by inheritance, and an inherited value is interpolated in the
+        consumer's model, where ${project.version} is the consumer's own version.
+
+        exeris.kernel.version, exeris.sdk.version and jackson3.version equal the values of the same
+        properties in exeris-tooling-bom: the versions this tooling release's suites ran against.
+        exeris.tooling.version equals the reactor version. tools/release-readiness fails a release
+        where either does not hold, or where any of the three Exeris versions is a -SNAPSHOT.
+    -->
+    <properties>
+        <exeris.tooling.version>0.10.0</exeris.tooling.version>
+        <exeris.kernel.version>0.12.0</exeris.kernel.version>
+        <exeris.sdk.version>0.12.0</exeris.sdk.version>
+        <!-- The kernel's Jackson 3 line. Emitted main code imports tools.jackson for an entity
+             with a List<X> field. -->
+        <jackson3.version>3.2.3</jackson3.version>
+    </properties>
+
+    <!-- What generated code and its build need, and nothing else: no JavaPoet, swagger, Jackson 2,
+         H2, compile-testing, JUnit or AssertJ. Those are tooling's internal pins
+         (exeris-tooling-bom) or the application's own choices. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-processor</artifactId>
+                <version>${exeris.tooling.version}</version>
+            </dependency>
+            <!-- So an application on exeris-app-parent, or one importing this BOM, states the
+                 tooling version once. -->
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-app-starter</artifactId>
+                <version>${exeris.tooling.version}</version>
+                <type>pom</type>
+            </dependency>
+
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-kernel-spi</artifactId>
+                <version>${exeris.kernel.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-kernel-core</artifactId>
+                <version>${exeris.kernel.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-kernel-community</artifactId>
+                <version>${exeris.kernel.version}</version>
+            </dependency>
+            <!-- For tests the application writes itself, to boot a kernel. The generated tests
+                 do not import it. -->
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-kernel-community-testkit</artifactId>
+                <version>${exeris.kernel.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-sdk-annotations</artifactId>
+                <version>${exeris.sdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-sdk-composition-runtime</artifactId>
+                <version>${exeris.sdk.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson3.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>eu.exeris</groupId>
+                    <artifactId>exeris-codegen-maven-plugin</artifactId>
+                    <version>${exeris.tooling.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <!--
+            Publishing for this module and the two that inherit it, under an id no consumer uses. A
+            consumer inherits this profile with the rest of the POM, so one called `release` would
+            be activated by the consumer's own `-P release`. release.yml activates it beside the
+            reactor root's `release` profile, which it mirrors: same plugins, versions and
+            configuration.
+
+            Two central-publishing-maven-plugin declarations now share one reactor. Each module
+            stages through the declaration it inherits, and the declaration on the last module in
+            the build uploads the bundle, so the two must not differ in anything but
+            <excludeArtifacts>. Each list names the modules its declaration governs that do not
+            ship, and tools/release-readiness checks each against those modules' maven.deploy.skip.
+            Every module under this POM ships, so its list is empty.
+        -->
+        <profile>
+            <id>exeris-tooling-release</id>
+            <build>
+                <plugins>
+                    <!-- Packaging `pom` attaches no sources or javadoc jar. Declared to mirror the
+                         root profile, so a jar-packaged module under this POM would get both. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.12.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <failOnError>false</failOnError>
+                            <quiet>true</quiet>
+                            <tags>
+                                <tag><name>apiNote</name><placement>a</placement><head>API Note:</head></tag>
+                                <tag><name>implSpec</name><placement>a</placement><head>Implementation Requirements:</head></tag>
+                                <tag><name>implNote</name><placement>a</placement><head>Implementation Note:</head></tag>
+                            </tags>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.12.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <waitUntil>validated</waitUntil>
+                            <excludeArtifacts/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

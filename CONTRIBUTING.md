@@ -131,7 +131,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 31 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 5 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 32 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 6 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repository layout
 
@@ -170,6 +170,8 @@ src/
                              build-explain_diagnostic — reads the
                              annotation processor's own output in target/classes/exeris-metadata
                              and the codegen output tree in src/main/generated/java
+    build/starter.ts         build-get_starter — pom.xml / package.json for a new application, from
+                             the vendored exeris-app-bom triple; bundled data only, writes nothing
     build/shapes.ts          envelope validation (schemaVersion + ADR-042 sourceDigest) and the
                              filename-prefix decoding; the AST body passes through verbatim
     build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
@@ -195,6 +197,8 @@ src/
                              per-entry SHA-256 verification, sandboxed to data/
   data/generator-catalogue.ts  loader and matcher for the vendored exeris-tooling generator
                              catalogue (ADR-097); never throws, reports why it is absent
+  data/app-starter.ts        reads the tested tooling + kernel + SDK triple out of the exeris-app-bom
+                             POMs (ADR-091) at pack time and loads it back; never throws
 scripts/
   vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
   p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
@@ -208,7 +212,7 @@ docs/
 
 ## Releasing
 
-A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java` (`0.10.0`). Both jars are fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
+A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java`, and the application starter from the `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs (`0.10.0`). Both jars are fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
 
 Publishing runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, in two jobs.
 

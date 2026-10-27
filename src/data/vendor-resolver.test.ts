@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 
+import { starterPomText } from "./__tests__/app-starter-fixture.js";
 import {
   collectSources,
   compareVersions,
   findArtifactJar,
+  findArtifactPom,
   parseLocalRepository,
   resolveMavenRepo,
   stripXmlComments,
@@ -235,8 +237,87 @@ function repoWithAllJars(): string {
   createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
   createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
   createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  writeStarterPoms(repo, "0.10.0");
   return repo;
 }
+
+/** The committed 0.10.0 starter POMs, laid out as a Maven repository holds them. */
+function writeStarterPoms(repo: string, version: string, bomPom?: string): void {
+  for (const artifactId of ["exeris-app-bom", "exeris-app-parent", "exeris-app-starter"]) {
+    const dir = join(repo, "eu", "exeris", artifactId, version);
+    mkdirSync(dir, { recursive: true });
+    const text = artifactId === "exeris-app-bom" && bomPom !== undefined ? bomPom : starterPomText(artifactId);
+    writeFileSync(join(dir, `${artifactId}-${version}.pom`), text);
+  }
+}
+
+test("findArtifactPom resolves a pom-packaged artefact, newest release first", () => {
+  const repo = join(tempDir, "pom-repo");
+  writeStarterPoms(repo, "0.10.0");
+  writeStarterPoms(repo, "0.11.0-SNAPSHOT");
+  assert.equal(findArtifactPom(repo, "exeris-app-bom")?.version, "0.10.0");
+  assert.equal(findArtifactPom(repo, "exeris-app-bom", "0.11.0-SNAPSHOT")?.version, "0.11.0-SNAPSHOT");
+  assert.equal(findArtifactPom(repo, "exeris-app-bom", "0.9.0"), null);
+  assert.equal(findArtifactPom(repo, "exeris-app-bom", undefined, { minVersion: "0.11.0" }), null);
+});
+
+test("collectSources vendors the application starter from the BOM POMs", () => {
+  const entries = collectSources({
+    repo: repoWithAllJars(),
+    strict: true,
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  const starter = entries.find((e) => e.id === "app-starter");
+  assert.ok(starter);
+  assert.equal(starter.sourceArtifact, "eu.exeris:exeris-app-bom:0.10.0");
+  const data = JSON.parse(starter.bytes.toString("utf8"));
+  assert.equal(data.appStarterFormat, 1);
+  assert.equal(data.bomVersion, "0.10.0");
+  assert.deepEqual(data.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
+});
+
+test("collectSources fails in strict mode when the BOM is absent", () => {
+  const repo = join(tempDir, "no-bom-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  assert.throws(
+    () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
+    /exeris-app-bom POM.*EXERIS_TOOLING_VERSION/,
+  );
+});
+
+test("collectSources keeps the other entries in non-strict mode when the BOM is absent", () => {
+  const repo = join(tempDir, "no-bom-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  const warnings: string[] = [];
+  const entries = collectSources({
+    repo,
+    strict: false,
+    warnFn: (m) => warnings.push(m),
+    extractFn: extractWith(CATALOGUE_TEXT),
+  });
+  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema", "generator-catalogue"]);
+  assert.ok(warnings.some((w) => /exeris-app-bom/.test(w)));
+});
+
+test("collectSources refuses a BOM whose versions are not literals", () => {
+  const repo = join(tempDir, "expr-bom-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
+  writeStarterPoms(
+    repo,
+    "0.10.0",
+    starterPomText("exeris-app-bom").replace("<exeris.sdk.version>0.12.0<", "<exeris.sdk.version>${project.version}<"),
+  );
+  assert.throws(
+    () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
+    /exeris\.sdk\.version.*not a literal/,
+  );
+});
 
 test("collectSources extracts entries when jars are found", () => {
   const entries = collectSources({
@@ -245,7 +326,7 @@ test("collectSources extracts entries when jars are found", () => {
     extractFn: extractWith(CATALOGUE_TEXT),
   });
 
-  assert.equal(entries.length, 3);
+  assert.equal(entries.length, 4);
   assert.equal(entries[0].id, "annotation-catalog");
   assert.equal(entries[0].sourceArtifact, "eu.exeris:exeris-sdk-annotations:0.12.0");
   assert.equal(entries[1].id, "ast-schema");

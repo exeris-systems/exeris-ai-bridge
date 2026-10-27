@@ -4,6 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
+  APP_BOM_ARTIFACT,
+  APP_PARENT_ARTIFACT,
+  APP_STARTER_ARTIFACT,
+  APP_STARTER_ENTRY,
+  AppStarterFormatError,
+  parseAppStarterPoms,
+} from "./app-starter.js";
+import {
   CatalogueFormatError,
   GENERATOR_CATALOGUE_ENTRY,
   parseGeneratorCatalogue,
@@ -232,6 +240,42 @@ export function findArtifactJar(
 }
 
 /**
+ * Find the POM of a coordinate under <repo>/eu/exeris/<artifactId>, with the
+ * same version rules as {@link findArtifactJar}. An artefact of packaging `pom`
+ * has no jar, so the POM is the artefact.
+ */
+export function findArtifactPom(
+  repo: string,
+  artifactId: string,
+  explicitVersion?: string,
+  options: FindArtifactJarOptions = {},
+): { pom: string; version: string } | null {
+  const existsFn = options.existsFn ?? existsSync;
+  const readdirFn = options.readdirFn ?? readdirSync;
+  const dir = join(repo, "eu", "exeris", artifactId);
+  if (!existsFn(dir)) return null;
+
+  const pomOf = (v: string) => join(dir, v, `${artifactId}-${v}.pom`);
+  if (explicitVersion) {
+    return existsFn(pomOf(explicitVersion)) ? { pom: pomOf(explicitVersion), version: explicitVersion } : null;
+  }
+
+  let candidates: string[];
+  try {
+    candidates = readdirFn(dir).filter((v) => existsFn(pomOf(v)));
+  } catch {
+    return null;
+  }
+  if (!options.allowSnapshots) candidates = candidates.filter((v) => !/-SNAPSHOT$/i.test(v));
+  if (options.minVersion) {
+    candidates = candidates.filter((v) => compareVersions(v, options.minVersion!) >= 0);
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => compareVersions(b, a));
+  return { pom: pomOf(candidates[0]), version: candidates[0] };
+}
+
+/**
  * Locates the unzip binary using standard fixed system directories to avoid PATH manipulation.
  */
 export function findUnzipBinary(
@@ -304,7 +348,8 @@ export interface CollectSourcesOptions {
 
 /**
  * Collect reference data sources: the SDK annotation catalog and AST schema,
- * and the codegen pipeline's generator catalogue.
+ * the codegen pipeline's generator catalogue, and the application starter's
+ * tested version triple.
  */
 export function collectSources(options: CollectSourcesOptions = {}): SourceEntry[] {
   const warnFn = options.warnFn ?? console.warn;
@@ -332,6 +377,8 @@ export function collectSources(options: CollectSourcesOptions = {}): SourceEntry
   const sources = collectSdkSources({ ...options, repo, warnFn, failFn, findJar, extract, allowSnapshots });
   const generators = collectGeneratorCatalogue({ ...options, repo, warnFn, failFn, findJar, extract });
   if (generators) sources.push(generators);
+  const starter = collectAppStarter({ ...options, repo, warnFn, failFn });
+  if (starter) sources.push(starter);
   return sources;
 }
 
@@ -418,4 +465,55 @@ function collectGeneratorCatalogue(
     bytes,
     sourceArtifact: `eu.exeris:exeris-codegen-java:${jar.version}`,
   };
+}
+
+/**
+ * The application starter, from the `eu.exeris:exeris-app-bom` POM and the two
+ * POMs that inherit it. Read from the POMs because the triple is the BOM's
+ * content, and a BOM has no jar. A POM whose versions are not literals is
+ * refused here so it never reaches a published tarball.
+ */
+function collectAppStarter(
+  options: CollectSourcesOptions & {
+    repo: string;
+    warnFn: (msg: string) => void;
+    failFn: (msg: string) => never;
+  },
+): SourceEntry | null {
+  const { repo, warnFn, failFn } = options;
+  const version = options.toolingVersion;
+  const pomOptions = { allowSnapshots: Boolean(version || options.allowSnapshots), minVersion: "0.10.0" };
+  const bom = findArtifactPom(repo, APP_BOM_ARTIFACT, version, pomOptions);
+  if (!bom) {
+    if (options.strict) {
+      failFn(
+        `Could not find the ${APP_BOM_ARTIFACT} POM in ${repo}. Set EXERIS_TOOLING_VERSION to the released exeris-tooling version this release vendors.`,
+      );
+    }
+    warnFn(`[vendor-reference-data] ${APP_BOM_ARTIFACT} POM not found in ${repo}. Emitting no application starter.`);
+    return null;
+  }
+  // The parent and the starter are read at the BOM's own version: a release
+  // sets one version across all three modules.
+  const parent = findArtifactPom(repo, APP_PARENT_ARTIFACT, bom.version, pomOptions);
+  const starter = findArtifactPom(repo, APP_STARTER_ARTIFACT, bom.version, pomOptions);
+  if (!parent || !starter) {
+    return failFn(
+      `${APP_BOM_ARTIFACT} ${bom.version} is present in ${repo} but ${APP_PARENT_ARTIFACT} (${parent ? "found" : "missing"}) or ${APP_STARTER_ARTIFACT} (${starter ? "found" : "missing"}) is not.`,
+    );
+  }
+  const read = (path: string) => readFileSync(path, "utf8");
+  try {
+    const data = parseAppStarterPoms({ bom: read(bom.pom), parent: read(parent.pom), starter: read(starter.pom) });
+    return {
+      id: APP_STARTER_ENTRY,
+      bytes: Buffer.from(`${JSON.stringify(data, null, 2)}\n`, "utf8"),
+      sourceArtifact: `eu.exeris:${APP_BOM_ARTIFACT}:${bom.version}`,
+    };
+  } catch (err) {
+    if (err instanceof AppStarterFormatError) {
+      return failFn(`${APP_BOM_ARTIFACT} ${bom.version}: ${err.message}`);
+    }
+    throw err;
+  }
 }

@@ -136,6 +136,19 @@ jobs:
             -Dartifact="eu.exeris:exeris-codegen-java:$EXERIS_TOOLING_VERSION" -Dtransitive=false \
             -DremoteRepositories="central::default::https://repo.maven.apache.org/maven2"
 
+      # The application starter build-get_starter serves (ADR-091) is the
+      # tested tooling + kernel + SDK triple the exeris-app-bom POM names. The
+      # three starter modules are packaging pom, so the POM is the artefact.
+      - name: Fetch the application starter POMs
+        env:
+          EXERIS_TOOLING_VERSION: ${{ vars.EXERIS_TOOLING_VERSION }}
+        run: |
+          for artifact in exeris-app-bom exeris-app-parent exeris-app-starter; do
+            mvn -B -q dependency:get \
+              -Dartifact="eu.exeris:$artifact:$EXERIS_TOOLING_VERSION:pom" -Dtransitive=false \
+              -DremoteRepositories="central::default::https://repo.maven.apache.org/maven2"
+          done
+
       - name: Test
         run: npm test
 
