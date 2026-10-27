@@ -128,3 +128,25 @@ test("SandboxEscapeError.message does not embed absolute root/candidate paths", 
     assert.ok(!err.message.includes("outside"), `message leaked candidate: ${err.message}`);
   }
 });
+
+test("resolveInside accepts a directory whose name merely starts with two dots", () => {
+  mkdirSync(join(root, "..cache"));
+  const file = join(root, "..cache", "f.txt");
+  writeFileSync(file, "x");
+  assert.equal(resolveInside(root, join("..cache", "f.txt")), file);
+});
+
+test("resolveInside accepts a root whose own name starts with two dots", () => {
+  const dotted = join(outside, "..root");
+  mkdirSync(dotted);
+  const file = join(dotted, "f.txt");
+  writeFileSync(file, "x");
+  assert.equal(resolveInside(dotted, "f.txt"), file);
+});
+
+test("resolveInside still refuses a sibling whose name starts with two dots", () => {
+  const sibling = join(outside, "..sibling");
+  mkdirSync(sibling);
+  writeFileSync(join(sibling, "f.txt"), "x");
+  assert.throws(() => resolveInside(root, join(sibling, "f.txt")), SandboxEscapeError);
+});
