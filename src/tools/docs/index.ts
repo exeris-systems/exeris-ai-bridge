@@ -5,7 +5,20 @@ import type { BridgeConfig, DocsConfig, DocsRoots, Unavailable } from "../../con
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
-import { localLinkCandidates, parseAdrIndex, type AdrEntry } from "./adr-index.js";
+import {
+  formatSandboxStderrLine,
+  readAdrContent,
+  readAdrEntries,
+  readHla,
+  readTemplate,
+  readWhitepaper,
+  redactEcosystemPaths,
+  TEMPLATE_KINDS,
+  type DocsContent,
+  type TemplateKind,
+} from "./content.js";
+
+export { formatSandboxStderrLine, redactEcosystemPaths };
 
 // docs:* — surfaces the exeris-docs ADR registry, canonical narratives,
 // decision-doc templates, and a bounded literal-substring search to AI
@@ -13,10 +26,6 @@ import { localLinkCandidates, parseAdrIndex, type AdrEntry } from "./adr-index.j
 // (ecosystemRoot) so cross-repo ADR links work without granting the agent
 // access to anything else on disk. Search is scoped to `docsRoot` only
 // (not the wider ecosystem) — cross-repo content is reachable via get_adr.
-
-const ADR_INDEX_FILENAME = "adr-index.md";
-const HLA_FILENAME = "high-level-architecture.md";
-const WHITEPAPER_FILENAME = "b2b-technical-whitepaper.md";
 
 // Per-repo docs live in `<ecosystemRoot>/<repo>/docs/**`. The repo regex
 // matches the ecosystem's naming convention and prevents agent input from
@@ -50,14 +59,6 @@ const REPO_NAME_DOCS_SELF = "exeris-docs";
 // are caught. `exeris-business` is denied by exact name.
 const REPO_NAME_ENTERPRISE_RE = /(^|-)enterprise(-|$)/;
 const REPO_NAME_BUSINESS = "exeris-business";
-
-const TEMPLATE_FILES: Record<TemplateKind, string> = {
-  ADR: "templates/ADR-TEMPLATE.md",
-  RFC: "templates/RFC-TEMPLATE.md",
-  RESEARCH: "templates/RESEARCH-TEMPLATE.md",
-};
-type TemplateKind = "ADR" | "RFC" | "RESEARCH";
-const TEMPLATE_KINDS: TemplateKind[] = ["ADR", "RFC", "RESEARCH"];
 
 // docs:search safety caps. The docs tree is small (dozens of files); these
 // are headroom rather than tight bounds, but they make the worst case
@@ -136,12 +137,9 @@ function listAdrsTool(handle: DocsFamily): RegisteredTool {
     handler: guard("docs", handle, async (config, args) => {
       const status =
         typeof args.status === "string" ? args.status.trim().toLowerCase() : "";
-      let entries: AdrEntry[];
-      try {
-        entries = readAdrIndex(config);
-      } catch (err) {
-        return errorResult(describeReadError(err, config, "adr-index.md"));
-      }
+      const index = readAdrEntries(config);
+      if (!index.ok) return errorResult(index.message);
+      const entries = index.entries;
       if (status.length === 0) {
         return ok(JSON.stringify(entries, null, 2));
       }
@@ -195,86 +193,7 @@ function getAdrTool(handle: DocsFamily): RegisteredTool {
         return errorResult(`Invalid input: 'number' must be ≥ 1, got ${number}`);
       }
 
-      let entries: AdrEntry[];
-      try {
-        entries = readAdrIndex(config);
-      } catch (err) {
-        return errorResult(describeReadError(err, config, "adr-index.md"));
-      }
-
-      const entry = entries.find((e) => e.number === number);
-      if (!entry) {
-        return errorResult(`ADR-${pad(number)} is not in the registry`);
-      }
-      if (!entry.link) {
-        return errorResult(
-          `ADR-${entry.numberPadded} ("${entry.title}") has no link in the registry ` +
-            `(status: ${entry.status.raw}). The content is not yet authored.`,
-        );
-      }
-
-      const trimmedTarget = entry.link.target.trim();
-      if (trimmedTarget.length === 0) {
-        return errorResult(
-          `ADR-${entry.numberPadded} ("${entry.title}") has an empty link target in the registry.`,
-        );
-      }
-
-      const candidates = localLinkCandidates(trimmedTarget);
-      if (candidates === null) {
-        return errorResult(
-          `ADR-${entry.numberPadded} ("${entry.title}") is linked outside the Exeris ` +
-            `ecosystem (${trimmedTarget}); the bridge reads registry content from disk only.`,
-        );
-      }
-
-      // First candidate present on disk wins. Every candidate goes through the
-      // sandbox, and one that resolves outside it refuses the whole lookup
-      // rather than falling through to the next.
-      // Operator-debug stderr parity with the other handlers — get_adr is the
-      // most likely legit-escape surface (cross-repo links) so the operator
-      // needs the structured fields on both failure branches. A candidate that
-      // merely misses before a later one hits is not a failure and is not logged.
-      let resolved: string | null = null;
-      let firstMiss: SandboxEscapeError | null = null;
-      for (const candidate of candidates) {
-        const joined = join(config.docsRoot, candidate);
-        try {
-          resolved = resolveInside(config.ecosystemRoot, joined);
-          break;
-        } catch (err) {
-          if (!(err instanceof SandboxEscapeError)) throw err;
-          if (err.resolved !== null) {
-            process.stderr.write(formatSandboxStderrLine(err));
-            return errorResult(
-              `ADR-${entry.numberPadded} link target escapes the ecosystem sandbox: ` +
-                `${entry.link.target}`,
-            );
-          }
-          firstMiss ??= err;
-        }
-      }
-      if (resolved === null) {
-        if (firstMiss) process.stderr.write(formatSandboxStderrLine(firstMiss));
-        return errorResult(missingAdrContentMessage(entry, config, candidates));
-      }
-
-      let body: string;
-      try {
-        body = readFileSync(resolved, "utf8");
-      } catch (err) {
-        const reason = redactEcosystemPaths(
-          err instanceof Error ? err.message : String(err),
-          config,
-        );
-        return errorResult(
-          `ADR-${entry.numberPadded} ("${entry.title}") link resolves to ` +
-            `${relativizeToEcosystem(config, resolved)}, ` +
-            `but the file could not be read: ${reason}.`,
-        );
-      }
-
-      return ok(body);
+      return render(readAdrContent(config, number));
     }),
   };
 }
@@ -310,7 +229,7 @@ function getTemplateTool(handle: DocsFamily): RegisteredTool {
         );
       }
       const kind = args.kind as TemplateKind;
-      return readDocsFileResult(config, TEMPLATE_FILES[kind], `${kind}-TEMPLATE.md`);
+      return render(readTemplate(config, kind));
     }),
   };
 }
@@ -327,7 +246,7 @@ function getHlaTool(handle: DocsFamily): RegisteredTool {
         "from exeris-docs. Canonical narrative of the three-tier model.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: guard("docs", handle, async (config) => readDocsFileResult(config, HLA_FILENAME, HLA_FILENAME)),
+    handler: guard("docs", handle, async (config) => render(readHla(config))),
   };
 }
 
@@ -343,9 +262,7 @@ function getWhitepaperTool(handle: DocsFamily): RegisteredTool {
         "from exeris-docs.",
       inputSchema: { type: "object", properties: {} },
     },
-    handler: guard("docs", handle, async (config) =>
-      readDocsFileResult(config, WHITEPAPER_FILENAME, WHITEPAPER_FILENAME),
-    ),
+    handler: guard("docs", handle, async (config) => render(readWhitepaper(config))),
   };
 }
 
@@ -824,12 +741,6 @@ function adrPostResolveGuard(repoDocsRoot: string, resolved: string): ReturnType
 // ---------------------------------------------------------------------------
 // Shared internals
 
-function readAdrIndex(config: DocsRoots): AdrEntry[] {
-  const indexPath = resolveInside(config.ecosystemRoot, join(config.docsRoot, ADR_INDEX_FILENAME));
-  const raw = readFileSync(indexPath, "utf8");
-  return parseAdrIndex(raw);
-}
-
 /**
  * Walk a directory recursively, returning absolute paths of `*.md` files
  * under it. Skips hidden dirs and `node_modules`. Bounded by maxFiles to
@@ -941,61 +852,6 @@ function validateRepoName(value: unknown):
   return value;
 }
 
-/**
- * Sandbox-check + read a docs-root-relative file path and return either the
- * body wrapped in a docs:* `ok()` result, or an `errorResult` with a redacted
- * message. The `displayName` is used in user-facing strings (and identifies
- * the resource in the SandboxEscape branch).
- */
-function readDocsFileResult(
-  config: DocsRoots,
-  relativePath: string,
-  displayName: string,
-) {
-  return readSandboxedFile(config, config.docsRoot, relativePath, displayName);
-}
-
-/**
- * Generalised sandbox-check + read. `anchorRoot` is the trusted base path
- * the `relativePath` is joined under; both end up sandbox-checked against
- * `config.ecosystemRoot` before any read. Used by docs:* tools that read
- * either from docsRoot (templates, hla, whitepaper) or from a sibling
- * repo's docs/ tree (get_repo_doc).
- */
-function readSandboxedFile(
-  config: DocsRoots,
-  anchorRoot: string,
-  relativePath: string,
-  displayName: string,
-) {
-  const joined = join(anchorRoot, relativePath);
-  let resolved: string;
-  try {
-    resolved = resolveInside(config.ecosystemRoot, joined);
-  } catch (err) {
-    if (err instanceof SandboxEscapeError) {
-      process.stderr.write(formatSandboxStderrLine(err));
-      return errorResult(
-        err.resolved === null
-          ? `Failed to read ${displayName}: file not found at the expected path`
-          : `Failed to read ${displayName}: resolved path is outside the ecosystem sandbox`,
-      );
-    }
-    throw err;
-  }
-  try {
-    return ok(readFileSync(resolved, "utf8"));
-  } catch (err) {
-    const reason = redactEcosystemPaths(
-      err instanceof Error ? err.message : String(err),
-      config,
-    );
-    return errorResult(
-      `Failed to read ${displayName} at ${relativizeToEcosystem(config, resolved)}: ${reason}`,
-    );
-  }
-}
-
 function ok(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
@@ -1007,95 +863,7 @@ function errorResult(message: string) {
   };
 }
 
-function pad(n: number): string {
-  return n.toString().padStart(3, "0");
-}
-
-/**
- * Render an absolute path relative to ecosystemRoot for user-facing messages.
- * Avoids leaking operator $HOME / install layout. Note: a `..`-prefixed
- * result still reveals the climb depth (e.g. `../../something`) — that's
- * structural information about how deep ecosystemRoot sits in the operator's
- * filesystem. Accepted trade-off: post-sandbox paths shouldn't reach this
- * function with `..` prefixes, so the depth-leak is a degraded-state hint
- * for an unexpected code path, not the primary surface.
- */
-function relativizeToEcosystem(config: DocsRoots, absPath: string): string {
-  const rel = relative(config.ecosystemRoot, absPath);
-  if (rel === "") return ".";
-  return rel;
-}
-
-/**
- * Strip the ecosystemRoot absolute prefix from a free-form message and
- * substitute `<ecosystem>`. Anchored on a trailing path separator so a
- * non-boundary prefix doesn't over-replace — e.g. ecosystemRoot=/home/u/dev
- * must not substitute inside /home/u/development/foo.
- *
- * SCOPE: this helper only redacts ecosystem-rooted paths. Errors that embed
- * absolute paths from OUTSIDE the ecosystem (currently unreachable in this
- * codebase — every read goes through resolveInside) are not stripped.
- * Defence-in-depth (regex-redact any `/path/to/file.md`) is deliberately
- * not added here; it would have false positives and a wider blast radius.
- */
-export function redactEcosystemPaths(message: string, config: DocsRoots): string {
-  const anchor = config.ecosystemRoot + sep;
-  return message.split(anchor).join("<ecosystem>" + sep);
-}
-
-/**
- * Format the operator-debug stderr line carrying SandboxEscape structured
- * fields. JSON-serialized so control characters in agent-reachable fields
- * (decoded `%0A` newline, `%1B` ESC, `%07` BEL from a poisoned registry
- * link target) can't forge log lines or inject ANSI escapes. The output
- * is a single-line JSON object suitable for log scrapers.
- */
-export function formatSandboxStderrLine(err: SandboxEscapeError): string {
-  return (
-    JSON.stringify({
-      level: "error",
-      component: "exeris-ai-bridge",
-      event: "SandboxEscape",
-      root: err.root,
-      candidate: err.candidate,
-      resolved: err.resolved,
-    }) + "\n"
-  );
-}
-
-/**
- * Compose a user-facing message for an index/registry-read failure without
- * leaking absolute paths. `resourceName` is the file/resource identifier
- * shown to the agent. Wire-facing message stays sanitized.
- *
- * Side effect: writes a JSON-serialised stderr line carrying the absolute
- * paths for operator debugging. Placeholder for 0.11.0 observability.
- */
-function describeReadError(err: unknown, config: DocsRoots, resourceName: string): string {
-  if (err instanceof SandboxEscapeError) {
-    process.stderr.write(formatSandboxStderrLine(err));
-    return err.resolved === null
-      ? `Failed to read ${resourceName}: file not found in the configured docs root`
-      : `Failed to read ${resourceName}: resolved path is outside the ecosystem sandbox`;
-  }
-  const raw = err instanceof Error ? err.message : String(err);
-  return `Failed to read ${resourceName}: ${redactEcosystemPaths(raw, config)}`;
-}
-
-function missingAdrContentMessage(entry: AdrEntry, config: DocsRoots, candidates: string[]): string {
-  const hint =
-    entry.visibility === "enterprise-private"
-      ? "This is an enterprise-private ADR; its content may not be available in this checkout."
-      : `Check that the cross-repo sibling (${entry.owningRepo}) is present alongside exeris-docs.` +
-        (entry.link?.github ? ` Its authoritative copy is ${entry.link.github}.` : "");
-  // A GitHub URL is its own clearest statement of the target; the on-disk
-  // guesses derived from it would only restate it, less readably.
-  const target =
-    candidates.length === 1
-      ? relativizeToEcosystem(config, join(config.docsRoot, candidates[0]))
-      : (entry.link?.target ?? "");
-  return (
-    `ADR-${entry.numberPadded} ("${entry.title}") link target ` +
-    `${target} could not be resolved on disk. ${hint}`
-  );
+/** Render shared registry content as a tool result: the body, or the failure as an error. */
+function render(content: DocsContent) {
+  return content.ok ? ok(content.text) : errorResult(content.message);
 }
