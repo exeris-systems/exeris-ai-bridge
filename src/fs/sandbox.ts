@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 // Per ADR-025 §Concrete obligations item 4 and the v0.2.0 locked sandbox
 // decision: every filesystem read in `docs:*` (and any future filesystem-bound
@@ -67,9 +67,10 @@ export function resolveInside(root: string, candidate: string): string {
  * so it is only as sound as the realpath step the caller ran first.
  *
  * Inside-root iff the relative path is "" (same as root), or it neither
- * climbs out (starts with "..") nor jumps to a different drive (absolute).
+ * climbs out (is ".." or starts with a ".." SEGMENT — a directory merely named
+ * "..cache" is inside) nor jumps to a different drive (absolute).
  */
 export function isInsideRealRoot(realRoot: string, realCandidate: string): boolean {
   const rel = relative(realRoot, realCandidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }

@@ -274,3 +274,18 @@ async function waitUntilGone(pid: number): Promise<boolean> {
   }
   return false;
 }
+
+test("a temporary directory under a dot-dot-named directory inside the project is refused", () => {
+  const dotted = join(projectRoot, "..cache");
+  mkdirSync(dotted);
+  assert.throws(() => createWorkdir({ protectedRoots: [projectRoot], tmpRoot: dotted }), WorkdirRefusedError);
+  assert.deepEqual(readdirNames(dotted), []);
+});
+
+test("a temporary directory in a dot-dot-named sibling of the project is allowed", async () => {
+  const sibling = join(scratch, "..elsewhere");
+  mkdirSync(sibling);
+  await withWorkdir({ protectedRoots: [projectRoot], tmpRoot: sibling }, async (dir) => {
+    assert.ok(existsSync(dir));
+  });
+});
