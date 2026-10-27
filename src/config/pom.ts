@@ -34,14 +34,14 @@ export function stripComments(content: string): string {
 }
 
 export function tagValue(block: string, tag: string): string | null {
-  const m = block.match(new RegExp(`<${tag}>\\s*([^<\\s]+)\\s*</${tag}>`, "i"));
+  const m = new RegExp(String.raw`<${tag}>\s*([^<\s]+)\s*</${tag}>`, "i").exec(block);
   return m ? m[1].trim() : null;
 }
 
 export function parsePom(content: string): PomModel {
   const stripped = stripComments(content);
   const properties = new Map<string, string>();
-  const propsMatch = stripped.match(/<properties>([\s\S]*?)<\/properties>/i);
+  const propsMatch = /<properties>([\s\S]*?)<\/properties>/i.exec(stripped);
   if (propsMatch) {
     const tagRegex = /<([a-zA-Z0-9_.-]+)>([^<]+)<\/\1>/g;
     let match: RegExpExecArray | null;
@@ -50,7 +50,7 @@ export function parsePom(content: string): PomModel {
     }
   }
   let parent: Coordinate | undefined;
-  const parentMatch = stripped.match(/<parent>([\s\S]*?)<\/parent>/i);
+  const parentMatch = /<parent>([\s\S]*?)<\/parent>/i.exec(stripped);
   if (parentMatch) {
     const groupId = tagValue(parentMatch[1], "groupId");
     const artifactId = tagValue(parentMatch[1], "artifactId");
@@ -72,7 +72,7 @@ export function resolveValue(
     return null;
   }
   const trimmed = val.trim();
-  const propMatch = trimmed.match(/^\$\{([^}]+)\}$/);
+  const propMatch = /^\$\{([^}]+)\}$/.exec(trimmed);
   if (propMatch) {
     const key = propMatch[1].trim();
     if (visited.has(key) || !properties.has(key)) {

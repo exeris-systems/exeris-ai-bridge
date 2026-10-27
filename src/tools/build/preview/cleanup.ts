@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import { join } from "node:path";
 
 // Process-wide cleanup for what a preview leaves behind if the bridge itself
 // is stopped mid-run.
@@ -50,10 +51,17 @@ export function cleanupNow(): void {
   directories.clear();
 }
 
+/**
+ * taskkill by absolute path, so the kill never resolves a binary through PATH.
+ */
+function taskkillPath(): string {
+  return join(process.env.SystemRoot ?? String.raw`C:\Windows`, "System32", "taskkill.exe");
+}
+
 export function killGroupSync(pgid: number): void {
   if (process.platform === "win32") {
     try {
-      spawnSync("taskkill", ["/pid", String(pgid), "/T", "/F"], { shell: false, stdio: "ignore" });
+      spawnSync(taskkillPath(), ["/pid", String(pgid), "/T", "/F"], { shell: false, stdio: "ignore" });
     } catch {
       // Already gone.
     }
