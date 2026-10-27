@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Unavailable } from "../../../config/env.js";
 import { findArtifactJar, resolveLocalRepository } from "../../../config/maven.js";
 import { resolveInside } from "../../../fs/sandbox.js";
-import { APP_GROUP_IDS, parsePom, readBounded, resolveValue } from "../../sdk/skew.js";
+import { APP_GROUP_IDS, parsePom, readBounded, resolveValue } from "../../../config/pom.js";
 
 // Finds the generator the PROJECT pins, locally, and refuses to guess.
 //
