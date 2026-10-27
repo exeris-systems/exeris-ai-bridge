@@ -34,16 +34,16 @@ const MAX_POM_BYTES = 2 * 1024 * 1024; // 2 MB size cap
 const MAX_CHAIN_DEPTH = 6;
 
 /** exeris-tooling 0.9.0 published the app BOM chain under eu.exeris.tooling; 0.10.0 moved it to eu.exeris. */
-const APP_GROUP_IDS: readonly string[] = ["eu.exeris", "eu.exeris.tooling"];
+export const APP_GROUP_IDS: readonly string[] = ["eu.exeris", "eu.exeris.tooling"];
 const SDK_VERSION_PROPERTY = "exeris.sdk.version";
 
-interface Coordinate {
+export interface Coordinate {
   readonly groupId: string;
   readonly artifactId: string;
   readonly version: string;
 }
 
-interface PomModel {
+export interface PomModel {
   readonly properties: Map<string, string>;
   readonly parent?: Coordinate;
   readonly body: string;
@@ -65,7 +65,7 @@ function tagValue(block: string, tag: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-function parsePom(content: string): PomModel {
+export function parsePom(content: string): PomModel {
   const stripped = stripComments(content);
   const properties = new Map<string, string>();
   const propsMatch = stripped.match(/<properties>([\s\S]*?)<\/properties>/i);
@@ -90,7 +90,7 @@ function parsePom(content: string): PomModel {
 }
 
 /** Resolves a literal, or a chain of `${prop}` references, within one pom's own properties. */
-function resolveValue(
+export function resolveValue(
   val: string,
   properties: Map<string, string>,
   visited: Set<string> = new Set(),
@@ -114,7 +114,7 @@ function resolveValue(
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function readBounded(root: string, path: string): string | null {
+export function readBounded(root: string, path: string): string | null {
   try {
     const safe = resolveInside(root, path);
     const stats = statSync(safe);
