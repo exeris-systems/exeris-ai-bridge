@@ -131,7 +131,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 32 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 6 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 33 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 7 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repository layout
 
