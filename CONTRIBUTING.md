@@ -141,6 +141,8 @@ src/
   instructions.ts            the `initialize` instructions handed to the model at connect time
   config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
   config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
+  config/tooling-pin.ts      the tooling version a project pins — app-parent, codegen plugin, or the
+                             installed @exeris/codegen-ts; shared by generator resolution and skew
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
   transport/
     lsp-framing.ts           LSP base-protocol (Content-Length) message codec
@@ -172,6 +174,8 @@ src/
                              and the codegen output tree in src/main/generated/java
     build/starter.ts         build-get_starter — pom.xml / package.json for a new application, from
                              the vendored exeris-app-bom triple; bundled data only, writes nothing
+    build/tooling-skew.ts    toolingSkew — the project's pinned tooling release against the one the
+                             vendored generator catalogue came from
     build/shapes.ts          envelope validation (schemaVersion + ADR-042 sourceDigest) and the
                              filename-prefix decoding; the AST body passes through verbatim
     build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
