@@ -433,6 +433,8 @@ test("metadata whose names could leave the output directory is refused before an
     "nested name key": { entityName: "Ok", sagas: [{ sagaName: "../up" }] },
     "nested module": { entityName: "Ok", module: "a/b" },
     "nested package key": { entityName: "Ok", views: [{ viewPackage: "x/y" }] },
+    "name list element": { entityName: "Ok", eventClassNames: ["Fine", "../x"] },
+    "nested name list": { entityName: "Ok", handlers: [{ eventClassNames: [["a", ["b/c"]]] }] },
     "control character": { entityName: "Ok", name: "a\u0000b" },
   };
   const tool = toolFor(project, { resolveJava: neverResolved() });
@@ -447,6 +449,17 @@ test("metadata whose names could leave the output directory is refused before an
     assert.ok(out.reason.length > 0 && out.remedy.length > 0, label);
   }
   assert.deepEqual(workdirsLeft(), []);
+});
+
+test("a valid name list passes the metadata check", async () => {
+  const unavailable = (): GeneratorResolution => ({ state: "unavailable", reason: "no jar", remedy: "install" });
+  const tool = toolFor(project, { resolveJava: unavailable });
+  writeFileSync(
+    join(META_ABS(), "Case.json"),
+    JSON.stringify({ entityName: "Ok", eventClassNames: ["OrderPlaced", "com.example.Shipped"], handlerNames: [["a"], ["b"]] }),
+  );
+  const out = payload(await tool.handler({ target: "java" }));
+  assert.equal(out.error, "generator_unavailable");
 });
 
 test("unparseable, non-object and linked metadata files are refused", async () => {
