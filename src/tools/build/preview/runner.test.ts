@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { afterEach, beforeEach, test } from "node:test";
 
 import {
@@ -9,6 +10,7 @@ import {
   DEFAULT_MAX_OUTPUT_BYTES,
   DEFAULT_TIMEOUT_MS,
   checkFilesSize,
+  generatorEnv,
   runGenerator,
   type RunResult,
 } from "./runner.js";
@@ -44,7 +46,7 @@ interface Outcome {
 /** Run a fake generator inside a workdir the way the preview tool will: `--output-dir=<workdir>`. */
 async function runFake(
   script: string,
-  limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+  limits: { timeoutMs?: number; maxOutputBytes?: number; graceMs?: number } = {},
   extraArgs: string[] = [],
 ): Promise<Outcome> {
   let workdir = "";
@@ -53,6 +55,7 @@ async function runFake(
     return runGenerator({
       command: process.execPath,
       args: [script, `--output-dir=${dir}`, ...extraArgs],
+      env: generatorEnv(process.env, dir),
       ...limits,
     });
   });
@@ -80,7 +83,11 @@ console.log("generated 1 file");
   let workdir = "";
   const result = await withWorkdir({ protectedRoots: [projectRoot] }, async (dir) => {
     workdir = dir;
-    const r = await runGenerator({ command: process.execPath, args: [script, `--output-dir=${dir}`] });
+    const r = await runGenerator({
+      command: process.execPath,
+      args: [script, `--output-dir=${dir}`],
+      env: generatorEnv(process.env, dir),
+    });
     seen = readFileSync(join(dir, "pkg", "A.java"), "utf8");
     return r;
   });
@@ -191,7 +198,7 @@ writeFileSync(${JSON.stringify(pidFile)}, String(grandchild.pid));
 });
 
 test("a command that cannot start reports a spawn error instead of throwing", async () => {
-  const result = await runGenerator({ command: join(scratch, "no-such-binary"), args: [] });
+  const result = await runGenerator({ command: join(scratch, "no-such-binary"), args: [], env: {} });
   assert.equal(result.exitCode, null);
   assert.ok(result.spawnError !== null);
 });
@@ -261,6 +268,119 @@ test("checkFilesSize names the limit and its value when the total exceeds it", (
 
 function readdirNames(dir: string): string[] {
   return readdirSync(dir);
+}
+
+test("the generator environment is an allowlist: no *_OPTIONS, temporary directories on the workdir", async () => {
+  const base = {
+    PATH: process.env.PATH,
+    HOME: "/home/someone",
+    LANG: "C",
+    JAVA_TOOL_OPTIONS: "-Xmx1m",
+    JDK_JAVA_OPTIONS: "-Xmx1m",
+    NODE_OPTIONS: "--require x",
+    SECRET_TOKEN: "s",
+    TMPDIR: "/elsewhere",
+  };
+  const env = generatorEnv(base, "/scratch/w");
+  assert.deepEqual(Object.keys(env).sort(), ["HOME", "LANG", "PATH", "TEMP", "TMP", "TMPDIR"]);
+  assert.equal(env.TMPDIR, "/scratch/w");
+  assert.equal(env.TMP, "/scratch/w");
+  assert.equal(env.TEMP, "/scratch/w");
+
+  const script = fakeGenerator("env", `console.log(JSON.stringify(Object.keys(process.env).sort()));`);
+  let out = "";
+  await withWorkdir({ protectedRoots: [projectRoot] }, async (dir) => {
+    const r = await runGenerator({
+      command: process.execPath,
+      args: [script],
+      env: generatorEnv({ ...process.env, NODE_OPTIONS: "--no-warnings", SECRET_TOKEN: "s" }, dir),
+    });
+    out = r.stdout;
+  });
+  const keys = JSON.parse(out) as string[];
+  assert.ok(!keys.includes("NODE_OPTIONS"));
+  assert.ok(!keys.includes("SECRET_TOKEN"));
+});
+
+test("a descendant that leaves the process group and holds stdout cannot keep the run open", async (t) => {
+  const pidFile = join(scratch, "escaped.pid");
+  const script = fakeGenerator(
+    "escape",
+    `import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+// detached => its own session; stdio inherit => it holds this process's stdout pipe.
+const escaped = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: ["ignore", "inherit", "inherit"] });
+writeFileSync(${JSON.stringify(pidFile)}, String(escaped.pid));
+setInterval(() => {}, 1000);
+`,
+  );
+  t.after(() => {
+    try {
+      process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  });
+  const started = Date.now();
+  const { result, workdir } = await runFake(script, { timeoutMs: 500, graceMs: 300 });
+  const elapsed = Date.now() - started;
+  assert.equal(result.timedOut, true);
+  assert.equal(result.limit?.name, "timeout");
+  assert.ok(elapsed < 500 + 300 + 1_500, `settled in ${elapsed} ms`);
+  assert.equal(existsSync(workdir), false);
+});
+
+test("stopping the bridge with SIGTERM kills the generator's process group and removes the workdir", async () => {
+  const runnerUrl = new URL("./runner.js", import.meta.url).href;
+  const workdirUrl = new URL("./workdir.js", import.meta.url).href;
+  const genPidFile = join(scratch, "gen.pid");
+  const grandPidFile = join(scratch, "grand.pid");
+  const generator = fakeGenerator(
+    "sigterm-gen",
+    `import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+writeFileSync(${JSON.stringify(grandPidFile)}, String(g.pid));
+writeFileSync(${JSON.stringify(genPidFile)}, String(process.pid));
+setInterval(() => {}, 1000);
+`,
+  );
+  const host = join(scratch, "host.mjs");
+  writeFileSync(
+    host,
+    `import { runGenerator, generatorEnv } from ${JSON.stringify(runnerUrl)};
+import { withWorkdir } from ${JSON.stringify(workdirUrl)};
+await withWorkdir({ protectedRoots: [${JSON.stringify(projectRoot)}] }, async (dir) => {
+  console.log("workdir " + dir);
+  await runGenerator({ command: process.execPath, args: [${JSON.stringify(generator)}], env: generatorEnv(process.env, dir), timeoutMs: 60000 });
+});
+`,
+  );
+  const hostProcess = spawn(process.execPath, [host], { stdio: ["ignore", "pipe", "inherit"] });
+  let seen = "";
+  hostProcess.stdout.on("data", (c: Buffer) => (seen += c.toString()));
+  const exited = new Promise<void>((resolve) => hostProcess.on("exit", () => resolve()));
+
+  await until(() => existsSync(grandPidFile) && existsSync(genPidFile) && /workdir /.test(seen));
+  const workdir = /workdir (.+)/.exec(seen)![1].trim();
+  const genPid = Number(readFileSync(genPidFile, "utf8"));
+  const grandPid = Number(readFileSync(grandPidFile, "utf8"));
+  assert.ok(existsSync(workdir));
+
+  hostProcess.kill("SIGTERM");
+  await exited;
+
+  assert.equal(existsSync(workdir), false, "the workdir must be removed");
+  assert.equal(await waitUntilGone(genPid), true, "the generator must be killed");
+  assert.equal(await waitUntilGone(grandPid), true, "its descendant must be killed");
+});
+
+async function until(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error("condition not reached");
 }
 
 async function waitUntilGone(pid: number): Promise<boolean> {
