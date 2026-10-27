@@ -68,7 +68,7 @@ The repo is deliberately named *bridge*, not *mcp*: MCP is the first protocol su
 
 ### 📋 What is NOT in scope
 
-- **Authoring agent-facing prompts, skills, or persona configurations.** Skill bundles (e.g. `exeris-architect-guardrails`) currently live next to the code they review (`exeris-kernel/.claude/skills/`) and SHOULD stay there. The bridge exposes *data*; agents bring their own *behavior*.
+- **Authoring agent-facing prompts, skills, or persona configurations.** Skill bundles (e.g. `exeris-architect-guardrails`) currently live next to the code they review (`exeris-kernel/.claude/skills/`) and SHOULD stay there. The bridge exposes *data*; agents bring their own *behavior*. *(Narrowed by the 2026-10-27 amendment "Stateless Prompt Templates, `build-validate_brief` and the Brief Schema" below: the bridge may ship stateless MCP prompt templates. Skill bundles and persona configurations stay out of scope.)*
 - **Replacing Studio.** Studio (`exeris-platform`) is a human-facing IDE/UX. The bridge is an agent-facing protocol. They consume the same LSP index but serve different surfaces.
 - **Embedding LLMs.** `exeris-ai-bridge` does NOT call out to any model provider. It is the *server* side of MCP — the agent (Claude, Cursor, etc.) is the client and the LLM lives there. No model API keys live in this repo.
 - **A capability or SKU.** This repo is not part of the Tier 1 substrate, the Tier 2 capability ecosystem, or the Tier 3 SKU layer (per HLA §§2.2, 3, 4). It is developer-facing tooling.
@@ -359,6 +359,38 @@ Item 3 of the 2026-06-24 amendment keeps the bridge off `exeris/applyMutation`. 
 - The 2026-06-24 amendment above, whose item 2 this extends and whose item 3 it keeps.
 - ADR-042 (`exeris-sdk`): the `MutationOp` / `MutationResult` vocabulary, `SourceDigest` as the concurrency token, and its 2026-10-07 amendment on the token-named baseline.
 - `exeris-platform/exeris-platform-lsp`: `ExerisProtocolExtensions.previewMutation` and `MutationPreview`, backed by `MutationApplyService.preview`; `ApplyMutationTest` pins the preview cases, `UnifiedDiffTest` the diff format, and `TransportParityIT` that stdio and WebSocket return the same preview.
+
+## Stateless Prompt Templates, `build-validate_brief` and the Brief Schema (2026-10-27 amendment)
+
+"What is NOT in scope" excludes authoring agent-facing prompts, and says the bridge exposes data while agents bring their own behaviour. Yet ROADMAP 0.9.0 lists four P1 and four P2 prompts and 0.11.0 lists `bridge-troubleshoot`, and none of them has been reconciled with that sentence. RFC-2026-10-24 (pre-construction discovery, `exeris-docs`, accepted 2026-10-27) adds a fifth P2 workflow, `discover-requirements`, together with a tool and a resource that the prompt relies on. That RFC chose a stateless prompt over leaving every client to improvise its own procedure, because a discovery step that varies by client is no shared step at all. This amendment admits that, and draws the line at execution, not at knowledge.
+
+### The Decision
+
+1. **The bridge may ship stateless MCP prompt templates that encode canonical workflows over Exeris contracts**, such as requirements discovery and entity authoring, provided the bridge itself holds no session state, conducts no multi-turn loop and invokes no model. The client renders a prompt; the bridge only returns its template and the arguments it was given. A prompt carries knowledge about how to do a workflow, and is described as that, not as pure data. The same terms admit every prompt in ROADMAP 0.9.0 and 0.11.0.
+2. **Prompts are listed on every transport, as tools are.** `prompts/list` does not depend on the transport, because the surface frozen at 1.0 does not. A step of a prompt that calls a tool of a family the transport does not serve meets that family's `family_unavailable` result. The prompt states which of its steps need a local server.
+3. **`build-validate_brief` joins `build:*`.** It reads a brief from `docs/briefs/` under the project root and checks it against the brief schema of the SDK version the project pins (RFC-2026-10-24, §Testing, "The tool's contract"). Because it reads the user's project, it belongs to `build:*` and is local only under the 2026-09-30 amendment, so a brief, which carries a customer's product intent, never reaches the hosted endpoint. It reads no `cap-manifest.json`, which is a `caps:*` source. It writes nothing.
+4. **The brief schema is an `sdk:*` resource.** It is vendored at release from the `exeris-sdk` artefact that emits it (ADR-106), pinned to its schema-format integer, served beside the annotation catalog and the AST schema, and available on the hosted endpoint, since it carries no user data.
+
+### Risks and assumptions
+
+- **Risk:** a prompt grows into an agent. The execution line in point 1 (no state, no loop, no model) is what stops it, and it applies to every later prompt, not only the ones this amendment was written for. A prompt that needs any of the three is out of scope until a further amendment.
+- **Assumes:** `exeris-sdk` releases the brief records and `brief-schema.json` (ADR-106). `build-validate_brief` and the schema resource ship only against a released artefact that carries them; until then neither is registered.
+- **Reversed by:** a client population that ignores server prompts. Point 2 then buys nothing, and the procedure moves to the data the tools return.
+
+### What this amendment does NOT change
+
+- **Skill bundles and persona configurations stay out of scope.** They live next to the code they review, as "What is NOT in scope" says.
+- **No model API, read-only across all families, preview never write.** A prompt invokes nothing; `build-validate_brief` writes nothing.
+- **No family is added.** Prompts belong to no tool family, and `build-validate_brief` and the schema resource join existing families.
+- **The hosted family split** (2026-09-30 amendment) stands as written.
+
+### Cross-references for this amendment
+
+- RFC-2026-10-24 (`exeris-docs`, pre-construction discovery): the brief, its readiness gate, the tool's contract and the rollout order.
+- ADR-106 (`exeris-sdk`, reserved): the brief contract.
+- ADR-003 (`exeris-sdk`, Entity-First): why the brief references the source model and never re-encodes it.
+- The 2026-08-16 "Two Personas" amendment above: the P2 track the discovery step belongs to.
+- The 2026-09-30 amendments above: the hosted family split that makes `build-validate_brief` local only.
 
 ## Cross-references
 
