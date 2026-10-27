@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import type { Unavailable } from "../../../config/env.js";
 import { findArtifactJar, resolveLocalRepository } from "../../../config/maven.js";
@@ -41,6 +41,13 @@ export interface ResolvedGenerator {
   readonly kind: GeneratorKind;
   /** The version the project pins (Java) or has installed (TypeScript). */
   readonly version: string;
+  /** Where it was found: the local Maven repository (Java) or the project's `node_modules` (TypeScript). */
+  readonly source: "m2" | "node_modules";
+  /**
+   * The launched artefact relative to the local Maven repository or the project root, `/`-separated,
+   * so it is safe to show an agent.
+   */
+  readonly path: string;
   /** Build the launch for one run inside the bridge's scratch directory. */
   launch(metadataDir: string, workdir: string): GeneratorLaunch;
 }
@@ -147,6 +154,8 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     state: "available",
     kind: "java",
     version,
+    source: "m2",
+    path: relative(repo, jar).split(sep).join("/"),
     launch: (metadataDir, workdir) => {
       const outputDir = join(workdir, OUTPUT_SUBDIR);
       return {
@@ -314,6 +323,8 @@ export function resolveTypeScriptGenerator(
     state: "available",
     kind: "typescript",
     version,
+    source: "node_modules",
+    path: relative(projectRoot, bin).split(sep).join("/"),
     launch: (metadataDir, workdir) => {
       const outputDir = join(workdir, OUTPUT_SUBDIR);
       return {

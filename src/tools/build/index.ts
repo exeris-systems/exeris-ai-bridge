@@ -25,6 +25,7 @@ import {
   parseCodegenManifest,
   TEST_GENERATED_ROOT,
 } from "./artefacts.js";
+import { previewGenerationTool, type PreviewDeps } from "./preview/tool.js";
 import {
   classifyMetadataFile,
   isJavaSimpleName,
@@ -62,6 +63,7 @@ export function registerBuildTools(
   config: BridgeConfig,
   bundle: BundleState = loadBundle(),
   rootOverride?: string,
+  preview: PreviewDeps = {},
 ): RegisteredTool[] {
   const catalogue = loadGeneratorCatalogue(bundle, rootOverride);
   const handle: BuildFamily =
@@ -75,6 +77,7 @@ export function registerBuildTools(
     getDetachStateTool(handle),
     explainDiagnosticTool(handle),
     getStarterTool(loadAppStarter(bundle, rootOverride)),
+    previewGenerationTool(handle, config.ecosystemRoot, preview),
   ];
 }
 

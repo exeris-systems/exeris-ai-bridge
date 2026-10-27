@@ -90,6 +90,7 @@ test("registerBuildTools registers exactly the six build-* tools", () => {
     "build-get_domain_metadata",
     "build-get_starter",
     "build-list_domains",
+    "build-preview_generation",
   ]);
 });
 
@@ -221,8 +222,9 @@ test("build-* is dark when no project root resolved", async () => {
     "build-explain_artefacts",
     "build-get_detach_state",
     "build-explain_diagnostic",
+    "build-preview_generation",
   ]) {
-    const res = await tools.get(name)!.handler({ name: "Station" });
+    const res = await tools.get(name)!.handler({ name: "Station", target: "java" });
     assert.equal(res.isError, true, name);
     const payload = JSON.parse(text(res));
     assert.equal(payload.error, "family_unavailable");

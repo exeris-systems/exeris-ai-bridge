@@ -198,13 +198,13 @@ function patchOrOmitted(
   return patch === undefined ? { diff: "", diffOmitted: "too_large" } : { diff: patch };
 }
 
-interface ListedFile {
+export interface ListedFile {
   readonly relative: string;
   readonly absolute: string;
   readonly size: number;
 }
 
-interface Listing {
+export interface Listing {
   readonly files: ListedFile[];
   readonly limit: PreviewLimit | null;
 }
@@ -213,7 +213,7 @@ interface Listing {
  * Regular files under `root`, depth-first. A missing root is an empty tree. A
  * tree beyond the entry or depth cap stops the walk and reports a `files` limit.
  */
-function listFiles(root: string): Listing {
+export function listFiles(root: string): Listing {
   const out: ListedFile[] = [];
   let limit: PreviewLimit | null = null;
   const walk = (dir: string, prefix: string, depth: number): void => {
