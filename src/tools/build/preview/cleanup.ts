@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 const groups = new Set<number>();
 const directories = new Set<string>();
+const closers = new Set<() => void>();
 let installed = false;
 
 /** Track a live generator process group (its leader's pid), so exit can kill it. */
@@ -35,8 +36,26 @@ export function untrackDirectory(dir: string): void {
   directories.delete(dir);
 }
 
-/** Kill every tracked group and remove every tracked directory. Synchronous and never throws. */
+/** Track a synchronous closer (a filesystem watcher, say), so exit can run it. */
+export function trackCloser(close: () => void): void {
+  install();
+  closers.add(close);
+}
+
+export function untrackCloser(close: () => void): void {
+  closers.delete(close);
+}
+
+/** Run every closer, kill every tracked group and remove every tracked directory. Synchronous and never throws. */
 export function cleanupNow(): void {
+  for (const close of closers) {
+    try {
+      close();
+    } catch {
+      // Closing is best effort at exit.
+    }
+  }
+  closers.clear();
   for (const pgid of groups) {
     killGroupSync(pgid);
   }
