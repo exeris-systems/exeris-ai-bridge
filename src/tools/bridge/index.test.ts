@@ -162,6 +162,13 @@ test("bridge-health reports every dark family with its reason and remedy", async
   );
 });
 
+test("bridge-health reports a degraded lsp watch with its reason", async () => {
+  const lsp = new LspClient(LSP_SPEC, { channelFactory: () => new SilentLspChannel() });
+  lsp.watchStatus = () => ({ state: "degraded", reason: "the workspace root is the home directory" });
+  const body = await call(LIVE, "bridge-health", { lsp });
+  assert.equal(body.families[1].watch, "degraded (the workspace root is the home directory)");
+});
+
 test("bridge-health reports the launch source and child state of a live family", async () => {
   let spawns = 0;
   const lsp = new LspClient(LSP_SPEC, {
@@ -187,6 +194,7 @@ test("bridge-health reports the launch source and child state of a live family",
     state: "available",
     source: "source-tree",
     transport: { state: "not-started", lastError: null },
+    watch: "off",
   });
   assert.deepEqual(body.families[2], {
     family: "kernel",

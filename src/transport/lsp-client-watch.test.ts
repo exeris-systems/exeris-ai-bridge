@@ -32,10 +32,17 @@ class FakeChannel implements LspChannel {
   onData(handler: (c: Buffer) => void): void {
     this.dataHandler = handler;
   }
-  onClose(_handler: (r: LspCloseReason) => void): void {
-    // These tests never crash the fake server.
+  private closeHandler: ((r: LspCloseReason) => void) | null = null;
+  closed = false;
+  onClose(handler: (r: LspCloseReason) => void): void {
+    this.closeHandler = handler;
   }
-  close(): void {}
+  close(): void {
+    this.closed = true;
+  }
+  emitClose(reason: LspCloseReason): void {
+    this.closeHandler?.(reason);
+  }
 
   respond(message: unknown): void {
     this.dataHandler?.(encodeMessage(message));
@@ -78,9 +85,10 @@ interface Fixture {
   cleanup(): void;
 }
 
-function fixture(reverse: (root: string) => unknown): Fixture {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "exeris-lsp-watch-")));
-  mkdirSync(join(root, "sub"));
+function fixture(reverse: (root: string) => unknown, rootOverride?: string): Fixture {
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "exeris-lsp-watch-")));
+  mkdirSync(join(tmp, "sub"));
+  const root = rootOverride ?? tmp;
   const channel = new FakeChannel();
   channel.autoResponder = (msg) => {
     if (msg.method === "initialize") return ackInitialize(msg);
@@ -101,7 +109,7 @@ function fixture(reverse: (root: string) => unknown): Fixture {
     },
     cleanup: () => {
       client.dispose();
-      rmSync(root, { recursive: true, force: true });
+      rmSync(tmp, { recursive: true, force: true });
     },
   };
 }
@@ -295,5 +303,115 @@ test("dispose stops the watcher", async () => {
     assert.equal(watched(f.channel).length, 0);
   } finally {
     f.cleanup();
+  }
+});
+
+const registerOne = (id: number, regId: string, watchers: unknown[]) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "client/registerCapability",
+  params: {
+    registrations: [
+      { id: regId, method: "workspace/didChangeWatchedFiles", registerOptions: { watchers } },
+    ],
+  },
+});
+
+test("registrations beyond the caps are refused with -32602 and change nothing", async () => {
+  const f = fixture(() => undefined);
+  try {
+    await f.start();
+    const java = [{ globPattern: "**/*.java" }];
+
+    // Four registrations are accepted; the fifth is refused.
+    for (let i = 1; i <= 5; i++) f.channel.respond(registerOne(i, `r${i}`, java));
+    await until(() => [1, 2, 3, 4, 5].every((i) => replyTo(f.channel, i) !== undefined), "replies");
+    for (let i = 1; i <= 4; i++) assert.equal(replyTo(f.channel, i).result, null, `registration ${i}`);
+    assert.equal(replyTo(f.channel, 5).error.code, -32602);
+
+    // Re-registering an existing id replaces it and is not a fifth registration.
+    f.channel.respond(registerOne(6, "r1", java));
+    // 33 watchers in one registration, and an over-long glob.
+    f.channel.respond(registerOne(7, "r1", Array.from({ length: 33 }, () => java[0])));
+    f.channel.respond(registerOne(8, "r1", [{ globPattern: "a".repeat(257) }]));
+    await until(() => [6, 7, 8].every((i) => replyTo(f.channel, i) !== undefined), "replies");
+    assert.equal(replyTo(f.channel, 6).result, null);
+    assert.equal(replyTo(f.channel, 7).error.code, -32602);
+    assert.equal(replyTo(f.channel, 8).error.code, -32602);
+
+    // Four registrations share one physical watcher: one write is one change, not four.
+    await sleep(100);
+    const file = join(f.root, "One.java");
+    await writeFromOtherProcess(file, "class One {}");
+    await until(() => watched(f.channel).length > 0, "didChangeWatchedFiles");
+    await sleep(300);
+    const created = watched(f.channel)
+      .flatMap((m) => m.params.changes as { uri: string; type: number }[])
+      .filter((c) => c.uri === pathToFileURL(file).href && c.type === 1);
+    assert.equal(created.length, 1);
+    assert.deepEqual(f.client.watchStatus(), { state: "watching" });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a registration that arrives after the client closed is refused and starts nothing", async () => {
+  const f = fixture(() => undefined);
+  try {
+    await f.start();
+    f.channel.emitClose({ kind: "exited", code: 1, signal: null });
+    f.channel.respond(registerOne(9, "late", [{ globPattern: "**/*.java" }]));
+    await until(() => replyTo(f.channel, 9) !== undefined, "refusal");
+    assert.ok(replyTo(f.channel, 9).error);
+    assert.deepEqual(f.client.watchStatus(), { state: "off" });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a root that may not be watched degrades, and each request is preceded by a root change", async () => {
+  const f = fixture(registerJavaWatcher(1), realpathSync("/"));
+  try {
+    await f.start();
+    await until(() => replyTo(f.channel, 1) !== undefined, "registration reply");
+    assert.equal(replyTo(f.channel, 1).result, null, "the registration itself is accepted");
+    await until(() => f.client.watchStatus().state === "degraded", "degraded state");
+    const status = f.client.watchStatus();
+    assert.ok(status.state === "degraded" && /filesystem root/.test(status.reason));
+
+    const before = f.channel.sent.length;
+    await f.client.request("exeris/domains").catch(() => undefined);
+    const after = f.channel.sent.slice(before);
+    const notificationAt = after.findIndex((m) => m.method === "workspace/didChangeWatchedFiles");
+    const requestAt = after.findIndex((m) => m.method === "exeris/domains");
+    assert.ok(notificationAt !== -1 && requestAt !== -1 && notificationAt < requestAt);
+    assert.deepEqual(after[notificationAt].params.changes, [{ uri: "file:///", type: 2 }]);
+
+    // Every request, not only the first.
+    const mark = f.channel.sent.length;
+    await f.client.request("exeris/domains").catch(() => undefined);
+    const again = f.channel.sent.slice(mark);
+    assert.equal(again[0].method, "workspace/didChangeWatchedFiles");
+    assert.equal(again[1].method, "exeris/domains");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a retried handshake closes the previous attempt's channel", async () => {
+  const first = new FakeChannel(); // never answers initialize
+  const second = new FakeChannel();
+  second.autoResponder = ackInitialize;
+  const channels = [first, second];
+  const client = new LspClient(SPEC, { channelFactory: () => channels.shift() as FakeChannel, requestTimeoutMs: 100 });
+  try {
+    await assert.rejects(client.request("noop"));
+    await client.request("noop").catch(() => undefined);
+    assert.equal(first.closed, true);
+    // The first child exiting late does not take the new client down.
+    first.emitClose({ kind: "exited", code: 0, signal: null });
+    assert.notEqual(client.status().state, "closed");
+  } finally {
+    client.dispose();
   }
 });
