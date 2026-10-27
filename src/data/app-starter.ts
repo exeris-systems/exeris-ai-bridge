@@ -58,7 +58,7 @@ function withoutComments(xml: string): string {
 }
 
 function tagText(xml: string, tag: string): string | null {
-  const escaped = tag.replace(/\./g, "\\.");
+  const escaped = tag.replace(/[\\^$.*+?()[\]{}|]/g, String.raw`\$&`);
   const match = new RegExp(`<${escaped}>([^<]*)</${escaped}>`).exec(xml);
   return match === null ? null : match[1].trim();
 }
