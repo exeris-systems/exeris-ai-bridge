@@ -46,12 +46,12 @@ The server is also listed in the [MCP Registry](https://registry.modelcontextpro
 
 ## Tools
 
-Tool names are `family-tool`. All 32 are listed in every session; a family whose dependency is
+Tool names are `family-tool`. All 33 are listed in every session; a family whose dependency is
 missing answers with a structured `family_unavailable` result naming the reason and the remedy.
 
 | Family | Answers | Tools |
 | --- | --- | --- |
-| `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means, and the build files for a new application | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic`, `build-get_starter` |
+| `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means, and the build files for a new application, what the generator would write now | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic`, `build-get_starter`, `build-preview_generation` |
 | `caps-*` | The capability composition your build validated | `caps-list_capabilities`, `caps-describe_composition` |
 | `sdk-*` | The SDK's annotations, deprecations, scoping rules and AST schema; whether your project pins a different SDK | `sdk-list_annotations`, `sdk-describe_annotation`, `sdk-list_deprecations`, `sdk-get_scoping_rules`, `sdk-get_ast_schema` |
 | `docs-*` | The Exeris ADRs, the high-level architecture, the whitepaper and the decision templates | `docs-list_adrs`, `docs-get_adr`, `docs-search`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template`, `docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc` |

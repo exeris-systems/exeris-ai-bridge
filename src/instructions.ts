@@ -61,7 +61,10 @@ Tool names are \`family-tool\`:
             editing a generated file, or the next build silently discards it.
             \`build-explain_diagnostic\` decodes an error the build printed, and
             \`build-get_starter\` returns the pom.xml / package.json for a NEW
-            application — ask it before hand-writing either
+            application — ask it before hand-writing either.
+            \`build-preview_generation\` runs the project's pinned generator over
+            the emitted metadata and returns what it would write, diffed against
+            the committed tree, without writing to the project
   caps-*    the capability composition of YOUR OWN project, from the
             cap-manifest.json produced at build time — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable

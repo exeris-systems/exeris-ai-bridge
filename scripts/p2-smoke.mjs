@@ -240,6 +240,8 @@ function assertBootsDark({
   detach,
   diagnostic,
   starter,
+  previewJava,
+  previewTs,
   sdkList,
   sdkAst,
   sdkDescribe,
@@ -359,6 +361,19 @@ function assertBootsDark({
   );
   assert.deepEqual(starterPayload.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
   assert.equal(starterPayload.bomVersion, "0.10.0", "the application starter did not survive packaging");
+  for (const [target, result] of [
+    ["java", previewJava],
+    ["ts", previewTs],
+  ]) {
+    assert.equal(result.isError, true, `build-preview_generation (${target}) ran a generator on a machine with none`);
+    const preview = JSON.parse(result.content[0].text);
+    assert.equal(preview.error, "generator_unavailable", `build-preview_generation (${target}): ${result.content[0].text}`);
+    assert.equal(preview.target, target);
+    assert.ok(preview.reason?.length > 0 && preview.remedy?.length > 0, `${target} preview is unavailable without a reason or remedy`);
+    for (const secret of [scratch, tmpdir()]) {
+      assert.equal(result.content[0].text.includes(secret), false, `${target} preview leaks a machine path`);
+    }
+  }
 
   assert.ok(!sdkList.isError, `sdk-list_annotations errored: ${sdkList.content[0].text}`);
   const sdkListPayload = JSON.parse(sdkList.content[0].text);
@@ -542,6 +557,18 @@ async function interrogate(project, home, extraEnv) {
       arguments: { variant: "both" },
     });
 
+    // Nothing here pins a generator or installs one, so the preview has nothing to run: it
+    // answers each target with the structured reason and remedy, not a transport error and
+    // not a generator of some other version.
+    const previewJava = await client.request("tools/call", {
+      name: "build-preview_generation",
+      arguments: { target: "java" },
+    });
+    const previewTs = await client.request("tools/call", {
+      name: "build-preview_generation",
+      arguments: { target: "ts" },
+    });
+
     const sdkList = await client.request("tools/call", {
       name: "sdk-list_annotations",
       arguments: {},
@@ -579,6 +606,8 @@ async function interrogate(project, home, extraEnv) {
       detach,
       diagnostic,
       starter,
+      previewJava,
+      previewTs,
       sdkList,
       sdkAst,
       sdkDescribe,
