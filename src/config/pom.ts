@@ -38,6 +38,25 @@ export function tagValue(block: string, tag: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+const NESTED_BLOCKS = ["dependencies", "configuration", "executions"] as const;
+
+/**
+ * A block with its nested `<dependencies>`, `<configuration>` and `<executions>` elements
+ * removed, so that `tagValue` on the result sees only the block's own direct children. Bounded:
+ * each pass removes innermost-first matches and the passes are capped.
+ */
+export function withoutNestedBlocks(block: string): string {
+  let result = block;
+  for (let pass = 0; pass < 16; pass += 1) {
+    const before = result;
+    for (const tag of NESTED_BLOCKS) {
+      result = result.replace(new RegExp(String.raw`<${tag}(?:\s[^>]*)?>[\s\S]*?</${tag}>`, "gi"), "");
+    }
+    if (result === before) break;
+  }
+  return result;
+}
+
 export function parsePom(content: string): PomModel {
   const stripped = stripComments(content);
   const properties = new Map<string, string>();
