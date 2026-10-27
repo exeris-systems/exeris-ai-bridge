@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import {
   MIN_JAVA_MAJOR,
   parseJavaMajor,
+  probeJavaMajor,
   resolveJavaGenerator,
   resolveTypeScriptGenerator,
   type GeneratorResolution,
@@ -203,6 +204,19 @@ test("parseJavaMajor reads modern and legacy version strings", () => {
   assert.equal(parseJavaMajor('java version "1.8.0_402"'), 8);
   assert.equal(parseJavaMajor("nothing"), null);
 });
+
+test(
+  "probeJavaMajor reads the version a successful 'java -version' prints on stderr",
+  { skip: process.platform === "win32" },
+  () => {
+    const home = join(work, "jdk");
+    mkdirSync(join(home, "bin"), { recursive: true });
+    writeFileSync(join(home, "bin", "java"), '#!/bin/sh\necho \'openjdk version "27.0.1" 2026-09-15\' >&2\nexit 0\n');
+    chmodSync(join(home, "bin", "java"), 0o755);
+    assert.equal(probeJavaMajor({ JAVA_HOME: home }), 27);
+    assert.equal(probeJavaMajor({ JAVA_HOME: join(work, "absent") }), null);
+  },
+);
 
 function installCodegenTs(manifest: object, binFile: string | null): string {
   const dir = join(project, "node_modules", "@exeris", "codegen-ts");

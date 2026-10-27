@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -239,19 +239,18 @@ function javaCommand(env: NodeJS.ProcessEnv): string {
   return "java";
 }
 
-/** Major version printed by `java -version` (it writes to stderr), or null when it cannot be run. */
-function probeJavaMajor(env: NodeJS.ProcessEnv): number | null {
-  try {
-    const out = execFileSync(javaCommand(env), ["-version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 10_000,
-    });
-    return parseJavaMajor(out);
-  } catch (err) {
-    const stderr = (err as { stderr?: unknown }).stderr;
-    return typeof stderr === "string" ? parseJavaMajor(stderr) : null;
-  }
+/**
+ * Major version printed by `java -version`, or null when it cannot be run.
+ * `java -version` exits 0 and writes to stderr, so stderr is read on success too.
+ */
+export function probeJavaMajor(env: NodeJS.ProcessEnv): number | null {
+  const probe = spawnSync(javaCommand(env), ["-version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 10_000,
+  });
+  if (probe.error !== undefined) return null;
+  return parseJavaMajor(`${probe.stderr ?? ""}\n${probe.stdout ?? ""}`);
 }
 
 /** `version "26"` -> 26, `version "25.0.1"` -> 25, legacy `version "1.8.0_402"` -> 8. */

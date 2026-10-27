@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -313,7 +313,7 @@ test("a custom metadataDir inside the project is passed to the generator", async
     target: "java",
     metadataDir: "custom",
   });
-  assert.match(payload(res).stdout, /meta=<project>\/custom|meta=.*\/custom/);
+  assert.match(payload(res).stdout, /meta=<project>\/custom/);
 });
 
 test("exit 1 is a result, with the EXT- identifier decoded and the project and scratch paths scrubbed", async () => {
@@ -423,5 +423,5 @@ test("the tool is unavailable without a project root", async () => {
   const out = payload(res);
   assert.equal(out.error, "family_unavailable");
   assert.equal(out.family, "build");
-  assert.equal(existsSync(join(tmpRoot, "x")), false);
+  assert.deepEqual(workdirsLeft(), []);
 });
