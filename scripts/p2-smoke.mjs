@@ -234,6 +234,7 @@ function assertBootsDark({
   docsAdr,
   docsExcluded,
   docsRepos,
+  docsIndexResource,
   capless,
   unbuilt,
   ungenerated,
@@ -324,6 +325,14 @@ function assertBootsDark({
   assert.match(docsExcluded.content[0].text, /https:\/\/github\.com\/exeris-systems\/exeris-kernel\//);
   assert.equal(docsRepos.isError, true);
   assert.equal(JSON.parse(docsRepos.content[0].text).error, "family_unavailable");
+
+  // The registry index is also a resource, advertised without subscriptions and read from the
+  // snapshot in the installed package.
+  assert.deepEqual(initialize.capabilities.resources, {}, "the server must advertise resources, and not subscribe");
+  assert.equal(docsIndexResource.contents.length, 1);
+  assert.equal(docsIndexResource.contents[0].uri, "exeris://docs/adr-index");
+  assert.equal(docsIndexResource.contents[0].mimeType, "text/markdown");
+  assert.match(docsIndexResource.contents[0].text, /^# ADR Index \(fixture\)/);
 
   assert.ok(!capless.isError, `caps-list_capabilities errored on a cap-less project: ${capless.content[0].text}`);
   const caplessPayload = JSON.parse(capless.content[0].text);
@@ -508,6 +517,9 @@ async function interrogate(project, home, extraEnv) {
     const docsExcluded = await client.request("tools/call", { name: "docs-get_adr", arguments: { number: 7 } });
     const docsRepos = await client.request("tools/call", { name: "docs-list_repos", arguments: {} });
 
+    // The same registry as a resource, read from the snapshot through the real transport.
+    const docsIndexResource = await client.request("resources/read", { uri: "exeris://docs/adr-index" });
+
     // The live counterpart: caps:* is up on this machine, and the project has
     // no cap-manifest.json, so the contract says a clean present:false answer
     // rather than an error. That distinction is the one an agent branches on —
@@ -601,6 +613,7 @@ async function interrogate(project, home, extraEnv) {
       docsAdr,
       docsExcluded,
       docsRepos,
+      docsIndexResource,
       capless,
       unbuilt,
       ungenerated,
