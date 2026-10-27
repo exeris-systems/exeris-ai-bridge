@@ -105,7 +105,7 @@ export function isExcludedPath(segments: readonly string[]): boolean {
 /** Why a root must not be watched, or null. A filesystem root or the home directory is too broad. */
 export function refusedRootReason(realRoot: string): string | null {
   if (parse(realRoot).root === realRoot) return "the workspace root is a filesystem root";
-  let home: string | null = null;
+  let home: string | null;
   try {
     home = realpathSync(homedir());
   } catch {
@@ -173,7 +173,7 @@ function expandBraces(glob: string): string[] {
   const bounds = [open, ...commas, close];
   const out: string[] = [];
   for (let i = 0; i < bounds.length - 1; i++) {
-    const alt = glob.slice((bounds[i] as number) + 1, bounds[i + 1]);
+    const alt = glob.slice((bounds[i]) + 1, bounds[i + 1]);
     for (const rest of expandBraces(head + alt + tail)) {
       out.push(rest);
       if (out.length > MAX_BRACE_EXPANSIONS) throw new Error("glob expands to too many alternatives");
@@ -230,7 +230,7 @@ function matchSegments(pattern: readonly SegmentPattern[], path: readonly string
     if (pc === GLOBSTAR) {
       starP = p++;
       starS = s;
-    } else if (pc !== undefined && matchSegment(pc, path[s] as string)) {
+    } else if (pc !== undefined && matchSegment(pc, path[s])) {
       p++;
       s++;
     } else if (starP !== -1) {
