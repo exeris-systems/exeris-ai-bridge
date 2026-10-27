@@ -1,4 +1,5 @@
 import type { Unavailable } from "../config/env.js";
+import { parsePom, tagValue, type Coordinate } from "../config/pom.js";
 import { readBundleEntry, type BundleState } from "./bundle.js";
 
 // The application starter: the tested tooling + kernel + SDK triple that
@@ -22,11 +23,7 @@ export const APP_BOM_ARTIFACT = "exeris-app-bom";
 export const APP_PARENT_ARTIFACT = "exeris-app-parent";
 export const APP_STARTER_ARTIFACT = "exeris-app-starter";
 
-export interface Coordinate {
-  readonly groupId: string;
-  readonly artifactId: string;
-  readonly version: string;
-}
+export type { Coordinate };
 
 export interface AppStarter {
   readonly appStarterFormat: number;
@@ -48,27 +45,6 @@ export interface AppStarterPoms {
   readonly starter: string;
 }
 
-function withoutComments(xml: string): string {
-  let prev = xml;
-  while (true) {
-    const next = prev.replace(/<!--[\s\S]*?-->/g, "");
-    if (next === prev) return next;
-    prev = next;
-  }
-}
-
-function tagText(xml: string, tag: string): string | null {
-  const escaped = tag.replace(/[\\^$.*+?()[\]{}|]/g, String.raw`\$&`);
-  const match = new RegExp(`<${escaped}>([^<]*)</${escaped}>`).exec(xml);
-  return match === null ? null : match[1].trim();
-}
-
-/** The text of `<parent>`'s child, or null when the POM has no parent block. */
-function parentBlock(xml: string): string | null {
-  const match = /<parent>([\s\S]*?)<\/parent>/.exec(xml);
-  return match === null ? null : match[1];
-}
-
 /** A version the publisher wrote as a literal, never an expression. */
 function literal(value: string | null, what: string): string {
   if (value === null || value.length === 0) {
@@ -87,21 +63,20 @@ function literal(value: string | null, what: string): string {
  * inherit the BOM at the BOM's own version.
  */
 export function parseAppStarterPoms(poms: AppStarterPoms): AppStarter {
-  const bom = withoutComments(poms.bom);
-  const parent = withoutComments(poms.parent);
-  const starter = withoutComments(poms.starter);
+  const bom = parsePom(poms.bom);
 
   // The BOM has no <parent>, so its first <version> after its artifactId is its own.
-  const bomHead = bom.replace(/<properties>[\s\S]*$/, "");
-  if (tagText(bomHead, "artifactId") !== APP_BOM_ARTIFACT) {
+  const bomHead = bom.body.replace(/<properties>[\s\S]*$/, "");
+  if (tagValue(bomHead, "artifactId") !== APP_BOM_ARTIFACT) {
     throw new AppStarterFormatError(`the BOM POM is not ${APP_GROUP_ID}:${APP_BOM_ARTIFACT}`);
   }
-  const bomVersion = literal(tagText(bomHead, "version"), "the BOM version");
+  const bomVersion = literal(tagValue(bomHead, "version"), "the BOM version");
 
+  const property = (name: string): string | null => bom.properties.get(name) ?? null;
   const triple = {
-    tooling: literal(tagText(bom, "exeris.tooling.version"), "exeris.tooling.version"),
-    kernel: literal(tagText(bom, "exeris.kernel.version"), "exeris.kernel.version"),
-    sdk: literal(tagText(bom, "exeris.sdk.version"), "exeris.sdk.version"),
+    tooling: literal(property("exeris.tooling.version"), "exeris.tooling.version"),
+    kernel: literal(property("exeris.kernel.version"), "exeris.kernel.version"),
+    sdk: literal(property("exeris.sdk.version"), "exeris.sdk.version"),
   };
   if (triple.tooling !== bomVersion) {
     throw new AppStarterFormatError(
@@ -110,16 +85,14 @@ export function parseAppStarterPoms(poms: AppStarterPoms): AppStarter {
   }
 
   for (const [artifact, xml] of [
-    [APP_PARENT_ARTIFACT, parent],
-    [APP_STARTER_ARTIFACT, starter],
+    [APP_PARENT_ARTIFACT, poms.parent],
+    [APP_STARTER_ARTIFACT, poms.starter],
   ] as const) {
-    const block = parentBlock(xml);
-    const declared = block === null ? null : tagText(block, "artifactId");
-    const inherited = block === null ? null : tagText(block, "version");
-    if (declared !== APP_BOM_ARTIFACT || inherited !== bomVersion) {
+    const model = parsePom(xml);
+    if (model.parent?.artifactId !== APP_BOM_ARTIFACT || model.parent.version !== bomVersion) {
       throw new AppStarterFormatError(`${artifact} does not inherit ${APP_BOM_ARTIFACT} ${bomVersion}`);
     }
-    const own = tagText(xml.replace(/<parent>[\s\S]*?<\/parent>/, ""), "artifactId");
+    const own = tagValue(model.body.replace(/<parent>[\s\S]*?<\/parent>/, ""), "artifactId");
     if (own !== artifact) {
       throw new AppStarterFormatError(`the ${artifact} POM declares artifactId '${own ?? "(none)"}'`);
     }
