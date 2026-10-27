@@ -1,10 +1,20 @@
 import { strict as assert } from "node:assert";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { compileGlob, type WatchBatch, type WatchHandle, watchRoot } from "./watch.js";
+import {
+  compileGlob,
+  isExcludedPath,
+  MAX_GLOB_LENGTH,
+  refusedRootReason,
+  resolveEventPath,
+  type WatchBatch,
+  type WatchHandle,
+  watchRoot,
+} from "./watch.js";
 
 const DEBOUNCE_MS = 60;
 
@@ -43,25 +53,81 @@ function allEvents(batches: readonly WatchBatch[]): { path: string; type: string
 
 /** Let the platform watcher settle after creation before the test starts writing. */
 async function started(handle: WatchHandle): Promise<WatchHandle> {
-  await sleep(100);
+  await handle.ready;
+  await sleep(50);
   return handle;
 }
 
 test("compileGlob supports recursive extension, subtree, brace and single-star patterns", () => {
   const java = compileGlob("**/*.java");
-  assert.ok(java.test("A.java"));
-  assert.ok(java.test("a/b/C.java"));
-  assert.ok(!java.test("a/b/C.txt"));
-  assert.ok(!java.test("a/b/C.java.bak"));
+  assert.ok(java("A.java"));
+  assert.ok(java("a/b/C.java"));
+  assert.ok(!java("a/b/C.txt"));
+  assert.ok(!java("a/b/C.java.bak"));
 
   const sub = compileGlob("src/**/*.{java,kt}");
-  assert.ok(sub.test("src/a/B.kt"));
-  assert.ok(sub.test("src/B.java"));
-  assert.ok(!sub.test("other/B.java"));
+  assert.ok(sub("src/a/B.kt"));
+  assert.ok(sub("src/B.java"));
+  assert.ok(!sub("other/B.java"));
 
   const flat = compileGlob("*.java");
-  assert.ok(flat.test("A.java"));
-  assert.ok(!flat.test("a/A.java"));
+  assert.ok(flat("A.java"));
+  assert.ok(!flat("a/A.java"));
+
+  assert.ok(compileGlob("a?c.java")("abc.java"));
+  assert.ok(!compileGlob("a?c.java")("ac.java"));
+});
+
+test("compileGlob rejects an over-long pattern and finishes quickly on pathological ones", () => {
+  assert.throws(() => compileGlob("a".repeat(MAX_GLOB_LENGTH + 1)), /longer than/);
+
+  const started = Date.now();
+  const hostile = [
+    "**/**/**/**/**/**/**/**/**/**/*.java",
+    "*a*a*a*a*a*a*a*a*a*a*a*a*b",
+    "{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}/**/*x",
+  ];
+  const longName = "a".repeat(5000);
+  const deepPath = Array.from({ length: 500 }, () => "d").join("/") + "/" + longName;
+  for (const glob of hostile) {
+    assert.equal(compileGlob(glob)(longName), false);
+    assert.equal(compileGlob(glob)(deepPath), false);
+  }
+  assert.throws(() => compileGlob("{a,b}".repeat(7)), /too many alternatives/);
+  assert.ok(Date.now() - started < 2000, "pathological globs must not backtrack");
+});
+
+test("isExcludedPath excludes VCS and build output but keeps the scanner's generated sources", () => {
+  assert.ok(isExcludedPath([".git", "objects"]));
+  assert.ok(isExcludedPath(["web", "node_modules", "x"]));
+  assert.ok(isExcludedPath(["dist"]));
+  assert.ok(isExcludedPath(["target", "classes"]));
+  assert.ok(isExcludedPath(["build", "tmp"]));
+  assert.ok(!isExcludedPath(["target"]));
+  assert.ok(!isExcludedPath(["target", "generated-sources", "x", "A.java"]));
+  assert.ok(!isExcludedPath(["build", "generated", "sources"]));
+  assert.ok(!isExcludedPath(["src", "main", "A.java"]));
+});
+
+test("resolveEventPath resolves symlinks and keeps the path below a deleted ancestor exact", async (t) => {
+  const { root, outside, cleanup } = fixture();
+  try {
+    mkdirSync(join(root, "real"));
+    try {
+      symlinkSync(outside, join(root, "escape"), "dir");
+      symlinkSync(join(root, "real"), join(root, "alias"), "dir");
+    } catch {
+      t.skip("symlinks unavailable on this platform");
+      return;
+    }
+    assert.equal(await resolveEventPath(root, join(root, "escape", "Evil.java")), null);
+    assert.equal(await resolveEventPath(root, join(root, "escape", "deep", "gone", "Evil.java")), null);
+    assert.equal(await resolveEventPath(root, join(root, "alias", "A.java")), join(root, "real", "A.java"));
+    assert.equal(await resolveEventPath(root, join(root, "gone", "sub", "A.java")), join(root, "gone", "sub", "A.java"));
+    assert.equal(await resolveEventPath(root, join(outside, "X.java")), null);
+  } finally {
+    cleanup();
+  }
 });
 
 test("create, change and delete are reported with the matching type", async () => {
@@ -132,33 +198,6 @@ test("a burst of writes to one path inside the debounce window coalesces into on
   }
 });
 
-test("an event reached through a symlinked directory that leaves the root is dropped", async (t) => {
-  const { root, outside, cleanup } = fixture();
-  try {
-    symlinkSync(outside, join(root, "link"), "dir");
-  } catch {
-    cleanup();
-    t.skip("symlinks unavailable on this platform");
-    return;
-  }
-  const c = collector();
-  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
-  try {
-    writeFileSync(join(outside, "Evil.java"), "class Evil {}");
-    writeFileSync(join(root, "Inside.java"), "class Inside {}");
-    await c.until(() => allEvents(c.batches).some((e) => e.path === join(root, "Inside.java")));
-    await sleep(DEBOUNCE_MS * 3);
-    assert.ok(
-      allEvents(c.batches).every((e) => e.path.startsWith(root)),
-      `no event may leave the root: ${JSON.stringify(c.batches)}`,
-    );
-    assert.ok(!allEvents(c.batches).some((e) => e.path.includes("Evil")));
-  } finally {
-    handle.close();
-    cleanup();
-  }
-});
-
 test("more distinct paths than the buffer holds collapse into a single rescan", async () => {
   const { root, cleanup } = fixture();
   const c = collector();
@@ -190,5 +229,140 @@ test("close stops delivery, including a batch already pending", async () => {
     assert.deepEqual(c.batches, []);
   } finally {
     cleanup();
+  }
+});
+
+test("a delete inside a deleted directory keeps the exact path", async () => {
+  const { root, cleanup } = fixture();
+  const c = collector();
+  const file = join(root, "a", "b", "X.java");
+  mkdirSync(join(root, "a", "b"), { recursive: true });
+  writeFileSync(file, "class X {}");
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
+  try {
+    rmSync(join(root, "a"), { recursive: true });
+    await c.until(() => allEvents(c.batches).some((e) => e.path === file && e.type === "deleted"));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a directory created after the watch started is watched and its files reported", async () => {
+  const { root, cleanup } = fixture();
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
+  try {
+    mkdirSync(join(root, "n", "m"), { recursive: true });
+    await sleep(150);
+    const file = join(root, "n", "m", "N.java");
+    writeFileSync(file, "class N {}");
+    await c.until(() => allEvents(c.batches).some((e) => e.path === file));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a continuous writer cannot postpone the flush past maxWaitMs", async () => {
+  const { root, cleanup } = fixture();
+  const c = collector();
+  const handle = await started(
+    watchRoot(root, { globs: ["**/*.java"], debounceMs: 400, maxWaitMs: 600, onEvents: c.push }),
+  );
+  try {
+    const begun = Date.now();
+    const writer = (async () => {
+      for (let i = 0; i < 25; i++) {
+        writeFileSync(join(root, "A.java"), `class A { int v${i}; }`);
+        await sleep(100);
+      }
+    })();
+    await c.until(() => c.batches.length > 0);
+    const firstAfter = Date.now() - begun;
+    assert.ok(firstAfter < 1500, `first batch after ${firstAfter} ms, writer still running`);
+    await writer;
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+const linuxOnly = { skip: process.platform === "linux" ? false : "owned per-directory watching is Linux-only" };
+
+test("excluded directories get no watch", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  for (const d of [".git/objects", "node_modules/x", "dist", "target/classes", "target/generated-sources/g", "build/tmp", "build/generated/s", "src/a"]) {
+    mkdirSync(join(root, d), { recursive: true });
+  }
+  const handle = watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: () => undefined });
+  try {
+    await handle.ready;
+    const watched = handle
+      .watchedDirectories()
+      .map((d) => d.slice(root.length + 1))
+      .sort();
+    assert.deepEqual(watched, [
+      "",
+      "build",
+      "build/generated",
+      "build/generated/s",
+      "src",
+      "src/a",
+      "target",
+      "target/generated-sources",
+      "target/generated-sources/g",
+    ]);
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("more directories than the cap degrade the watcher and release every watch", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  for (let i = 0; i < 10; i++) mkdirSync(join(root, `d${i}`));
+  let reason: string | null = null;
+  const handle = watchRoot(root, {
+    globs: ["**/*.java"],
+    debounceMs: DEBOUNCE_MS,
+    maxDirectories: 4,
+    onEvents: () => undefined,
+    onDegraded: (r) => {
+      reason = r;
+    },
+  });
+  try {
+    await handle.ready;
+    const state = handle.state();
+    assert.equal(state.state, "degraded");
+    assert.match(reason ?? "", /more than 4 directories/);
+    assert.deepEqual(handle.watchedDirectories(), []);
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a filesystem root and the home directory are refused", async () => {
+  assert.ok(refusedRootReason("/") !== null || process.platform === "win32");
+  const home = realpathSync(homedir());
+  assert.match(refusedRootReason(home) ?? "", /home directory/);
+
+  for (const target of [home, realpathSync("/")]) {
+    let reason: string | null = null;
+    const handle = watchRoot(target, {
+      globs: ["**/*.java"],
+      debounceMs: DEBOUNCE_MS,
+      onEvents: () => undefined,
+      onDegraded: (r) => {
+        reason = r;
+      },
+    });
+    await handle.ready;
+    assert.equal(handle.state().state, "degraded");
+    assert.ok(reason !== null);
+    assert.deepEqual(handle.watchedDirectories(), []);
+    handle.close();
   }
 });
