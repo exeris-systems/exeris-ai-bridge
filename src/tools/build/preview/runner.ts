@@ -283,5 +283,11 @@ function killProcessTree(pid: number, posix: boolean, fallback: () => void): voi
     }
     return;
   }
+  // taskkill /T takes the tree; the plain kill covers a taskkill that could not run.
   killGroupSync(pid);
+  try {
+    fallback();
+  } catch {
+    // Already exited.
+  }
 }
