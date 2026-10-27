@@ -137,6 +137,12 @@ test(
         mkdirSync(dirname(join(l1, f.path)), { recursive: true });
         writeFileSync(join(l1, f.path), body);
       }
+      // The manifest is bookkeeping the tool does not list; a committed tree carries it, so write it.
+      const paths = (firstOut.files.added as { path: string }[]).map((f) => f.path).sort();
+      writeFileSync(
+        join(l1, ".exeris-codegen-manifest"),
+        `# Exeris Tooling generated-output manifest - DO NOT EDIT MANUALLY\n${paths.join("\n")}\n`,
+      );
       const committed = hashTree(project);
       const second = await tool.handler({ target: "java" });
       assert.equal(second.isError, undefined, text(second));
@@ -145,6 +151,8 @@ test(
       assert.deepEqual(secondOut.files.added, []);
       assert.deepEqual(secondOut.files.removed, []);
       assert.ok(secondOut.files.unchanged.length > 0);
+      assert.deepEqual(secondOut.files.changed, []);
+      assert.equal(secondOut.l1.seeded, true);
       assert.equal(hashTree(project), committed);
       assert.deepEqual(readdirSync(tmpRoot), []);
     } finally {

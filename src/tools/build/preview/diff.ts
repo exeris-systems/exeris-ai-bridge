@@ -222,9 +222,14 @@ export function listFiles(root: string): Listing {
       limit = listingLimit(MAX_LIST_DEPTH, "levels", "directory nesting");
       return;
     }
+    // A directory swapped for another (a rename, a link) while it is read is not trusted: its
+    // identity is compared before and after the read, and a changed one reads as empty.
     let names: Dirent[];
     try {
+      const before = lstatSync(dir);
       names = readdirSync(dir, { withFileTypes: true });
+      const after = lstatSync(dir);
+      if (!before.isDirectory() || before.dev !== after.dev || before.ino !== after.ino) return;
     } catch {
       return;
     }

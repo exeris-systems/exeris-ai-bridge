@@ -48,6 +48,8 @@ export interface ResolvedGenerator {
    * so it is safe to show an agent.
    */
   readonly path: string;
+  /** Absolute paths the generator's output may echo (the artefact and the repository holding it); they never go on the wire. */
+  readonly privatePaths: readonly string[];
   /** Build the launch for one run inside the bridge's scratch directory. */
   launch(metadataDir: string, workdir: string): GeneratorLaunch;
 }
@@ -148,6 +150,9 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     );
   }
 
+  // Invariant: the JVM has no write confinement. What keeps a crafted metadata name from
+  // placing a file outside the scratch directory is the corpus check that runs before the
+  // launch (validate-metadata.ts); there is no runtime sandbox for Java to rely on.
   const command = javaCommand(deps.env);
   const baseEnv = deps.env;
   return {
@@ -156,6 +161,7 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     version,
     source: "m2",
     path: relative(repo, jar).split(sep).join("/"),
+    privatePaths: [jar, repo],
     launch: (metadataDir, workdir) => {
       const outputDir = join(workdir, OUTPUT_SUBDIR);
       return {
@@ -163,6 +169,8 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
         // The crash log is directed into the scratch directory, outside outputDir:
         // the JVM would otherwise write hs_err_pid*.log into its working directory.
         args: [
+          // No hsperfdata file: the JVM would otherwise create /tmp/hsperfdata_<user> outside the scratch directory.
+          "-XX:-UsePerfData",
           `-XX:ErrorFile=${join(workdir, "hs_err_pid%p.log")}`,
           "-jar",
           jar,
@@ -324,11 +332,16 @@ export function resolveTypeScriptGenerator(
     version,
     source: "node_modules",
     path: relative(projectRoot, bin).split(sep).join("/"),
+    privatePaths: [pkgDir],
     launch: (metadataDir, workdir) => {
       const outputDir = join(workdir, OUTPUT_SUBDIR);
       return {
         command: process.execPath,
-        args: [bin, "generate", "--input", metadataDir, "--output", outputDir],
+        // The generator writes wherever the metadata's names lead, and exeris-gen has no write
+        // containment of its own. Node's permission model is the containment: reads are open (the
+        // package, the project's config and metadata), writes are limited to the scratch directory,
+        // and child processes, workers and addons stay denied because they are not granted.
+        args: [...nodePermissionFlags(workdir), bin, "generate", "--input", metadataDir, "--output", outputDir],
         // The project root, not the scratch directory: exeris-gen finds exeris-codegen.json from
         // its working directory and has no --config flag. Every path it writes is absolute and
         // inside the scratch directory.
@@ -338,6 +351,21 @@ export function resolveTypeScriptGenerator(
       };
     },
   };
+}
+
+/**
+ * The flag that turns the permission model on: `--permission` from Node 22.13 and 23.5 (where it
+ * became stable), `--experimental-permission` before that (Node 20 and 21, and 22 before 22.13).
+ */
+export function nodePermissionFlag(nodeVersion: string = process.versions.node): string {
+  const [major = 0, minor = 0] = nodeVersion.split(".").map((part) => Number.parseInt(part, 10));
+  const stable = major > 23 || (major === 23 && minor >= 5) || (major === 22 && minor >= 13);
+  return stable ? "--permission" : "--experimental-permission";
+}
+
+/** Read anywhere, write only under `workdir`; nothing else is granted. */
+export function nodePermissionFlags(workdir: string, nodeVersion?: string): string[] {
+  return [nodePermissionFlag(nodeVersion), "--allow-fs-read=*", `--allow-fs-write=${workdir}`];
 }
 
 /** The `exeris-gen` path from a package.json `bin` field (a string, or a name -> path map). */

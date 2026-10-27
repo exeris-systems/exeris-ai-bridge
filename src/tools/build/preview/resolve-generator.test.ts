@@ -6,6 +6,8 @@ import { afterEach, beforeEach, test } from "node:test";
 
 import {
   MIN_JAVA_MAJOR,
+  nodePermissionFlag,
+  nodePermissionFlags,
   parseJavaMajor,
   probeJavaMajor,
   resolveJavaGenerator,
@@ -85,6 +87,7 @@ test("java: the app-parent version pins the jar, and the launch follows ADR-097"
   assert.equal(launch.command, "java");
   // The crash log and the JVM's working directory are the scratch directory, never the project.
   assert.deepEqual(launch.args, [
+    "-XX:-UsePerfData",
     `-XX:ErrorFile=${join("/work", "hs_err_pid%p.log")}`,
     "-jar",
     jar,
@@ -236,9 +239,10 @@ test("typescript: the installed package's exeris-gen bin is launched with node",
   assert.equal(launch.outputDir, join("/work", "out"));
   assert.equal(launch.cwd, project, "exeris-gen reads exeris-codegen.json from its working directory");
   assert.equal(launch.env.TMPDIR, "/work");
-  assert.equal(launch.args[0].endsWith(join("dist", "index.js")), true);
-  assert.ok(launch.args[0].startsWith(dir) || launch.args[0].includes("codegen-ts"));
-  assert.deepEqual(launch.args.slice(1), ["generate", "--input", "/meta", "--output", join("/work", "out")]);
+  assert.equal(launch.args[3].endsWith(join("dist", "index.js")), true);
+  assert.ok(launch.args[3].startsWith(dir));
+  assert.deepEqual(launch.args.slice(0, 3), [nodePermissionFlag(), "--allow-fs-read=*", "--allow-fs-write=/work"]);
+  assert.deepEqual(launch.args.slice(4), ["generate", "--input", "/meta", "--output", join("/work", "out")]);
 });
 
 test("typescript: a string bin is accepted", () => {
@@ -271,4 +275,14 @@ test("resolver messages carry no absolute paths", () => {
   assert.ok(!r.reason.includes(work) && !r.remedy.includes(work));
   const t = unavailable(resolveTypeScriptGenerator(project));
   assert.ok(!t.reason.includes(work) && !t.remedy.includes(work));
+});
+
+test("the permission flag is --permission from Node 22.13 and 23.5, the experimental one before", () => {
+  for (const v of ["20.0.0", "20.19.0", "21.7.3", "22.12.9", "23.4.0"]) {
+    assert.equal(nodePermissionFlag(v), "--experimental-permission", v);
+  }
+  for (const v of ["22.13.0", "22.20.1", "23.5.0", "24.0.0", "26.1.0"]) {
+    assert.equal(nodePermissionFlag(v), "--permission", v);
+  }
+  assert.deepEqual(nodePermissionFlags("/w", "24.1.0"), ["--permission", "--allow-fs-read=*", "--allow-fs-write=/w"]);
 });
