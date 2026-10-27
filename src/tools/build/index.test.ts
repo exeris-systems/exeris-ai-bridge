@@ -8,6 +8,7 @@ import type { BridgeConfig } from "../../config/env.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BundleState } from "../../data/bundle.js";
 import { writeCatalogueBundle } from "../../data/__tests__/generator-catalogue-fixture.js";
+import type { RegisteredTool } from "../types.js";
 import { registerBuildTools } from "./index.js";
 
 const METADATA_REL = "target/classes/exeris-metadata";
@@ -594,4 +595,52 @@ test("the entity filter keeps files whose scope is unknown", async () => {
   const unknown = payload.artefacts.find((a: { path: string }) => a.path.endsWith("Whatever.java"));
   assert.equal(unknown.scope, null);
   assert.deepEqual(unknown.candidates, []);
+});
+
+// ---------------------------------------------------------------------------
+// tooling skew
+
+const appParentPom = (version: string) =>
+  `<project><parent><groupId>eu.exeris</groupId><artifactId>exeris-app-parent</artifactId><version>${version}</version></parent></project>`;
+
+async function explainSkew(pom: string, tools: (root: string) => Map<string, RegisteredTool> = toolsFor) {
+  const root = generatedProject();
+  writeFileSync(join(root, "pom.xml"), pom);
+  const res = await tools(root).get("build-explain_artefacts")!.handler({});
+  assert.ok(!res.isError, text(res));
+  return JSON.parse(text(res)).toolingSkew;
+}
+
+test("build-explain_artefacts reports a project on the catalogue's tooling release as aligned", async () => {
+  assert.deepEqual(await explainSkew(appParentPom("0.10.0")), {
+    status: "aligned",
+    bundledToolingVersion: "0.10.0",
+    projectToolingVersion: "0.10.0",
+    source: "app-parent",
+  });
+});
+
+test("build-explain_artefacts reports a project on another tooling release as skew_detected", async () => {
+  const skew = await explainSkew(appParentPom("0.9.1"));
+  assert.equal(skew.status, "skew_detected");
+  assert.equal(skew.projectToolingVersion, "0.9.1");
+  assert.equal(skew.bundledToolingVersion, "0.10.0");
+  assert.match(skew.warning, /0\.9\.1/);
+});
+
+test("build-explain_artefacts reports the tooling skew as unknown when the project pins nothing", async () => {
+  const skew = await explainSkew("<project/>");
+  assert.equal(skew.status, "unknown");
+  assert.equal(skew.bundledToolingVersion, "0.10.0");
+  assert.match(skew.reason, /no tooling version is pinned/);
+});
+
+test("build-explain_artefacts reports the tooling skew as unknown when the bundle carries no catalogue", async () => {
+  const absent: BundleState = { state: "unavailable", reason: "no bundle (test)", remedy: "pack it (test)" };
+  const skew = await explainSkew(appParentPom("0.10.0"), (root) =>
+    new Map(registerBuildTools(configFor(root), absent).map((t) => [t.definition.name, t])),
+  );
+  assert.equal(skew.status, "unknown");
+  assert.equal(skew.bundledToolingVersion, "unknown");
+  assert.equal(skew.projectToolingVersion, "0.10.0");
 });

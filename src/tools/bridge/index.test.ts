@@ -11,6 +11,7 @@ import type { BridgeConfig, KernelConfig, LspConfig, Unavailable } from "../../c
 import { KernelAdapter, type KernelChannel } from "../../transport/kernel-adapter.js";
 import { LspClient, LspTransportError, type LspChannel, type LspCloseReason } from "../../transport/lsp-client.js";
 import type { BundleState } from "../../data/bundle.js";
+import { CATALOGUE_FIXTURE_SOURCE, catalogueFixtureText } from "../../data/__tests__/generator-catalogue-fixture.js";
 import { getServerVersion } from "../../version.js";
 import { registerBridgeTools } from "./index.js";
 
@@ -193,7 +194,11 @@ test("bridge-health reports the launch source and child state of a live family",
     source: "env-command",
     transport: { state: "not-started", lastError: null },
   });
-  assert.deepEqual(body.families[3], { family: "build", state: "available" });
+  assert.deepEqual(body.families[3], {
+    family: "build",
+    state: "available",
+    toolingSkew: { status: "unknown", bundledToolingVersion: "unknown", reason: body.families[3].toolingSkew.reason },
+  });
   assert.deepEqual(body.families[4], { family: "caps", state: "available" });
   assert.deepEqual(body.families[5], {
     family: "sdk",
@@ -524,3 +529,59 @@ test("bridge-health reports sdk family unavailable when bundle has no catalog en
   assert.equal(sdkFamily.reason, "The bundled reference data carries no annotation catalog.");
 });
 
+
+// ---------------------------------------------------------------------------
+// build:* tooling skew
+
+function catalogueBundleIn(dir: string): BundleState {
+  const text = catalogueFixtureText();
+  writeFileSync(join(dir, "generator-catalogue.json"), text, "utf8");
+  return {
+    state: "available",
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    bridgeVersion: "0.0.0",
+    entries: [
+      {
+        id: "generator-catalogue",
+        path: "generator-catalogue.json",
+        sha256: createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex"),
+        bytes: Buffer.byteLength(text),
+        sourceArtifact: CATALOGUE_FIXTURE_SOURCE,
+      },
+    ],
+  };
+}
+
+async function buildToolingSkew(pom: string | null) {
+  const tmp = mkdtempSync(join(tmpdir(), "bridge-health-tooling-"));
+  try {
+    if (pom !== null) writeFileSync(join(tmp, "pom.xml"), pom, "utf8");
+    const config: BridgeConfig = { ...LIVE, project: { state: "available", projectRoot: tmp, source: "env" } };
+    const body = await call(config, "bridge-health", undefined, catalogueBundleIn(tmp), tmp);
+    const build = body.families.find((f: any) => f.family === "build");
+    assert.equal(build.state, "available");
+    return build.toolingSkew;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const toolingParent = (version: string) =>
+  `<project><parent><groupId>eu.exeris</groupId><artifactId>exeris-app-parent</artifactId><version>${version}</version></parent></project>`;
+
+test("bridge-health reports build toolingSkew aligned when the project pins the catalogue's release", async () => {
+  const skew = await buildToolingSkew(toolingParent("0.10.0"));
+  assert.equal(skew.status, "aligned");
+  assert.equal(skew.source, "app-parent");
+});
+
+test("bridge-health reports build toolingSkew skew_detected when the project pins another release", async () => {
+  const skew = await buildToolingSkew(toolingParent("0.9.1"));
+  assert.equal(skew.status, "skew_detected");
+  assert.equal(skew.projectToolingVersion, "0.9.1");
+  assert.equal(skew.bundledToolingVersion, "0.10.0");
+});
+
+test("bridge-health reports build toolingSkew unknown when the project pins no tooling", async () => {
+  assert.equal((await buildToolingSkew(null)).status, "unknown");
+});

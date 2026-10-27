@@ -80,6 +80,7 @@ function fake(name: string, source: string, kind: "java" | "typescript" = "java"
     kind,
     version: "0.10.0",
     source: kind === "java" ? "m2" : "node_modules",
+    pinSource: kind === "java" ? "app-parent" : "node-modules",
     path: "fake/generator",
     privatePaths: [],
     launch: (metadataDir, workdir) => {
@@ -361,6 +362,7 @@ test("a generator that cannot start is a structured error", async () => {
     kind: "java",
     version: "0.10.0",
     source: "m2",
+    pinSource: "app-parent",
     path: "fake/generator",
     privatePaths: [],
     launch: (_m, workdir) => ({
@@ -646,4 +648,35 @@ test("a codegen config with dryRun, or an outputPath outside the project, is ref
   write("exeris-codegen.json", JSON.stringify({ outputPath: "src/gen" }));
   const ok = payload(await tool.handler({ target: "ts" }));
   assert.deepEqual(ok.l1, { root: "src/gen", source: "config", seeded: false });
+});
+
+test("the preview reports the pinned generator's release against the catalogue that decodes its diagnostics", async () => {
+  const aligned = payload(
+    await toolFor(project, { resolveJava: fake("manifest", MANIFEST_GENERATOR) }).handler({ target: "java" }),
+  );
+  assert.deepEqual(aligned.toolingSkew, {
+    status: "aligned",
+    bundledToolingVersion: "0.10.0",
+    projectToolingVersion: "0.10.0",
+    source: "app-parent",
+  });
+
+  const older = fake("manifest-older", MANIFEST_GENERATOR);
+  const skewed = payload(
+    await toolFor(project, {
+      resolveJava: () => ({ ...(older() as object), version: "0.9.1" }) as GeneratorResolution,
+    }).handler({ target: "java" }),
+  );
+  assert.equal(skewed.toolingSkew.status, "skew_detected");
+  assert.equal(skewed.toolingSkew.projectToolingVersion, "0.9.1");
+});
+
+test("a TypeScript preview names the installed package as the pin's source", async () => {
+  const out = payload(
+    await toolFor(project, { resolveTypeScript: fake("manifest-ts", MANIFEST_GENERATOR, "typescript") }).handler({
+      target: "ts",
+    }),
+  );
+  assert.equal(out.toolingSkew.source, "node-modules");
+  assert.equal(out.toolingSkew.status, "aligned");
 });
