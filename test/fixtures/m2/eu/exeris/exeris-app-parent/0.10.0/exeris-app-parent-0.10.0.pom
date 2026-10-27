@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Inherits exeris-app-bom rather than importing it: properties of an imported BOM do not reach
+         <build><pluginManagement>, and inheritance is what carries the plugin version here. -->
+    <parent>
+        <groupId>eu.exeris</groupId>
+        <artifactId>exeris-app-bom</artifactId>
+        <version>0.10.0</version>
+        <relativePath>../exeris-app-bom/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>exeris-app-parent</artifactId>
+    <packaging>pom</packaging>
+
+    <name>Exeris Tooling :: Application Parent</name>
+    <description>
+        Parent POM for an application whose sources exeris-tooling generates: the annotation
+        processor, the codegen goals bound to their phases, and the generated migrations and
+        OpenAPI on the classpath. Pair it with a dependency on exeris-app-starter.
+    </description>
+
+    <!-- Exeris's own publication metadata: Central validates this POM as published, so url,
+         licenses, developers and scm are present (the last three inherited from exeris-app-bom).
+         An application on this parent inherits them unless it declares its own, which is why the
+         README's application POM and the invoker fixture blank url, licenses, developers and scm
+         and state their own description. -->
+    <url>https://github.com/exeris-systems/exeris-tooling</url>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- JDK 25 LTS, the floor exeris-tooling builds at: exeris-codegen-maven-plugin loads into
+             Maven's own JVM, and generated code compiles at this release. -->
+        <maven.compiler.release>25</maven.compiler.release>
+    </properties>
+
+    <build>
+        <!--
+            Every generated file is written under src/main/generated/java, and exeris:generate
+            registers that directory as a compile source root and nothing else. Maven copies no
+            .sql or .yaml from a source root, so the Flyway migrations (db/migration) and the
+            OpenAPI document (openapi) reach target/classes only through this entry.
+
+            Declaring <resources> replaces Maven's default, so src/main/resources is restated. An
+            application that declares its own <resources> replaces both entries and has to keep the
+            generated one.
+        -->
+        <resources>
+            <resource>
+                <directory>${project.basedir}/src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/src/main/generated/java</directory>
+                <includes>
+                    <include>db/migration/**</include>
+                    <include>openapi/**</include>
+                </includes>
+            </resource>
+        </resources>
+
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>3.5.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.14.1</version>
+                </plugin>
+                <!-- Surefire selects the JUnit Platform provider from the test classpath, so the
+                     generated tests (ADR-058: JUnit 5 + AssertJ in the application's test scope) run
+                     with no provider declared here. -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.2.5</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!-- An older JVM fails at plugin load with an UnsupportedClassVersionError realm dump;
+                 this fails first, with one line. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-exeris-jdk-and-maven</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[25,)</version>
+                                    <message>An Exeris application builds on JDK 25 or newer: exeris-codegen-maven-plugin loads into Maven's own JVM. Current JVM: ${java.version}.</message>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>[3.9,)</version>
+                                    <message>An Exeris application builds on Maven 3.9 or newer.</message>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- BEGIN exeris build block. README.md ("Quick start", route 2) carries a copy of
+                 everything from here to END for an application that cannot take this parent; keep
+                 the two identical. The plugin version is spelled out, although exeris-app-bom's
+                 pluginManagement already supplies it here, because an imported BOM brings no
+                 pluginManagement and the copy has to carry it. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>eu.exeris</groupId>
+                            <artifactId>exeris-processor</artifactId>
+                            <version>${exeris.tooling.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>eu.exeris</groupId>
+                <artifactId>exeris-codegen-maven-plugin</artifactId>
+                <version>${exeris.tooling.version}</version>
+                <executions>
+                    <execution>
+                        <id>exeris-generate</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>exeris-verify</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>verify-capabilities</goal>
+                            <goal>verify-runtime</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- END exeris build block. -->
+        </plugins>
+    </build>
+</project>

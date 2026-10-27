@@ -3,11 +3,13 @@ import { join } from "node:path";
 
 import type { BridgeConfig, ProjectConfig, Unavailable } from "../../config/env.js";
 import { loadBundle, type BundleState } from "../../data/bundle.js";
+import { loadAppStarter } from "../../data/app-starter.js";
 import { loadGeneratorCatalogue, type CatalogueState } from "../../data/generator-catalogue.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
+import { getStarterTool } from "./starter.js";
 import {
   looksLikeExerisOutput,
   MAX_DIAGNOSTIC_CHARS,
@@ -51,9 +53,10 @@ type BuildFamily = { readonly state: "available"; readonly project: ProjectConfi
 
 /**
  * `bundle` and `rootOverride` are injectable for tests; production reads the
- * bundle shipped in the package. The generator catalogue is loaded once, here,
- * so a catalogue the bridge cannot use is a state every call reports rather
- * than a failure each call rediscovers.
+ * bundle shipped in the package. The generator catalogue and the application
+ * starter are loaded once, here, so a catalogue or starter the bridge cannot
+ * use is a state every call reports rather than a failure each call
+ * rediscovers.
  */
 export function registerBuildTools(
   config: BridgeConfig,
@@ -71,6 +74,7 @@ export function registerBuildTools(
     explainArtefactsTool(handle, catalogue),
     getDetachStateTool(handle),
     explainDiagnosticTool(handle),
+    getStarterTool(loadAppStarter(bundle, rootOverride)),
   ];
 }
 
