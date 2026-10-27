@@ -79,7 +79,7 @@ const BUILT = {
   "README.md": "not metadata",
 };
 
-test("registerBuildTools registers exactly the five build-* tools", () => {
+test("registerBuildTools registers exactly the six build-* tools", () => {
   const names = registerBuildTools(configFor(null))
     .map((t) => t.definition.name)
     .sort();
@@ -88,6 +88,7 @@ test("registerBuildTools registers exactly the five build-* tools", () => {
     "build-explain_diagnostic",
     "build-get_detach_state",
     "build-get_domain_metadata",
+    "build-get_starter",
     "build-list_domains",
   ]);
 });
@@ -216,6 +217,7 @@ test("build-* is dark when no project root resolved", async () => {
   for (const name of [
     "build-list_domains",
     "build-get_domain_metadata",
+    "build-get_starter",
     "build-explain_artefacts",
     "build-get_detach_state",
     "build-explain_diagnostic",

@@ -18,6 +18,10 @@ import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.j
 //   --strict   fail hard if no repository or SDK jars are found, or the docs
 //              registry snapshot cannot be built (required in prepack)
 //
+// The application starter (data/app-starter.json) is read from the
+// eu.exeris:exeris-app-bom, -app-parent and -app-starter POMs at EXERIS_TOOLING_VERSION;
+// --strict fails if the BOM is absent.
+//
 // The generator catalogue (data/generator-catalogue.json) is read from the
 // eu.exeris:exeris-codegen-java jar at EXERIS_TOOLING_VERSION and accepted by the
 // catalogueFormat it declares; a format this build does not read fails the run.

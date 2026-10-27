@@ -215,6 +215,11 @@ function assertZeroCheckout(project, home) {
     "the installed package is missing the generator catalogue — prepack did not vendor it from exeris-codegen-java",
   );
   assert.equal(
+    existsSync(join(project, "node_modules", "@exeris", "ai-bridge", "data", "app-starter.json")),
+    true,
+    "the installed package is missing the application starter — prepack did not vendor it from exeris-app-bom",
+  );
+  assert.equal(
     existsSync(join(project, "node_modules", "@exeris", "ai-bridge", "data", "docs", "manifest.json")),
     true,
     "the installed package is missing the docs registry snapshot — prepack did not build it, or `files` dropped it",
@@ -234,6 +239,7 @@ function assertBootsDark({
   ungenerated,
   detach,
   diagnostic,
+  starter,
   sdkList,
   sdkAst,
   sdkDescribe,
@@ -255,7 +261,7 @@ function assertBootsDark({
   // The bundle ships inside the tarball, so unlike every other surface it is
   // live on a bare machine, carrying reference data entries for the P2 families.
   assert.equal(version.bundle.state, "available", "the bundled reference data did not survive packaging");
-  assert.equal(version.bundle.entryCount, 3); // annotation catalog, AST schema, generator catalogue
+  assert.equal(version.bundle.entryCount, 4); // annotation catalog, AST schema, generator catalogue, application starter
   assert.equal(version.bundle.bridgeVersion, PKG.version);
 
   assert.equal(health.mode, "app");
@@ -344,6 +350,15 @@ function assertBootsDark({
   const diagnosticPayload = JSON.parse(diagnostic.content[0].text);
   assert.equal(diagnosticPayload.recognised, true, "the diagnostic catalogue did not survive packaging");
   assert.equal(diagnosticPayload.matches[0].id, "processor/universe-tier-reserved");
+
+  assert.ok(!starter.isError, `build-get_starter errored: ${starter.content[0].text}`);
+  const starterPayload = JSON.parse(starter.content[0].text);
+  assert.deepEqual(
+    starterPayload.files.map((f) => f.path),
+    ["backend/pom.xml", "frontend/package.json"],
+  );
+  assert.deepEqual(starterPayload.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
+  assert.equal(starterPayload.bomVersion, "0.10.0", "the application starter did not survive packaging");
 
   assert.ok(!sdkList.isError, `sdk-list_annotations errored: ${sdkList.content[0].text}`);
   const sdkListPayload = JSON.parse(sdkList.content[0].text);
@@ -520,6 +535,13 @@ async function interrogate(project, home, extraEnv) {
       },
     });
 
+    // Bundled data only: no project root, no ecosystem root, no checkout. The
+    // starter's triple is vendored from the BOM POMs at pack time.
+    const starter = await client.request("tools/call", {
+      name: "build-get_starter",
+      arguments: { variant: "both" },
+    });
+
     const sdkList = await client.request("tools/call", {
       name: "sdk-list_annotations",
       arguments: {},
@@ -556,6 +578,7 @@ async function interrogate(project, home, extraEnv) {
       ungenerated,
       detach,
       diagnostic,
+      starter,
       sdkList,
       sdkAst,
       sdkDescribe,
