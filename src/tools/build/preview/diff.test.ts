@@ -6,12 +6,15 @@ import { afterEach, beforeEach, test } from "node:test";
 
 import {
   JAVA_L1_ROOT,
+  MAX_LISTED_ENTRIES,
+  MAX_LIST_DEPTH,
   TYPESCRIPT_L1_ROOT,
   collectProduced,
   diffAgainstL1,
   javaL1Root,
   typescriptL1Root,
 } from "./diff.js";
+import { OUTPUT_SUBDIR, createOutputDir } from "./workdir.js";
 
 let work: string;
 let project: string;
@@ -122,4 +125,72 @@ test("typescriptL1Root honours outputPath from exeris-codegen.json when it is in
 test("typescriptL1Root ignores an outputPath that leaves the project", () => {
   writeFileSync(join(project, "exeris-codegen.json"), JSON.stringify({ outputPath: "../elsewhere" }));
   assert.equal(typescriptL1Root(project), join(project, TYPESCRIPT_L1_ROOT));
+});
+
+test("typescriptL1Root reads the config file names in the generator's order", () => {
+  writeFileSync(join(project, ".exerisrc.json"), JSON.stringify({ outputPath: "c" }));
+  mkdirSync(join(project, "c"));
+  assert.equal(typescriptL1Root(project), join(project, "c"));
+  writeFileSync(join(project, "exeris-codegen.config.json"), JSON.stringify({ outputPath: "b" }));
+  mkdirSync(join(project, "b"));
+  assert.equal(typescriptL1Root(project), join(project, "b"));
+  writeFileSync(join(project, "exeris-codegen.json"), JSON.stringify({ outputPath: "a" }));
+  mkdirSync(join(project, "a"));
+  assert.equal(typescriptL1Root(project), join(project, "a"));
+});
+
+test("typescriptL1Root walks up from a subdirectory but stops at the project root", () => {
+  const sub = join(project, "frontend", "app");
+  mkdirSync(sub, { recursive: true });
+  mkdirSync(join(project, "gen"));
+  writeFileSync(join(project, "exeris-codegen.json"), JSON.stringify({ outputPath: "gen" }));
+  assert.equal(typescriptL1Root(project, sub), join(project, "gen"));
+
+  // A config above the project root is not the project's.
+  rmSync(join(project, "exeris-codegen.json"));
+  writeFileSync(join(work, "exeris-codegen.json"), JSON.stringify({ outputPath: "gen" }));
+  assert.equal(typescriptL1Root(project, sub), join(project, TYPESCRIPT_L1_ROOT));
+});
+
+test("a changed file whose diff exceeds the diff budget is reported changed, diff too large", () => {
+  const lines = (prefix: string): string => Array.from({ length: 15_000 }, (_, i) => `${prefix}${i}`).join("\n");
+  const l1 = javaL1Root(project);
+  put(l1, "Big.java", lines("old"));
+  put(produced, "Big.java", lines("new"));
+  const report = diffAgainstL1(collectProduced(produced).files, project, l1);
+  assert.equal(report.files[0].status, "changed");
+  assert.equal(report.files[0].diff, "");
+  assert.equal(report.files[0].diffOmitted, "too_large");
+});
+
+test("a tree with more files than the listing cap reports a files limit", () => {
+  for (let i = 0; i <= MAX_LISTED_ENTRIES; i++) put(produced, `f${i}.txt`, "x");
+  const result = collectProduced(produced);
+  assert.equal(result.limit?.name, "files");
+  assert.equal(result.limit?.value, MAX_LISTED_ENTRIES);
+  assert.equal(result.files.size, 0);
+});
+
+test("a tree nested deeper than the depth cap reports a files limit", () => {
+  const deep = Array.from({ length: MAX_LIST_DEPTH + 2 }, () => "d").join("/");
+  put(produced, `${deep}/f.txt`, "x");
+  const result = collectProduced(produced);
+  assert.equal(result.limit?.name, "files");
+  assert.equal(result.limit?.value, MAX_LIST_DEPTH);
+});
+
+test("paths are sorted with a locale-aware comparator, stable across runs", () => {
+  put(produced, "b/B.java", "b\n");
+  put(produced, "a/A.java", "a\n");
+  put(produced, "a/B.java", "ab\n");
+  const report = diffAgainstL1(collectProduced(produced).files, project, javaL1Root(project));
+  assert.deepEqual(report.files.map((f) => f.path), ["a/A.java", "a/B.java", "b/B.java"]);
+});
+
+test("only the output subdirectory is listed: a crash log beside it is never a produced file", () => {
+  const out = createOutputDir(produced);
+  assert.equal(out, join(produced, OUTPUT_SUBDIR));
+  put(out, "p/A.java", "class A {}\n");
+  put(produced, "hs_err_pid42.log", "crash");
+  assert.deepEqual([...collectProduced(out).files.keys()], ["p/A.java"]);
 });
