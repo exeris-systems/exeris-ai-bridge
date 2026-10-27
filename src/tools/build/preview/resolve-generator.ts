@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { Unavailable } from "../../../config/env.js";
@@ -7,7 +7,11 @@ import { findArtifactJar, resolveLocalRepository } from "../../../config/maven.j
 import { isInsideRealRoot, resolveInside } from "../../../fs/sandbox.js";
 import { generatorEnv } from "./runner.js";
 import { OUTPUT_SUBDIR } from "./workdir.js";
-import { APP_GROUP_IDS, parsePom, readBounded, resolveValue } from "../../../config/pom.js";
+import {
+  readInstalledCodegenTs,
+  resolveJavaToolingPin,
+  type ToolingVersionSource,
+} from "../../../config/tooling-pin.js";
 
 // Finds the generator the PROJECT pins, locally, and refuses to guess.
 //
@@ -43,6 +47,8 @@ export interface ResolvedGenerator {
   readonly version: string;
   /** Where it was found: the local Maven repository (Java) or the project's `node_modules` (TypeScript). */
   readonly source: "m2" | "node_modules";
+  /** Where the project's pin of `version` was read from; the tooling-skew report names it. */
+  readonly pinSource: ToolingVersionSource;
   /**
    * The launched artefact relative to the local Maven repository or the project root, `/`-separated,
    * so it is safe to show an agent.
@@ -67,7 +73,6 @@ export const GENERATOR_EXIT = { ok: 0, failed: 1, invalidArguments: 2 } as const
 export const MIN_JAVA_MAJOR = 25;
 
 const CODEGEN_CLI = { groupId: "eu.exeris", artifactId: "exeris-codegen-cli" } as const;
-const CODEGEN_PLUGIN = "exeris-codegen-maven-plugin";
 
 /** A Maven version as a single path segment: no separator, no `..`. */
 const SAFE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -99,7 +104,7 @@ export interface JavaResolveDeps {
  * Launch: `java -jar <jar> --metadata-dir=<dir> --output-dir=<dir>` (ADR-097).
  */
 export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps): GeneratorResolution {
-  const pinned = pinnedToolingVersion(projectRoot);
+  const pinned = resolveJavaToolingPin(projectRoot);
   if (pinned.kind === "none") {
     return unavailable(
       pinned.reason,
@@ -160,6 +165,7 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     kind: "java",
     version,
     source: "m2",
+    pinSource: pinned.source,
     path: relative(repo, jar).split(sep).join("/"),
     privatePaths: [jar, repo],
     launch: (metadataDir, workdir) => {
@@ -191,52 +197,6 @@ function isInsideLocalRepository(repo: string, jar: string): boolean {
   } catch {
     return false;
   }
-}
-
-type PinnedVersion =
-  | { readonly kind: "pinned"; readonly version: string }
-  | { readonly kind: "none"; readonly reason: string };
-
-/** The project's pinned tooling version: the app-parent version first, else the codegen plugin's. */
-function pinnedToolingVersion(projectRoot: string): PinnedVersion {
-  const content = readBounded(projectRoot, join(projectRoot, "pom.xml"));
-  if (content === null) {
-    return { kind: "none", reason: "The project has no readable pom.xml, so its pinned tooling version is unknown." };
-  }
-  const model = parsePom(content);
-
-  const parent = model.parent;
-  if (
-    parent !== undefined &&
-    APP_GROUP_IDS.includes(parent.groupId) &&
-    parent.artifactId === "exeris-app-parent"
-  ) {
-    const version = resolveValue(parent.version, model.properties);
-    return version === null
-      ? { kind: "none", reason: `pom.xml parents on exeris-app-parent at "${parent.version}", which is not a concrete version the bridge can resolve.` }
-      : { kind: "pinned", version };
-  }
-
-  const pluginVersion = codegenPluginVersion(model.body, model.properties);
-  if (pluginVersion !== null) return { kind: "pinned", version: pluginVersion };
-  return {
-    kind: "none",
-    reason: `pom.xml neither parents on exeris-app-parent nor declares ${CODEGEN_PLUGIN} with a concrete version, so no tooling version is pinned.`,
-  };
-}
-
-function codegenPluginVersion(body: string, properties: Map<string, string>): string | null {
-  const pluginRegex = /<plugin>([\s\S]*?)<\/plugin>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = pluginRegex.exec(body)) !== null) {
-    const block = match[1];
-    if (!new RegExp(String.raw`<artifactId>\s*${CODEGEN_PLUGIN}\s*</artifactId>`, "i").test(block)) continue;
-    const raw = /<version>\s*([^<\s]+)\s*<\/version>/i.exec(block);
-    if (raw === null) continue;
-    const resolved = resolveValue(raw[1], properties);
-    if (resolved !== null) return resolved;
-  }
-  return null;
 }
 
 function javaCommand(env: NodeJS.ProcessEnv): string {
@@ -273,9 +233,7 @@ export function parseJavaMajor(output: string): number | null {
 // TypeScript
 // ---------------------------------------------------------------------------
 
-const CODEGEN_TS_PACKAGE_DIR = ["node_modules", "@exeris", "codegen-ts"] as const;
 const BIN_NAME = "exeris-gen";
-const MAX_MANIFEST_BYTES = 1024 * 1024;
 
 /**
  * Resolve the `exeris-gen` entry point of the project's installed
@@ -295,16 +253,9 @@ export function resolveTypeScriptGenerator(
     "Run 'npm install' in the project (with @exeris/codegen-ts as a dependency), then retry. The bridge does not download it.",
   );
 
-  let pkgDir: string;
-  let manifest: { version?: unknown; bin?: unknown };
-  try {
-    pkgDir = resolveInside(projectRoot, join(projectRoot, ...CODEGEN_TS_PACKAGE_DIR));
-    const manifestPath = resolveInside(pkgDir, join(pkgDir, "package.json"));
-    if (statSync(manifestPath).size > MAX_MANIFEST_BYTES) return absent;
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version?: unknown; bin?: unknown };
-  } catch {
-    return absent;
-  }
+  const installed = readInstalledCodegenTs(projectRoot);
+  if (installed === null) return absent;
+  const { pkgDir, manifest } = installed;
 
   const version = typeof manifest.version === "string" ? manifest.version : null;
   const binRelative = binEntry(manifest.bin);
@@ -331,6 +282,7 @@ export function resolveTypeScriptGenerator(
     kind: "typescript",
     version,
     source: "node_modules",
+    pinSource: "node-modules",
     path: relative(projectRoot, bin).split(sep).join("/"),
     privatePaths: [pkgDir],
     launch: (metadataDir, workdir) => {

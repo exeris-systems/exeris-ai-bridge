@@ -12,6 +12,9 @@ import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../trans
 import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
 import { getServerVersion } from "../../version.js";
+import { resolveProjectToolingVersion } from "../../config/tooling-pin.js";
+import { loadGeneratorCatalogue } from "../../data/generator-catalogue.js";
+import { computeToolingSkew, type ToolingSkewReport } from "../build/tooling-skew.js";
 import { computeVersionSkew, type VersionSkewReport } from "../sdk/skew.js";
 
 // bridge:* — the bridge's own diagnostic surface. It reports on the server
@@ -133,7 +136,7 @@ function healthTool(
           // the agent's unit is the family — it calls caps-list_capabilities,
           // not "the project config" — and a single merged row would leave it
           // guessing which of its tools the state applied to.
-          plainFamilyReport("build", config.project),
+          buildFamilyReport(config.project, bundle, rootOverride),
           plainFamilyReport("caps", config.project),
           bundleFamilyReport("sdk", bundle, config.project, rootOverride),
         ],
@@ -160,6 +163,8 @@ interface FamilyReport {
   readonly remedy?: string;
   readonly transport?: TransportReport | null;
   readonly versionSkew?: VersionSkewReport;
+  /** build:* — the project's pinned tooling version against the bundled generator catalogue's. */
+  readonly toolingSkew?: ToolingSkewReport;
 }
 
 interface TransportReport {
@@ -179,6 +184,23 @@ function plainFamilyReport(
 ): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
   return { family, state: "available" };
+}
+
+/**
+ * build:* reads the project like caps:*, and additionally reports whether the project's pinned
+ * tooling version matches the release the bundled generator catalogue came from.
+ */
+function buildFamilyReport(
+  config: ProjectConfig | Unavailable,
+  bundle: BundleState,
+  rootOverride?: string,
+): FamilyReport {
+  if (config.state === "unavailable") return darkFamilyReport("build", config);
+  const toolingSkew = computeToolingSkew(
+    loadGeneratorCatalogue(bundle, rootOverride),
+    resolveProjectToolingVersion(config.projectRoot),
+  );
+  return { family: "build", state: "available", toolingSkew };
 }
 
 /**

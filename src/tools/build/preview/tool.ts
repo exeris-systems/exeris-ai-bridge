@@ -5,10 +5,12 @@ import { pathToFileURL } from "node:url";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ProjectConfig, Unavailable } from "../../../config/env.js";
+import type { CatalogueState } from "../../../data/generator-catalogue.js";
 import { isInsideRealRoot } from "../../../fs/sandbox.js";
 import type { RegisteredTool } from "../../types.js";
 import { guard } from "../../unavailable.js";
 import { scanDiagnostics } from "../diagnostics.js";
+import { computeToolingSkew } from "../tooling-skew.js";
 import { collectProduced, diffAgainstL1, javaL1Root, type FileDiff } from "./diff.js";
 import {
   GENERATOR_EXIT,
@@ -32,6 +34,13 @@ import { createOutputDir, withWorkdir } from "./workdir.js";
 // emitted metadata into a scratch directory and reports what it produced
 // against the project's L1 tree. The scratch directory is the only thing
 // written (ADR-025, `build:*` preview amendment); the project is only read.
+
+/** Stands in when a caller supplies no catalogue: the skew is then reported as unknown. */
+const CATALOGUE_NOT_LOADED: CatalogueState = {
+  state: "unavailable",
+  reason: "No generator catalogue was loaded for this tool.",
+  remedy: "Register the build tools through registerBuildTools.",
+};
 
 export const METADATA_DIR = "target/classes/exeris-metadata";
 
@@ -61,6 +70,7 @@ export function previewGenerationTool(
   handle: Handle,
   ecosystemRoot: string | null,
   deps: PreviewDeps = {},
+  catalogue: CatalogueState = CATALOGUE_NOT_LOADED,
 ): RegisteredTool {
   return {
     definition: {
@@ -98,7 +108,7 @@ export function previewGenerationTool(
         });
       }
       try {
-        return await preview(project, ecosystemRoot, target as Target, deps);
+        return await preview(project, ecosystemRoot, target as Target, deps, catalogue);
       } catch (err) {
         return failed(target, err, makeScrub(project.projectRoot, []));
       }
@@ -111,6 +121,7 @@ async function preview(
   ecosystemRoot: string | null,
   target: Target,
   deps: PreviewDeps,
+  catalogue: CatalogueState,
 ): Promise<CallToolResult> {
   const projectRoot = project.projectRoot;
 
@@ -226,7 +237,7 @@ async function preview(
         source: l1Source,
         seeded: seeded.copied > 0,
       };
-      const report = summarise(target, generator, run, l1, scrub);
+      const report = summarise(target, generator, run, l1, scrub, catalogue);
       if (run.exitCode !== GENERATOR_EXIT.ok) {
         return jsonResult({
           ...report,
@@ -253,12 +264,19 @@ function summarise(
   run: RunResult,
   l1: { root: string; source: "default" | "config"; seeded: boolean },
   scrub: Scrubber,
+  catalogue: CatalogueState,
 ) {
   const text = scrubbed(run, scrub);
   const { matches, unrecognisedIds } = scanDiagnostics(`${text.stdout}\n${text.stderr}`);
   return {
     target,
     generator: describe(generator),
+    // The generator that ran is the pinned one; the catalogue decoded its diagnostics.
+    toolingSkew: computeToolingSkew(catalogue, {
+      kind: "pinned",
+      version: generator.version,
+      source: generator.pinSource,
+    }),
     exitCode: run.exitCode,
     outcome: outcomeOf(run.exitCode),
     l1,

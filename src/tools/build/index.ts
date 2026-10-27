@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { BridgeConfig, ProjectConfig, Unavailable } from "../../config/env.js";
+import { resolveProjectToolingVersion } from "../../config/tooling-pin.js";
 import { loadBundle, type BundleState } from "../../data/bundle.js";
 import { loadAppStarter } from "../../data/app-starter.js";
 import { loadGeneratorCatalogue, type CatalogueState } from "../../data/generator-catalogue.js";
@@ -25,6 +26,7 @@ import {
   parseCodegenManifest,
   TEST_GENERATED_ROOT,
 } from "./artefacts.js";
+import { computeToolingSkew } from "./tooling-skew.js";
 import { previewGenerationTool, type PreviewDeps } from "./preview/tool.js";
 import {
   classifyMetadataFile,
@@ -77,7 +79,7 @@ export function registerBuildTools(
     getDetachStateTool(handle),
     explainDiagnosticTool(handle),
     getStarterTool(loadAppStarter(bundle, rootOverride)),
-    previewGenerationTool(handle, config.ecosystemRoot, preview),
+    previewGenerationTool(handle, config.ecosystemRoot, preview, catalogue),
   ];
 }
 
@@ -274,6 +276,7 @@ function explainArtefactsTool(handle: BuildFamily, catalogue: CatalogueState): R
       return jsonResult({
         present: true,
         catalogue: describeCatalogue(catalogue),
+        toolingSkew: computeToolingSkew(catalogue, resolveProjectToolingVersion(project.projectRoot)),
         roots: roots.map(({ root, entries }) => ({ root, generatedFiles: entries.length })),
         total: all.length,
         filter,
