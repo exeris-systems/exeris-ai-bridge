@@ -214,18 +214,15 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     closeWatcher();
   });
 
-  const handle: WatchHandle = {
-    root: realRoot,
-    close: () => {
-      if (closed) return;
-      closed = true;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      buffer.clear();
-      closeWatcher();
-      untrackCloser(handle.close);
-    },
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    buffer.clear();
+    closeWatcher();
+    untrackCloser(close);
   };
-  trackCloser(handle.close);
-  return handle;
+  trackCloser(close);
+  return { root: realRoot, close };
 }
