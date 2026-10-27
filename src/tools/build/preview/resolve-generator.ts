@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Unavailable } from "../../../config/env.js";
 import { findArtifactJar, resolveLocalRepository } from "../../../config/maven.js";
-import { resolveInside } from "../../../fs/sandbox.js";
+import { isInsideRealRoot, resolveInside } from "../../../fs/sandbox.js";
+import { generatorEnv } from "./runner.js";
+import { OUTPUT_SUBDIR } from "./workdir.js";
 import { APP_GROUP_IDS, parsePom, readBounded, resolveValue } from "../../../config/pom.js";
 
 // Finds the generator the PROJECT pins, locally, and refuses to guess.
@@ -16,12 +18,22 @@ import { APP_GROUP_IDS, parsePom, readBounded, resolveValue } from "../../../con
 
 export type GeneratorKind = "java" | "typescript";
 
-/** The launch of one resolved generator over a metadata directory into an output directory. */
+/**
+ * The launch of one resolved generator over a metadata directory.
+ *
+ * The generator is confined to the scratch directory: its output goes to a
+ * subdirectory of it (`outputDir`), and its environment is the fixed allowlist
+ * of generatorEnv(), so a variable such as JAVA_TOOL_OPTIONS cannot redirect a
+ * dump or a log elsewhere.
+ */
 export interface GeneratorLaunch {
   readonly command: string;
   readonly args: readonly string[];
   /** Working directory the generator runs in. */
   readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  /** Where the generator writes the files it produces; the only directory that is listed and diffed. */
+  readonly outputDir: string;
 }
 
 export interface ResolvedGenerator {
@@ -29,8 +41,8 @@ export interface ResolvedGenerator {
   readonly kind: GeneratorKind;
   /** The version the project pins (Java) or has installed (TypeScript). */
   readonly version: string;
-  /** Build the launch for one run. The output directory is the bridge's scratch directory. */
-  launch(metadataDir: string, outputDir: string): GeneratorLaunch;
+  /** Build the launch for one run inside the bridge's scratch directory. */
+  launch(metadataDir: string, workdir: string): GeneratorLaunch;
 }
 
 export type GeneratorResolution = ResolvedGenerator | Unavailable;
@@ -47,6 +59,13 @@ export const MIN_JAVA_MAJOR = 25;
 
 const CODEGEN_CLI = { groupId: "eu.exeris", artifactId: "exeris-codegen-cli" } as const;
 const CODEGEN_PLUGIN = "exeris-codegen-maven-plugin";
+
+/** A Maven version as a single path segment: no separator, no `..`. */
+const SAFE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function isSafeVersion(version: string): boolean {
+  return SAFE_VERSION.test(version) && !version.includes("..");
+}
 
 function unavailable(reason: string, remedy: string): Unavailable {
   return { state: "unavailable", reason, remedy };
@@ -79,6 +98,12 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     );
   }
   const version = pinned.version;
+  if (!isSafeVersion(version)) {
+    return unavailable(
+      "The tooling version pinned in pom.xml is not a plain Maven version, so no generator is resolved for it.",
+      "Pin a release version such as 0.10.0 on exeris-app-parent or exeris-codegen-maven-plugin, then retry.",
+    );
+  }
 
   const repo = resolveLocalRepository(deps.env);
   if (repo === null) {
@@ -92,6 +117,13 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
     return unavailable(
       `eu.exeris:exeris-codegen-cli:${version} is not in the local Maven repository. The bridge does not download it and does not substitute another version.`,
       `Run 'mvn dependency:get -Dartifact=eu.exeris:exeris-codegen-cli:${version}' (or a build of the project) to install it, then retry.`,
+    );
+  }
+
+  if (!isInsideLocalRepository(repo, jar)) {
+    return unavailable(
+      `eu.exeris:exeris-codegen-cli:${version} resolves outside the local Maven repository, so it is not launched.`,
+      "Reinstall the artifact into the local Maven repository, then retry.",
     );
   }
 
@@ -110,16 +142,38 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
   }
 
   const command = javaCommand(deps.env);
+  const baseEnv = deps.env;
   return {
     state: "available",
     kind: "java",
     version,
-    launch: (metadataDir, outputDir) => ({
-      command,
-      args: ["-jar", jar, `--metadata-dir=${metadataDir}`, `--output-dir=${outputDir}`],
-      cwd: projectRoot,
-    }),
+    launch: (metadataDir, workdir) => {
+      const outputDir = join(workdir, OUTPUT_SUBDIR);
+      return {
+        command,
+        // The crash log is directed into the scratch directory, outside outputDir:
+        // the JVM would otherwise write hs_err_pid*.log into its working directory.
+        args: [
+          `-XX:ErrorFile=${join(workdir, "hs_err_pid%p.log")}`,
+          "-jar",
+          jar,
+          `--metadata-dir=${metadataDir}`,
+          `--output-dir=${outputDir}`,
+        ],
+        cwd: workdir,
+        env: generatorEnv(baseEnv, workdir),
+        outputDir,
+      };
+    },
   };
+}
+
+function isInsideLocalRepository(repo: string, jar: string): boolean {
+  try {
+    return isInsideRealRoot(realpathSync.native(repo), realpathSync.native(jar));
+  } catch {
+    return false;
+  }
 }
 
 type PinnedVersion =
@@ -159,7 +213,7 @@ function codegenPluginVersion(body: string, properties: Map<string, string>): st
   let match: RegExpExecArray | null;
   while ((match = pluginRegex.exec(body)) !== null) {
     const block = match[1];
-    if (!new RegExp(`<artifactId>\\s*${CODEGEN_PLUGIN}\\s*</artifactId>`, "i").test(block)) continue;
+    if (!new RegExp(String.raw`<artifactId>\s*${CODEGEN_PLUGIN}\s*</artifactId>`, "i").test(block)) continue;
     const raw = /<version>\s*([^<\s]+)\s*<\/version>/i.exec(block);
     if (raw === null) continue;
     const resolved = resolveValue(raw[1], properties);
@@ -216,9 +270,12 @@ const MAX_MANIFEST_BYTES = 1024 * 1024;
  * `-o, --output <path>`); the run's other settings come from the project's
  * `exeris-codegen.json`, which the generator reads from its working directory.
  */
-export function resolveTypeScriptGenerator(projectRoot: string): GeneratorResolution {
+export function resolveTypeScriptGenerator(
+  projectRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): GeneratorResolution {
   const absent = unavailable(
-    "@exeris/codegen-ts is not installed in the project's node_modules, so there is no TypeScript generator at the project's version.",
+    "@exeris/codegen-ts was not found in the project's own node_modules (a workspace-hoisted install is not followed), so there is no TypeScript generator at the project's version.",
     "Run 'npm install' in the project (with @exeris/codegen-ts as a dependency), then retry. The bridge does not download it.",
   );
 
@@ -234,12 +291,7 @@ export function resolveTypeScriptGenerator(projectRoot: string): GeneratorResolu
   }
 
   const version = typeof manifest.version === "string" ? manifest.version : null;
-  const binRelative =
-    typeof manifest.bin === "string"
-      ? manifest.bin
-      : typeof manifest.bin === "object" && manifest.bin !== null
-        ? (manifest.bin as Record<string, unknown>)[BIN_NAME]
-        : undefined;
+  const binRelative = binEntry(manifest.bin);
   if (version === null || typeof binRelative !== "string") {
     return unavailable(
       `The installed @exeris/codegen-ts has no ${BIN_NAME} entry in its package.json.`,
@@ -262,10 +314,25 @@ export function resolveTypeScriptGenerator(projectRoot: string): GeneratorResolu
     state: "available",
     kind: "typescript",
     version,
-    launch: (metadataDir, outputDir) => ({
-      command: process.execPath,
-      args: [bin, "generate", "--input", metadataDir, "--output", outputDir],
-      cwd: projectRoot,
-    }),
+    launch: (metadataDir, workdir) => {
+      const outputDir = join(workdir, OUTPUT_SUBDIR);
+      return {
+        command: process.execPath,
+        args: [bin, "generate", "--input", metadataDir, "--output", outputDir],
+        // The project root, not the scratch directory: exeris-gen finds exeris-codegen.json from
+        // its working directory and has no --config flag. Every path it writes is absolute and
+        // inside the scratch directory.
+        cwd: projectRoot,
+        env: generatorEnv(env, workdir),
+        outputDir,
+      };
+    },
   };
+}
+
+/** The `exeris-gen` path from a package.json `bin` field (a string, or a name -> path map). */
+function binEntry(bin: unknown): unknown {
+  if (typeof bin === "string") return bin;
+  if (typeof bin === "object" && bin !== null) return (bin as Record<string, unknown>)[BIN_NAME];
+  return undefined;
 }

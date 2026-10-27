@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -80,9 +80,19 @@ test("java: the app-parent version pins the jar, and the launch follows ADR-097"
   const gen = available(resolveJavaGenerator(project, java(26)));
   assert.equal(gen.kind, "java");
   assert.equal(gen.version, "0.10.0");
-  const launch = gen.launch("/meta", "/out");
+  const launch = gen.launch("/meta", "/work");
   assert.equal(launch.command, "java");
-  assert.deepEqual(launch.args, ["-jar", jar, "--metadata-dir=/meta", "--output-dir=/out"]);
+  // The crash log and the JVM's working directory are the scratch directory, never the project.
+  assert.deepEqual(launch.args, [
+    `-XX:ErrorFile=${join("/work", "hs_err_pid%p.log")}`,
+    "-jar",
+    jar,
+    "--metadata-dir=/meta",
+    `--output-dir=${join("/work", "out")}`,
+  ]);
+  assert.equal(launch.cwd, "/work");
+  assert.equal(launch.outputDir, join("/work", "out"));
+  assert.equal(launch.env.TMPDIR, "/work");
 });
 
 test("java: the app-parent version wins over a plugin version", () => {
@@ -115,6 +125,40 @@ test("java: the pinned jar missing is unavailable, never another version", () =>
   assert.match(r.reason, /exeris-codegen-cli:0\.10\.0 is not in the local Maven repository/);
   assert.match(r.reason, /does not download/);
   assert.match(r.remedy, /0\.10\.0/);
+});
+
+test("java: the launch environment carries no *_OPTIONS variable", () => {
+  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  installCli("0.10.0");
+  const gen = available(
+    resolveJavaGenerator(project, {
+      env: { ...env(), JAVA_TOOL_OPTIONS: "-Xmx1m", JDK_JAVA_OPTIONS: "-Xmx1m", NODE_OPTIONS: "--x", PATH: "/usr/bin" },
+      javaMajor: () => 26,
+    }),
+  );
+  const launched = gen.launch("/meta", "/work").env;
+  assert.deepEqual(Object.keys(launched).sort(), ["PATH", "TEMP", "TMP", "TMPDIR"]);
+});
+
+test("java: a version that is a path is unavailable and nothing outside the repository is launched", () => {
+  const evil = join(work, "evil");
+  mkdirSync(evil);
+  writeFileSync(join(evil, "exeris-codegen-cli-9.jar"), "not ours");
+  for (const version of ["../../../../evil", "..", "0.10.0/../../x", "0..1", "-1.0"]) {
+    writeFileSync(join(project, "pom.xml"), parentPom(version));
+    const r = unavailable(resolveJavaGenerator(project, java(26)));
+    assert.match(r.reason, /not a plain Maven version/, version);
+  }
+});
+
+test("java: a jar that is a link out of the local repository is not launched", () => {
+  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  const elsewhere = join(work, "elsewhere.jar");
+  writeFileSync(elsewhere, "not ours");
+  const dir = join(repo, "eu", "exeris", "exeris-codegen-cli", "0.10.0");
+  mkdirSync(dir, { recursive: true });
+  symlinkSync(elsewhere, join(dir, "exeris-codegen-cli-0.10.0.jar"));
+  assert.match(unavailable(resolveJavaGenerator(project, java(26))).reason, /outside the local Maven repository/);
 });
 
 test("java: no local Maven repository is unavailable", () => {
@@ -173,11 +217,14 @@ test("typescript: the installed package's exeris-gen bin is launched with node",
   const gen = available(resolveTypeScriptGenerator(project));
   assert.equal(gen.kind, "typescript");
   assert.equal(gen.version, "0.10.0");
-  const launch = gen.launch("/meta", "/out");
+  const launch = gen.launch("/meta", "/work");
   assert.equal(launch.command, process.execPath);
+  assert.equal(launch.outputDir, join("/work", "out"));
+  assert.equal(launch.cwd, project, "exeris-gen reads exeris-codegen.json from its working directory");
+  assert.equal(launch.env.TMPDIR, "/work");
   assert.equal(launch.args[0].endsWith(join("dist", "index.js")), true);
   assert.ok(launch.args[0].startsWith(dir) || launch.args[0].includes("codegen-ts"));
-  assert.deepEqual(launch.args.slice(1), ["generate", "--input", "/meta", "--output", "/out"]);
+  assert.deepEqual(launch.args.slice(1), ["generate", "--input", "/meta", "--output", join("/work", "out")]);
 });
 
 test("typescript: a string bin is accepted", () => {
@@ -187,7 +234,7 @@ test("typescript: a string bin is accepted", () => {
 
 test("typescript: no node_modules is unavailable with a remedy", () => {
   const r = unavailable(resolveTypeScriptGenerator(project));
-  assert.match(r.reason, /not installed/);
+  assert.match(r.reason, /project's own node_modules/);
   assert.match(r.remedy, /does not download/);
 });
 
