@@ -106,3 +106,8 @@ function install(): void {
   if (process.listenerCount("SIGTERM") === 0) process.on("SIGTERM", () => process.exit(143));
   if (process.listenerCount("SIGINT") === 0) process.on("SIGINT", () => process.exit(130));
 }
+
+/** How many closers are tracked; lets a test assert that a finished resource released its entry. */
+export function trackedCloserCount(): number {
+  return closers.size;
+}

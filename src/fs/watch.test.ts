@@ -5,10 +5,13 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { test } from "node:test";
 
+import { trackedCloserCount } from "../process/exit-hooks.js";
+
 import {
   compileGlob,
   describeFsError,
   isExcludedPath,
+  leavesBase,
   type SiblingProbe,
   MAX_GLOB_LENGTH,
   refusedRootReason,
@@ -199,7 +202,7 @@ test("files that match no glob are not reported", async () => {
 test("a burst of writes to one path inside the debounce window coalesces into one event", async () => {
   const { root, cleanup } = fixture();
   const c = collector();
-  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 300, onEvents: c.push }));
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 1000, onEvents: c.push }));
   try {
     const file = join(root, "A.java");
     for (let i = 0; i < 5; i++) {
@@ -207,7 +210,7 @@ test("a burst of writes to one path inside the debounce window coalesces into on
       await sleep(20);
     }
     await c.until(() => c.batches.length > 0);
-    await sleep(500);
+    await sleep(1200);
     assert.equal(c.batches.length, 1, "one debounced batch");
     const events = allEvents(c.batches);
     assert.equal(events.length, 1);
@@ -503,4 +506,133 @@ test("a nested tree created in one burst is watched once per directory and fully
   }
   assert.equal(closes, opened.length, "every OS watch that was opened has been closed");
   assert.deepEqual(handle.watchedDirectories(), []);
+});
+
+test("only a first segment of exactly `..` leaves the base", () => {
+  assert.equal(leavesBase(".."), true);
+  assert.equal(leavesBase(join("..", "x")), true);
+  assert.equal(leavesBase("..x"), false);
+  assert.equal(leavesBase(join("..x", "A.java")), false);
+  assert.equal(leavesBase(""), false);
+});
+
+test("a directory named `..x` inside the root is inside it", async () => {
+  const { root, cleanup } = fixture();
+  mkdirSync(join(root, "..x"));
+  const file = join(root, "..x", "A.java");
+  writeFileSync(file, "class A {}");
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
+  try {
+    assert.equal(await resolveEventPath(root, file), file);
+    writeFileSync(file, "class A { int x; }");
+    await c.until(() => allEvents(c.batches).some((e) => e.path === file));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a build file created within a burst applies to the events after it", async () => {
+  const { root, cleanup } = fixture();
+  const pkg = join(root, "pkg");
+  mkdirSync(join(pkg, "target"), { recursive: true });
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 600, onEvents: c.push }));
+  try {
+    // Each step lands inside one debounce window, so the probe answered for B
+    // is still cached when pom.xml appears.
+    writeFileSync(join(pkg, "target", "B.java"), "class B {}");
+    await sleep(100);
+    writeFileSync(join(pkg, "pom.xml"), "<project/>");
+    await sleep(100);
+    writeFileSync(join(pkg, "target", "C.java"), "class C {}");
+    await c.until(() => allEvents(c.batches).length > 0);
+    await sleep(700);
+    const paths = allEvents(c.batches).map((e) => e.path);
+    assert.ok(paths.includes(join(pkg, "target", "B.java")), JSON.stringify(paths));
+    assert.ok(!paths.includes(join(pkg, "target", "C.java")), JSON.stringify(paths));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a watcher that degrades leaves no closer registered", async () => {
+  const before = trackedCloserCount();
+  const handle = watchRoot("/", { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: () => undefined });
+  await handle.ready;
+  assert.equal(handle.state().state, "degraded");
+  assert.equal(trackedCloserCount(), before);
+  handle.close();
+  assert.equal(trackedCloserCount(), before);
+});
+
+test("a depth-0 watcher watches the root alone and reports only its own matches", async () => {
+  const { root, cleanup } = fixture();
+  mkdirSync(join(root, "sub"));
+  const c = collector();
+  const handle = await started(
+    watchRoot(root, { globs: ["**/adr-index.md"], maxDepth: 0, debounceMs: DEBOUNCE_MS, onEvents: c.push }),
+  );
+  try {
+    assert.deepEqual(handle.watchedDirectories(), [root]);
+    writeFileSync(join(root, "sub", "adr-index.md"), "nested");
+    writeFileSync(join(root, "other.md"), "other");
+    writeFileSync(join(root, "adr-index.md"), "index");
+    await c.until(() => allEvents(c.batches).length > 0);
+    await sleep(150);
+    assert.deepEqual(allEvents(c.batches).map((e) => e.path), [join(root, "adr-index.md")]);
+
+    // A directory created later is not descended into either.
+    mkdirSync(join(root, "later"));
+    await sleep(150);
+    assert.deepEqual(handle.watchedDirectories(), [root]);
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a depth-0 watcher reports a file replaced by rename", async () => {
+  const { root, cleanup } = fixture();
+  writeFileSync(join(root, "adr-index.md"), "old");
+  const c = collector();
+  const handle = await started(
+    watchRoot(root, { globs: ["adr-index.md"], maxDepth: 0, debounceMs: DEBOUNCE_MS, onEvents: c.push }),
+  );
+  try {
+    writeFileSync(join(root, ".adr-index.md.tmp"), "new");
+    renameSync(join(root, ".adr-index.md.tmp"), join(root, "adr-index.md"));
+    await c.until(() => allEvents(c.batches).some((e) => e.path === join(root, "adr-index.md")));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a directory replaced within a window is judged by its new contents", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  const proj = join(root, "proj");
+  mkdirSync(join(proj, "build"), { recursive: true });
+  writeFileSync(join(proj, "pom.xml"), "<project/>");
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 1500, onEvents: c.push }));
+  try {
+    // Caches "proj has a pom.xml".
+    writeFileSync(join(proj, "build", "Old.java"), "class Old {}");
+    await sleep(100);
+    renameSync(proj, join(root, "proj.old"));
+    await sleep(200);
+    mkdirSync(join(proj, "build", "foo"), { recursive: true });
+    writeFileSync(join(proj, "build", "foo", "A.java"), "class A {}");
+    await sleep(300);
+    assert.ok(
+      handle.watchedDirectories().includes(join(proj, "build", "foo")),
+      JSON.stringify(handle.watchedDirectories()),
+    );
+  } finally {
+    handle.close();
+    cleanup();
+  }
 });

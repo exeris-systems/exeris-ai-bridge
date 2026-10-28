@@ -47,6 +47,15 @@ async function main(): Promise<void> {
   const lsp = config.lsp.state === "available" ? new LspClient(config.lsp) : undefined;
   const kernel = config.kernel.state === "available" ? new KernelAdapter(config.kernel) : undefined;
 
+  const server = new Server(
+    { name: SERVER_NAME, version: getServerVersion() },
+    {
+      capabilities: { tools: {}, resources: { subscribe: true }, prompts: {} },
+      instructions: buildInstructions(config, bundle),
+    },
+  );
+  const resources = registerResources(server, config);
+
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
 
   for (const tool of [
@@ -56,15 +65,10 @@ async function main(): Promise<void> {
     ...registerBuildTools(config),
     ...registerCapsTools(config),
     ...registerSdkTools(bundle, config.project),
-    ...registerBridgeTools(config, { lsp, kernel }, bundle),
+    ...registerBridgeTools(config, { lsp, kernel, resources }, bundle),
   ]) {
     tools.set(tool.definition.name, tool);
   }
-
-  const server = new Server(
-    { name: SERVER_NAME, version: getServerVersion() },
-    { capabilities: { tools: {}, resources: {}, prompts: {} }, instructions: buildInstructions(config, bundle) },
-  );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [...tools.values()].map((t) => t.definition),
@@ -78,7 +82,6 @@ async function main(): Promise<void> {
     return await tool.handler(request.params.arguments ?? {});
   });
 
-  registerResources(server, config);
   registerPrompts(server, config, bundle);
 
   await server.connect(new StdioServerTransport());

@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative, sep } from "node:path";
+import { relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   compileGlob,
   describeFsError,
+  leavesBase,
   type WatchBatch,
   type WatchChangeType,
   type WatchHandle,
@@ -655,7 +656,7 @@ function globForWatcher(realRoot: string, globPattern: unknown): string {
     throw new RegistrationRefused("globPattern.baseUri does not resolve to a local directory");
   }
   const rel = relative(realRoot, base);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (leavesBase(rel)) {
     throw new RegistrationRefused("globPattern.baseUri is outside the workspace root");
   }
   return rel === "" ? rp.pattern : `${rel.split(sep).join("/")}/${rp.pattern}`;

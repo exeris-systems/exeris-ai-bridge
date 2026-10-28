@@ -42,7 +42,9 @@ export const DOCS_RESOURCES: readonly Resource[] = [
     name: "adr-index",
     title: "ADR registry index",
     description:
-      "The ecosystem ADR registry: number, title, owning repo, scope, visibility, status and link of every record.",
+      "The ecosystem ADR registry: number, title, owning repo, scope, visibility, status and link of every record. " +
+      "Subscribable: from an exeris-docs checkout a notification follows each change to the file; " +
+      "from the bundled snapshot the content is immutable for the process, so a subscription is accepted and never fires.",
     mimeType: MIME_TYPE,
   },
   {

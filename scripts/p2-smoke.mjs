@@ -235,6 +235,8 @@ function assertBootsDark({
   docsExcluded,
   docsRepos,
   docsIndexResource,
+  subscribed,
+  subscribeRefused,
   promptList,
   routePrompt,
   capless,
@@ -328,9 +330,11 @@ function assertBootsDark({
   assert.equal(docsRepos.isError, true);
   assert.equal(JSON.parse(docsRepos.content[0].text).error, "family_unavailable");
 
-  // The registry index is also a resource, advertised without subscriptions and read from the
-  // snapshot in the installed package.
-  assert.deepEqual(initialize.capabilities.resources, {}, "the server must advertise resources, and not subscribe");
+  // The registry index is also a resource, advertised as subscribable (never firing over the
+  // snapshot) and read from the snapshot in the installed package.
+  assert.deepEqual(initialize.capabilities.resources, { subscribe: true }, "the server must advertise resources with subscribe");
+  assert.deepEqual(subscribed, {}, "subscribing to the registry index must succeed over the snapshot");
+  assert.match(String(subscribeRefused?.message), /code -32602/, "subscribing to any other resource must be invalid params");
   assert.equal(docsIndexResource.contents.length, 1);
   assert.equal(docsIndexResource.contents[0].uri, "exeris://docs/adr-index");
   assert.equal(docsIndexResource.contents[0].mimeType, "text/markdown");
@@ -539,6 +543,9 @@ async function interrogate(project, home, extraEnv) {
 
     // The same registry as a resource, read from the snapshot through the real transport.
     const docsIndexResource = await client.request("resources/read", { uri: "exeris://docs/adr-index" });
+    // A subscription is accepted over the snapshot: the content cannot change, so it never fires.
+    const subscribed = await client.request("resources/subscribe", { uri: "exeris://docs/adr-index" });
+    const subscribeRefused = await client.request("resources/subscribe", { uri: "exeris://docs/hla" }).catch((err) => err);
     const promptList = await client.request("prompts/list", {});
     const routePrompt = await client.request("prompts/get", {
       name: "route-this-task",
@@ -639,6 +646,8 @@ async function interrogate(project, home, extraEnv) {
       docsExcluded,
       docsRepos,
       docsIndexResource,
+      subscribed,
+      subscribeRefused,
       promptList,
       routePrompt,
       capless,

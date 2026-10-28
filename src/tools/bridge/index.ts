@@ -9,6 +9,8 @@ import type {
 } from "../../config/env.js";
 import { isSdkAvailable, loadBundle, readBundleEntry, type BundleState } from "../../data/bundle.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
+import type { ResourcesHandle } from "../../resources/index.js";
+import type { SubscriptionWatchStatus } from "../../resources/subscriptions.js";
 import type { LspClient, LspCloseReason, LspStatus, LspWatchStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
 import { getServerVersion } from "../../version.js";
@@ -42,6 +44,8 @@ export interface BridgeTransports {
   readonly lsp?: LspClient;
   /** Present when kernel:* resolved a launch spec; shares the instance the family uses. */
   readonly kernel?: KernelAdapter;
+  /** The server's resources; shares the instance the subscriptions use. */
+  readonly resources?: ResourcesHandle;
 }
 
 export function registerBridgeTools(
@@ -128,7 +132,7 @@ function healthTool(
         mode: config.mode,
         modeSource: config.modeSource,
         families: [
-          docsFamilyReport(config.docs),
+          docsFamilyReport(config.docs, transports.resources?.subscriptionWatch()),
           childFamilyReport("lsp", config.lsp, transports.lsp?.status(), transports.lsp?.watchStatus()),
           childFamilyReport("kernel", config.kernel, transports.kernel?.status()),
           // Two families, one resolution: build:* and caps:* both read the
@@ -164,6 +168,11 @@ interface FamilyReport {
   readonly transport?: TransportReport | null;
   /** lsp:* only: whether other processes' workspace writes reach the server. `watching`, `degraded (reason)` or `off`. */
   readonly watch?: string;
+  /**
+   * docs:* only: what a subscription to exeris://docs/adr-index does. `off` (no subscriber),
+   * `watching`, `degraded (reason)`, or `static` (the content cannot change, so it never fires).
+   */
+  readonly subscriptions?: string;
   readonly versionSkew?: VersionSkewReport;
   /** build:* — the project's pinned tooling version against the bundled generator catalogue's. */
   readonly toolingSkew?: ToolingSkewReport;
@@ -211,13 +220,15 @@ function buildFamilyReport(
  * each repository it was read from — the facts an agent needs to judge whether
  * a record it read may since have changed.
  */
-function docsFamilyReport(config: DocsConfig | Unavailable): FamilyReport {
+function docsFamilyReport(config: DocsConfig | Unavailable, subscription?: SubscriptionWatchStatus): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport("docs", config);
-  if (config.source === "checkout") return { family: "docs", state: "available", source: "checkout" };
+  const subscriptions = subscription === undefined ? {} : { subscriptions: describeWatch(subscription) };
+  if (config.source === "checkout") return { family: "docs", state: "available", source: "checkout", ...subscriptions };
   return {
     family: "docs",
     state: "available",
     source: "snapshot",
+    ...subscriptions,
     snapshot: {
       generatedAt: config.generatedAt,
       sources: config.sources.map(({ repo, commit, licence }) => ({ repo, commit, licence })),
@@ -304,7 +315,7 @@ function darkFamilyReport(family: ToolFamily, config: Unavailable): FamilyReport
   return { family, state: "unavailable", reason: config.reason, remedy: config.remedy };
 }
 
-function describeWatch(watch: LspWatchStatus): string {
+function describeWatch(watch: LspWatchStatus | SubscriptionWatchStatus): string {
   return watch.state === "degraded" ? `degraded (${watch.reason})` : watch.state;
 }
 

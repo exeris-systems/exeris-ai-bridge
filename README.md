@@ -77,6 +77,11 @@ as the tools.
 | `exeris://docs/whitepaper` | The B2B technical whitepaper |
 | `exeris://docs/template/{ADR\|RFC\|RESEARCH}` | A decision-doc template |
 
+`exeris://docs/adr-index` can be subscribed to (`resources/subscribe`): from an `exeris-docs`
+checkout the server sends `notifications/resources/updated` once per burst of changes to the file,
+including a replacement by rename; from the bundled snapshot the content cannot change, so the
+subscription is accepted and never fires. Any other URI is rejected as invalid params.
+
 A URI outside this set, or an ADR number that is not three digits, is rejected as invalid params. An
 ADR that is not in the registry or has no servable content answers with the MCP resource-not-found
 error (`-32002`); docs being unavailable answers with an internal error whose data is the

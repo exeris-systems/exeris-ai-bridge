@@ -1,7 +1,7 @@
 import { existsSync, type FSWatcher, realpathSync, watch } from "node:fs";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, parse, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:path";
 
 import { trackCloser, untrackCloser } from "../process/exit-hooks.js";
 
@@ -57,6 +57,12 @@ export interface WatchOptions {
   readonly maxBufferedEvents?: number;
   /** Directories watched on Linux before degrading. Default 10 000. */
   readonly maxDirectories?: number;
+  /**
+   * Deepest directory watched, counted from the root (0 = the root alone, no
+   * descent). Unset watches the whole tree. A bounded depth always uses one
+   * non-recursive watcher per directory, on every platform.
+   */
+  readonly maxDepth?: number;
   /** Replaces `fs.watch`; for tests that count the OS watches opened and closed. */
   readonly watchFn?: typeof watch;
 }
@@ -85,6 +91,7 @@ const MAX_BRACE_EXPANSIONS = 64;
 
 const ALWAYS_EXCLUDED = new Set([".git", "node_modules"]);
 const JVM_BUILD_FILES = ["pom.xml", "build.gradle", "build.gradle.kts"];
+const PROBED_FILES = new Set([...JVM_BUILD_FILES, "package.json"]);
 
 /** Whether the directory at `directory` (root-relative segments) contains `file`. */
 export type SiblingProbe = (directory: readonly string[], file: string) => boolean;
@@ -138,9 +145,13 @@ export function refusedRootReason(realRoot: string): string | null {
   return null;
 }
 
+/** Whether a `relative()` result leaves its base. A directory merely named `..x` stays inside. */
+export function leavesBase(rel: string): boolean {
+  return rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel);
+}
+
 function isInside(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return !leavesBase(relative(root, candidate));
 }
 
 /**
@@ -304,10 +315,35 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   let flushing = false;
   let rearm = false;
 
-  const hasSibling: SiblingProbe = (directory, file) => existsSync(join(realRoot, ...directory, file));
+  // Sibling probes answered so far, per directory. A probe is a synchronous
+  // stat, and every event of a burst asks the same few questions. An answer
+  // holds until the build file it was about is created or removed, a rescan is
+  // requested, a new directory is about to be walked, or the window flushes,
+  // so a burst costs one stat per (directory, file).
+  const probes = new Map<string, Map<string, boolean>>();
+  const hasSibling: SiblingProbe = (directory, file) => {
+    const key = directory.join(sep);
+    let known = probes.get(key);
+    if (known === undefined) {
+      known = new Map();
+      probes.set(key, known);
+    }
+    let found = known.get(file);
+    if (found === undefined) {
+      found = existsSync(join(realRoot, ...directory, file));
+      known.set(file, found);
+    }
+    return found;
+  };
+  const forgetProbes = (path: string): void => {
+    const name = basename(path);
+    if (PROBED_FILES.has(name)) probes.get(relative(realRoot, dirname(path)))?.delete(name);
+  };
   const excluded = (segments: readonly string[]): boolean => isExcludedPath(segments, hasSibling);
   const matches = (rel: string): boolean => matchers.some((m) => m(rel));
   const relSegments = (path: string): string[] => relative(realRoot, path).split(sep);
+  const maxDepth = options.maxDepth;
+  const depthOf = (dir: string): number => relSegments(dir).filter((s) => s !== "").length;
 
   const schedule = (): void => {
     if (timer !== null) clearTimeout(timer);
@@ -318,6 +354,8 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   };
 
   const collapse = (): void => {
+    // A rescan means the tree may have been replaced, so no probe answer about it still holds.
+    probes.clear();
     overflow = true;
     buffer.clear();
     schedule();
@@ -344,6 +382,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     if (closed || degradedReason !== null) return;
     degradedReason = reason;
     closeAllWatchers();
+    untrackCloser(close);
     if (timer !== null) clearTimeout(timer);
     timer = null;
     buffer.clear();
@@ -358,6 +397,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   const flush = async (): Promise<void> => {
     timer = null;
     windowStart = null;
+    probes.clear();
     if (closed || degradedReason !== null) return;
     if (flushing) {
       rearm = true;
@@ -400,6 +440,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
 
   const record = (path: string, rename: boolean): void => {
     if (closed || degradedReason !== null) return;
+    forgetProbes(path);
     const segments = relSegments(path);
     if (excluded(segments)) return;
     if (!matches(segments.join("/"))) return;
@@ -494,7 +535,9 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       }
       for (const entry of entries) {
         const child = join(dir, entry.name);
-        if (entry.isDirectory()) queue.push(child);
+        if (entry.isDirectory()) {
+          if (maxDepth === undefined || depthOf(dir) < maxDepth) queue.push(child);
+        }
         else if (reportFound) record(child, true);
       }
     }
@@ -514,7 +557,9 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
         if (wasWatched && !closed && degradedReason === null) collapse();
       }
       if (closed || degradedReason !== null) return;
-      if (isDirectory && !directoryWatchers.has(path)) {
+      if (isDirectory && !directoryWatchers.has(path) && (maxDepth === undefined || depthOf(dirname(path)) < maxDepth)) {
+        // A directory that is new at this path may sit where another stood.
+        probes.clear();
         await walk(path, true);
         return;
       }
@@ -522,13 +567,24 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     record(path, eventType === "rename");
   };
 
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    buffer.clear();
+    closeAllWatchers();
+    untrackCloser(close);
+  };
+  trackCloser(close);
+
   // --- startup ---
 
   const refused = refusedRootReason(realRoot);
   let ready: Promise<void>;
   if (refused !== null) {
     ready = Promise.resolve().then(() => degrade(refused));
-  } else if (process.platform === "linux") {
+  } else if (process.platform === "linux" || maxDepth !== undefined) {
     ready = walk(realRoot, false).catch((cause: unknown) => {
       degrade(`directory walk failed (${describeFsError(cause)})`);
     });
@@ -549,17 +605,6 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       ready = Promise.resolve().then(() => degrade(`cannot watch the workspace root (${describeFsError(err)})`));
     }
   }
-
-  const close = (): void => {
-    if (closed) return;
-    closed = true;
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
-    buffer.clear();
-    closeAllWatchers();
-    untrackCloser(close);
-  };
-  trackCloser(close);
 
   return {
     root: realRoot,

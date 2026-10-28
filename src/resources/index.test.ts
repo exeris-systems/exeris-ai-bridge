@@ -70,7 +70,7 @@ afterEach(async () => {
 
 /** A client connected to the real resource handlers over an in-memory transport. */
 async function connect(config: BridgeConfig): Promise<Client> {
-  const server = new Server({ name: "test", version: "0" }, { capabilities: { resources: {} } });
+  const server = new Server({ name: "test", version: "0" }, { capabilities: { resources: { subscribe: true } } });
   registerResources(server, config);
   const client = new Client({ name: "test-client", version: "0" });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
