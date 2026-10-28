@@ -41,8 +41,8 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 ### Subscribing to the registry index
 
 The server advertises `resources.subscribe`. Only `exeris://docs/adr-index` is subscribable; any
-other URI is rejected as invalid params (`-32602`) with a message naming it, and unsubscribing from
-a URI that was never subscribed succeeds.
+other URI is rejected as invalid params (`-32602`) with a message naming the one subscribable URI,
+and unsubscribing from a URI that was never subscribed succeeds.
 
 What a subscription does depends on which source answers `docs:*`:
 

@@ -50,7 +50,10 @@ export interface AdrIndexSubscriptions {
 }
 
 /**
- * @param notify called with the resource URI, once per debounced burst of
+ * Builds the subscription state of one server: which URIs are subscribed, and
+ * the watcher that runs only while a subscription to a checkout's index exists.
+ *
+ * @param notify - called with the resource URI, once per debounced burst of
  *   changes, and only while a subscription is active. It must not throw.
  */
 export function createAdrIndexSubscriptions(
