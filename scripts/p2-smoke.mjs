@@ -356,7 +356,7 @@ function assertBootsDark({
       "wall-audit",
     ],
   );
-  assert.match(routePrompt.messages.map((m) => m.content.text ?? "").join("\n"), /EXERIS_ECOSYSTEM_ROOT/);
+  assert.match(routePrompt.messages.map((m) => m.content.text ?? "").join("\n"), /EXERIS_DOCS_ROOT/);
 
   assert.ok(!capless.isError, `caps-list_capabilities errored on a cap-less project: ${capless.content[0].text}`);
   const caplessPayload = JSON.parse(capless.content[0].text);
