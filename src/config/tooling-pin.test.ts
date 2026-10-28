@@ -33,6 +33,31 @@ test("the app-parent version is the pin", () => {
   assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.10.0", source: "app-parent" });
 });
 
+const wrapPlugin = (inner: string) => `<project><build><plugins><plugin>${inner}</plugin></plugins></build></project>`;
+
+test("a plugin whose dependencies and configuration precede its artifactId is still recognised", () => {
+  writeFileSync(
+    join(root, "pom.xml"),
+    wrapPlugin(
+      "<dependencies><dependency><groupId>x</groupId><artifactId>other</artifactId><version>9.9.9</version></dependency></dependencies>" +
+        "<configuration><version>8.8.8</version></configuration>" +
+        "<groupId>eu.exeris</groupId><artifactId>exeris-codegen-maven-plugin</artifactId><version>0.9.2</version>",
+    ),
+  );
+  assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.9.2", source: "codegen-plugin" });
+});
+
+test("a dependency named like the codegen plugin inside another plugin is not the plugin", () => {
+  writeFileSync(
+    join(root, "pom.xml"),
+    wrapPlugin(
+      "<groupId>org.example</groupId><artifactId>some-plugin</artifactId><version>1.0.0</version>" +
+        "<dependencies><dependency><groupId>eu.exeris</groupId><artifactId>exeris-codegen-maven-plugin</artifactId><version>0.9.3</version></dependency></dependencies>",
+    ),
+  );
+  assert.equal(resolveJavaToolingPin(root).kind, "none");
+});
+
 test("the app-parent pin wins over the codegen plugin's", () => {
   writeFileSync(join(root, "pom.xml"), parentPom("0.10.0").replace("</project>", `${pluginPom("0.9.1").slice(9)}`));
   assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.10.0", source: "app-parent" });
