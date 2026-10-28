@@ -9,6 +9,7 @@ import {
 import { loadConfig, type BridgeConfig } from "./config/env.js";
 import { buildInstructions } from "./instructions.js";
 import { loadBundle, isSdkAvailable, type BundleState } from "./data/bundle.js";
+import { registerResources } from "./resources/index.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerBuildTools } from "./tools/build/index.js";
 import { registerCapsTools } from "./tools/caps/index.js";
@@ -61,7 +62,7 @@ async function main(): Promise<void> {
 
   const server = new Server(
     { name: SERVER_NAME, version: getServerVersion() },
-    { capabilities: { tools: {} }, instructions: buildInstructions(config, bundle) },
+    { capabilities: { tools: {}, resources: {} }, instructions: buildInstructions(config, bundle) },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -75,6 +76,8 @@ async function main(): Promise<void> {
     }
     return await tool.handler(request.params.arguments ?? {});
   });
+
+  registerResources(server, config);
 
   await server.connect(new StdioServerTransport());
 }
