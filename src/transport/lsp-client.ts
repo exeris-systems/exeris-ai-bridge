@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   compileGlob,
+  describeFsError,
   type WatchBatch,
   type WatchChangeType,
   type WatchHandle,
@@ -486,8 +487,7 @@ export class LspClient {
       });
       this.physicalWatcher = handle;
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      this.onWatchDegraded(`cannot start the workspace watcher (${message})`);
+      this.onWatchDegraded(`cannot start the workspace watcher (${describeFsError(cause)})`);
     }
   }
 

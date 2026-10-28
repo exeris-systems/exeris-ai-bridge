@@ -1,4 +1,4 @@
-import { type FSWatcher, realpathSync, watch } from "node:fs";
+import { existsSync, type FSWatcher, realpathSync, watch } from "node:fs";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, relative, sep } from "node:path";
@@ -81,25 +81,46 @@ const MAX_BRACE_EXPANSIONS = 64;
 
 // --- paths ----------------------------------------------------------------
 
-const ALWAYS_EXCLUDED = new Set([".git", "node_modules", "dist"]);
+const ALWAYS_EXCLUDED = new Set([".git", "node_modules"]);
+const JVM_BUILD_FILES = ["pom.xml", "build.gradle", "build.gradle.kts"];
+
+/** Whether the directory at `directory` (root-relative segments) contains `file`. */
+export type SiblingProbe = (directory: readonly string[], file: string) => boolean;
 
 /**
- * Whether a root-relative path lies in a subtree that is not watched. `target`
- * and `build` are build output, except the directories the platform scanner
- * indexes as sources (`target/generated-sources`, `build/generated`). The
- * directories `target` and `build` themselves stay watched, so those children
- * are reachable.
+ * Whether a root-relative path lies in a subtree that is not watched.
+ *
+ * `.git` and `node_modules` are excluded wherever they sit. `target` and
+ * `build` are build output only when they sit directly beside a build file
+ * (`pom.xml`, `build.gradle`, `build.gradle.kts`), and `dist` only beside a
+ * `package.json`: a Java package directory with one of those names holds
+ * sources, which the platform scanner indexes. Build output is excluded except
+ * the directories the scanner indexes as sources (`target/generated-sources`,
+ * `build/generated`). The directories `target` and `build` themselves stay
+ * watched, so those children are reachable.
  */
-export function isExcludedPath(segments: readonly string[]): boolean {
+export function isExcludedPath(segments: readonly string[], hasSibling: SiblingProbe): boolean {
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     if (segment === undefined) continue;
     if (ALWAYS_EXCLUDED.has(segment)) return true;
     const next = segments[i + 1];
-    if (segment === "target" && next !== undefined && next !== "generated-sources") return true;
-    if (segment === "build" && next !== undefined && next !== "generated") return true;
+    const parent = segments.slice(0, i);
+    if (segment === "target" && next !== undefined && next !== "generated-sources") {
+      if (JVM_BUILD_FILES.some((f) => hasSibling(parent, f))) return true;
+    }
+    if (segment === "build" && next !== undefined && next !== "generated") {
+      if (JVM_BUILD_FILES.some((f) => hasSibling(parent, f))) return true;
+    }
+    if (segment === "dist" && hasSibling(parent, "package.json")) return true;
   }
   return false;
+}
+
+/** A filesystem error as a path-free reason: its code, never its message, which embeds absolute paths. */
+export function describeFsError(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : "unknown error";
 }
 
 /** Why a root must not be watched, or null. A filesystem root or the home directory is too broad. */
@@ -280,6 +301,8 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   let flushing = false;
   let rearm = false;
 
+  const hasSibling: SiblingProbe = (directory, file) => existsSync(join(realRoot, ...directory, file));
+  const excluded = (segments: readonly string[]): boolean => isExcludedPath(segments, hasSibling);
   const matches = (rel: string): boolean => matchers.some((m) => m(rel));
   const relSegments = (path: string): string[] => relative(realRoot, path).split(sep);
 
@@ -375,7 +398,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   const record = (path: string, rename: boolean): void => {
     if (closed || degradedReason !== null) return;
     const segments = relSegments(path);
-    if (isExcludedPath(segments)) return;
+    if (excluded(segments)) return;
     if (!matches(segments.join("/"))) return;
     if (overflow) {
       schedule();
@@ -428,7 +451,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       const err = cause as NodeJS.ErrnoException;
       // A directory removed between listing and watching is not a failure.
       if (err.code === "ENOENT" || err.code === "ENOTDIR") return true;
-      degrade(`cannot watch a directory (${err.code ?? err.message})`);
+      degrade(`cannot watch a directory (${describeFsError(err)})`);
       return false;
     }
     // Attached before anything can fail asynchronously.
@@ -437,7 +460,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
         removeDirectoryTree(dir);
         return;
       }
-      degrade(`watcher error (${err.code ?? err.message})`);
+      degrade(`watcher error (${describeFsError(err)})`);
     });
     directoryWatchers.set(dir, w);
     return true;
@@ -449,7 +472,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     while (queue.length > 0) {
       const dir = queue.shift() as string;
       if (closed || degradedReason !== null) return;
-      if (isExcludedPath(relSegments(dir).filter((s) => s !== ""))) continue;
+      if (excluded(relSegments(dir).filter((s) => s !== ""))) continue;
       // Watch first, list second: an entry created in between shows up in both.
       if (!watchDirectory(dir)) return;
       let entries;
@@ -472,7 +495,12 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       try {
         isDirectory = (await lstat(path)).isDirectory();
       } catch {
+        // A watched directory that disappeared (removed, renamed away, moved out
+        // of the root or into an excluded directory) takes its sources with it
+        // without an event per file: only a rescan can report them.
+        const wasWatched = directoryWatchers.has(path);
         removeDirectoryTree(path);
+        if (wasWatched && !closed && degradedReason === null) collapse();
       }
       if (closed || degradedReason !== null) return;
       if (isDirectory && !directoryWatchers.has(path)) {
@@ -491,7 +519,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     ready = Promise.resolve().then(() => degrade(refused));
   } else if (process.platform === "linux") {
     ready = walk(realRoot, false).catch((cause: unknown) => {
-      degrade(`directory walk failed (${cause instanceof Error ? cause.message : String(cause)})`);
+      degrade(`directory walk failed (${describeFsError(cause)})`);
     });
   } else {
     try {
@@ -503,11 +531,11 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
         }
         record(join(realRoot, filename.toString()), eventType === "rename");
       });
-      nativeWatcher.on("error", (err: NodeJS.ErrnoException) => degrade(`watcher error (${err.code ?? err.message})`));
+      nativeWatcher.on("error", (err: NodeJS.ErrnoException) => degrade(`watcher error (${describeFsError(err)})`));
       ready = Promise.resolve();
     } catch (cause) {
       const err = cause as NodeJS.ErrnoException;
-      ready = Promise.resolve().then(() => degrade(`cannot watch the workspace root (${err.code ?? err.message})`));
+      ready = Promise.resolve().then(() => degrade(`cannot watch the workspace root (${describeFsError(err)})`));
     }
   }
 

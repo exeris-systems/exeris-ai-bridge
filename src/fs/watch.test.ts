@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,9 @@ import { test } from "node:test";
 
 import {
   compileGlob,
+  describeFsError,
   isExcludedPath,
+  type SiblingProbe,
   MAX_GLOB_LENGTH,
   refusedRootReason,
   resolveEventPath,
@@ -97,16 +99,35 @@ test("compileGlob rejects an over-long pattern and finishes quickly on pathologi
   assert.ok(Date.now() - started < 2000, "pathological globs must not backtrack");
 });
 
-test("isExcludedPath excludes VCS and build output but keeps the scanner's generated sources", () => {
-  assert.ok(isExcludedPath([".git", "objects"]));
-  assert.ok(isExcludedPath(["web", "node_modules", "x"]));
-  assert.ok(isExcludedPath(["dist"]));
-  assert.ok(isExcludedPath(["target", "classes"]));
-  assert.ok(isExcludedPath(["build", "tmp"]));
-  assert.ok(!isExcludedPath(["target"]));
-  assert.ok(!isExcludedPath(["target", "generated-sources", "x", "A.java"]));
-  assert.ok(!isExcludedPath(["build", "generated", "sources"]));
-  assert.ok(!isExcludedPath(["src", "main", "A.java"]));
+test("isExcludedPath excludes build output only beside a build file, and VCS and dependencies anywhere", () => {
+  const beside = (...files: string[]): SiblingProbe => (dir, file) => dir.length === 0 && files.includes(file);
+  const none: SiblingProbe = () => false;
+
+  assert.ok(isExcludedPath([".git", "objects"], none));
+  assert.ok(isExcludedPath(["web", "node_modules", "x"], none));
+
+  assert.ok(isExcludedPath(["target", "classes"], beside("pom.xml")));
+  assert.ok(isExcludedPath(["build", "tmp"], beside("build.gradle")));
+  assert.ok(isExcludedPath(["build", "tmp"], beside("build.gradle.kts")));
+  assert.ok(isExcludedPath(["dist"], beside("package.json")));
+  assert.ok(!isExcludedPath(["target"], beside("pom.xml")));
+  assert.ok(!isExcludedPath(["target", "generated-sources", "x", "A.java"], beside("pom.xml")));
+  assert.ok(!isExcludedPath(["build", "generated", "sources"], beside("build.gradle")));
+
+  // The same names without a build file beside them are ordinary directories.
+  assert.ok(!isExcludedPath(["target", "classes"], none));
+  assert.ok(!isExcludedPath(["dist"], none));
+  assert.ok(!isExcludedPath(["src", "main", "java", "com", "acme", "build", "Foo.java"], beside("pom.xml")));
+  assert.ok(!isExcludedPath(["src", "main", "java", "com", "acme", "target", "Foo.java"], beside("pom.xml")));
+  assert.ok(!isExcludedPath(["src", "main", "A.java"], none));
+});
+
+test("describeFsError reports the code and never the message", () => {
+  const err = Object.assign(new Error("ENOSPC: no space left, watch '/home/someone/project/src'"), { code: "ENOSPC" });
+  assert.equal(describeFsError(err), "ENOSPC");
+  const reason = describeFsError(new Error("EACCES: cannot read /home/someone/project"));
+  assert.equal(reason, "unknown error");
+  assert.ok(!/[/\\]/.test(reason) && !/[/\\]/.test(describeFsError(err)));
 });
 
 test("resolveEventPath resolves symlinks and keeps the path below a deleted ancestor exact", async (t) => {
@@ -232,7 +253,7 @@ test("close stops delivery, including a batch already pending", async () => {
   }
 });
 
-test("a delete inside a deleted directory keeps the exact path", async () => {
+test("removing a directory tree reports the deletion or a rescan, never a wrong path", async () => {
   const { root, cleanup } = fixture();
   const c = collector();
   const file = join(root, "a", "b", "X.java");
@@ -241,7 +262,13 @@ test("a delete inside a deleted directory keeps the exact path", async () => {
   const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
   try {
     rmSync(join(root, "a"), { recursive: true });
-    await c.until(() => allEvents(c.batches).some((e) => e.path === file && e.type === "deleted"));
+    // The removed directory's own watcher forwards a rescan; if the per-file
+    // delete wins the race instead, its path must be exact. resolveEventPath
+    // pins the exactness for a deleted ancestor.
+    await c.until(
+      () => c.batches.some((b) => b.kind === "rescan") || allEvents(c.batches).some((e) => e.path === file && e.type === "deleted"),
+    );
+    assert.ok(allEvents(c.batches).every((e) => e.path === file));
   } finally {
     handle.close();
     cleanup();
@@ -292,7 +319,20 @@ const linuxOnly = { skip: process.platform === "linux" ? false : "owned per-dire
 
 test("excluded directories get no watch", linuxOnly, async () => {
   const { root, cleanup } = fixture();
-  for (const d of [".git/objects", "node_modules/x", "dist", "target/classes", "target/generated-sources/g", "build/tmp", "build/generated/s", "src/a"]) {
+  writeFileSync(join(root, "pom.xml"), "<project/>");
+  writeFileSync(join(root, "package.json"), "{}");
+  for (const d of [
+    ".git/objects",
+    "node_modules/x",
+    "dist",
+    "target/classes",
+    "target/generated-sources/g",
+    "build/tmp",
+    "build/generated/s",
+    "src/a",
+    "src/main/java/com/acme/build",
+    "src/main/java/com/acme/target",
+  ]) {
     mkdirSync(join(root, d), { recursive: true });
   }
   const handle = watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: () => undefined });
@@ -309,6 +349,12 @@ test("excluded directories get no watch", linuxOnly, async () => {
       "build/generated/s",
       "src",
       "src/a",
+      "src/main",
+      "src/main/java",
+      "src/main/java/com",
+      "src/main/java/com/acme",
+      "src/main/java/com/acme/build",
+      "src/main/java/com/acme/target",
       "target",
       "target/generated-sources",
       "target/generated-sources/g",
@@ -364,5 +410,41 @@ test("a filesystem root and the home directory are refused", async () => {
     assert.ok(reason !== null);
     assert.deepEqual(handle.watchedDirectories(), []);
     handle.close();
+  }
+});
+
+test("package directories named build and target under src/main/java are watched and report events", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  writeFileSync(join(root, "pom.xml"), "<project/>");
+  const pkg = join(root, "src", "main", "java", "com", "acme");
+  mkdirSync(join(pkg, "build"), { recursive: true });
+  mkdirSync(join(pkg, "target"), { recursive: true });
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
+  try {
+    writeFileSync(join(pkg, "build", "Foo.java"), "class Foo {}");
+    writeFileSync(join(pkg, "target", "Bar.java"), "class Bar {}");
+    await c.until(() => {
+      const paths = allEvents(c.batches).map((e) => e.path);
+      return paths.includes(join(pkg, "build", "Foo.java")) && paths.includes(join(pkg, "target", "Bar.java"));
+    });
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a watched directory that is moved away forwards a rescan", linuxOnly, async () => {
+  const { root, outside, cleanup } = fixture();
+  mkdirSync(join(root, "pkg", "inner"), { recursive: true });
+  writeFileSync(join(root, "pkg", "inner", "A.java"), "class A {}");
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push }));
+  try {
+    renameSync(join(root, "pkg"), join(outside, "pkg"));
+    await c.until(() => c.batches.some((b) => b.kind === "rescan"));
+  } finally {
+    handle.close();
+    cleanup();
   }
 });
