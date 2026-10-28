@@ -109,6 +109,31 @@ test("produced files over the size cap are refused before they are read", () => 
   assert.equal(result.totalBytes, 50);
 });
 
+test("committed files to be compared over the size cap are a files limit and nothing is reported", () => {
+  const l1 = javaL1Root(project);
+  put(l1, "p/A.java", "x".repeat(50));
+  put(l1, "Other.java", "y".repeat(500));
+  put(produced, "p/A.java", "x");
+  const files = collectProduced(produced).files;
+  const report = diffAgainstL1(files, project, l1, 10);
+  assert.equal(report.limit?.name, "files");
+  assert.equal(report.limit?.value, 10);
+  assert.equal(report.limit?.unit, "bytes");
+  assert.deepEqual(report.files, []);
+  assert.deepEqual(report.removed, []);
+});
+
+test("committed files the run does not produce do not count against the size cap", () => {
+  const l1 = javaL1Root(project);
+  put(l1, "p/A.java", "x".repeat(5));
+  put(l1, "Other.java", "y".repeat(500));
+  put(produced, "p/A.java", "x");
+  const report = diffAgainstL1(collectProduced(produced).files, project, l1, 10);
+  assert.equal(report.limit, null);
+  assert.equal(report.files[0].status, "changed");
+  assert.deepEqual(report.removed, ["Other.java"]);
+});
+
 test("the L1 roots are the Java tree and the TypeScript output path", () => {
   assert.equal(javaL1Root(project), join(project, JAVA_L1_ROOT));
   assert.equal(JAVA_L1_ROOT, join("src", "main", "generated", "java"));

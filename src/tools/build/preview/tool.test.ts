@@ -253,6 +253,25 @@ test("a L1 tree beyond the size cap is a files limit and nothing is run", async 
   assert.deepEqual(workdirsLeft(), []);
 });
 
+test("a committed file that grew past the size cap after seeding is a files limit and the scratch directory is gone", async () => {
+  write(`${JAVA_L1}/A.java`, "small");
+  const grown = join(project, JAVA_L1, "A.java");
+  const res = await toolFor(project, {
+    resolveJava: fake(
+      "grow",
+      `import { writeFileSync } from "node:fs";
+writeFileSync(process.argv[3] + "/A.java", "small");
+writeFileSync(${JSON.stringify(grown)}, "x".repeat(500));`,
+    ),
+    maxFilesBytes: 50,
+  }).handler({ target: "java" });
+  assert.equal(res.isError, true);
+  const out = payload(res);
+  assert.equal(out.error, "limit_exceeded");
+  assert.deepEqual(out.limit, { name: "files", value: 50, unit: "bytes" });
+  assert.deepEqual(workdirsLeft(), []);
+});
+
 test("a Java resolution miss returns the structured reason and remedy", async () => {
   const res = await toolFor(project, {
     resolveJava: () => ({ state: "unavailable", reason: "no jar", remedy: "install the jar" }),
