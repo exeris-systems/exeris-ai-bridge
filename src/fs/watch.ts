@@ -57,6 +57,8 @@ export interface WatchOptions {
   readonly maxBufferedEvents?: number;
   /** Directories watched on Linux before degrading. Default 10 000. */
   readonly maxDirectories?: number;
+  /** Replaces `fs.watch`; for tests that count the OS watches opened and closed. */
+  readonly watchFn?: typeof watch;
 }
 
 export interface WatchHandle {
@@ -288,6 +290,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   const maxBuffered = options.maxBufferedEvents ?? DEFAULT_MAX_BUFFERED;
   const maxWait = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const maxDirectories = options.maxDirectories ?? DEFAULT_MAX_DIRECTORIES;
+  const watchFn = options.watchFn ?? watch;
 
   // Per path: whether fs.watch reported a rename (create/delete/move).
   const buffer = new Map<string, { rename: boolean }>();
@@ -432,14 +435,17 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     }
   };
 
-  const watchDirectory = (dir: string): boolean => {
+  // "present": another walk already watches (and lists) this directory, e.g.
+  // `mkdir -p a/b` is seen both from `a`'s walk and from the parent's event for `b`.
+  const watchDirectory = (dir: string): "added" | "present" | "failed" => {
+    if (directoryWatchers.has(dir)) return "present";
     if (directoryWatchers.size >= maxDirectories) {
       degrade(`more than ${maxDirectories} directories under the workspace root`);
-      return false;
+      return "failed";
     }
     let w: FSWatcher;
     try {
-      w = watch(dir, { persistent: true }, (eventType, filename) => {
+      w = watchFn(dir, { persistent: true }, (eventType, filename) => {
         if (closed || degradedReason !== null) return;
         if (filename === null || filename === undefined) {
           collapse();
@@ -450,9 +456,9 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     } catch (cause) {
       const err = cause as NodeJS.ErrnoException;
       // A directory removed between listing and watching is not a failure.
-      if (err.code === "ENOENT" || err.code === "ENOTDIR") return true;
+      if (err.code === "ENOENT" || err.code === "ENOTDIR") return "added";
       degrade(`cannot watch a directory (${describeFsError(err)})`);
-      return false;
+      return "failed";
     }
     // Attached before anything can fail asynchronously.
     w.on("error", (err: NodeJS.ErrnoException) => {
@@ -462,8 +468,11 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       }
       degrade(`watcher error (${describeFsError(err)})`);
     });
+    // Never leave a replaced watcher open: it would keep delivering events and
+    // holding an inotify watch outside the cap.
+    directoryWatchers.get(dir)?.close();
     directoryWatchers.set(dir, w);
-    return true;
+    return "added";
   };
 
   /** Watch `dir` and everything under it that is not excluded; symlinks are never followed. */
@@ -474,7 +483,9 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       if (closed || degradedReason !== null) return;
       if (excluded(relSegments(dir).filter((s) => s !== ""))) continue;
       // Watch first, list second: an entry created in between shows up in both.
-      if (!watchDirectory(dir)) return;
+      const watched = watchDirectory(dir);
+      if (watched === "failed") return;
+      if (watched === "present") continue;
       let entries;
       try {
         entries = await readdir(dir, { withFileTypes: true });
@@ -523,7 +534,7 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
     });
   } else {
     try {
-      nativeWatcher = watch(realRoot, { recursive: true }, (eventType, filename) => {
+      nativeWatcher = watchFn(realRoot, { recursive: true }, (eventType, filename) => {
         if (closed || degradedReason !== null) return;
         if (filename === null || filename === undefined) {
           collapse();

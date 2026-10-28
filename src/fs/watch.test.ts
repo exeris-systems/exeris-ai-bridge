@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { type FSWatcher, mkdirSync, mkdtempSync, watch, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -447,4 +447,60 @@ test("a watched directory that is moved away forwards a rescan", linuxOnly, asyn
     handle.close();
     cleanup();
   }
+});
+
+const TREES = 6;
+const FILES = 6000;
+
+test("a nested tree created in one burst is watched once per directory and fully released on close", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  const opened: FSWatcher[] = [];
+  let closes = 0;
+  const countingWatch = ((...args: Parameters<typeof watch>) => {
+    const w = watch(...args);
+    const levels = relative(root, String(args[0])).split(sep).slice(1);
+    const child = ["b", "c", "d"][levels.length - 1];
+    if (levels.length >= 1 && levels.length <= 3 && child !== undefined) {
+      mkdirSync(join(String(args[0]), child), { recursive: true });
+    }
+    const close = w.close.bind(w);
+    w.close = () => {
+      closes++;
+      close();
+    };
+    opened.push(w);
+    return w;
+  }) as typeof watch;
+  const c = collector();
+  const handle = await started(
+    watchRoot(root, { globs: ["**/*.java"], debounceMs: DEBOUNCE_MS, onEvents: c.push, watchFn: countingWatch }),
+  );
+  try {
+    const initial = opened.length;
+    // Each tree arrives as `tN/a` holding many files, so listing `a` is slow. The
+    // counting watch creates the next level the moment a level's watch is
+    // attached: the parent's watcher then reports the child while the
+    // ancestor's walk is still listing it, and both paths reach the child.
+    const stage = mkdtempSync(join(tmpdir(), "exeris-watch-stage-"));
+    for (let i = 0; i < TREES; i++) {
+      mkdirSync(join(stage, `t${i}`, "a"), { recursive: true });
+      for (let f = 0; f < FILES; f++) writeFileSync(join(stage, `t${i}`, "a", `f${f}.txt`), "");
+      renameSync(join(stage, `t${i}`), join(root, `t${i}`));
+    }
+    rmSync(stage, { recursive: true, force: true });
+    await sleep(1500);
+    for (let i = 0; i < TREES; i++) writeFileSync(join(root, `t${i}`, "a", "b", "c", "d", "D.java"), "class D {}");
+    await c.until(() => allEvents(c.batches).filter((e) => e.path.endsWith("D.java")).length === TREES);
+    await sleep(300);
+
+    const watched = handle.watchedDirectories();
+    assert.equal(new Set(watched).size, watched.length, "no directory is watched twice");
+    assert.equal(watched.length, 1 + TREES * 5, "root plus every tree's five directories");
+    assert.equal(opened.length - initial, TREES * 5, "exactly one OS watch was opened per new directory");
+  } finally {
+    handle.close();
+    cleanup();
+  }
+  assert.equal(closes, opened.length, "every OS watch that was opened has been closed");
+  assert.deepEqual(handle.watchedDirectories(), []);
 });
