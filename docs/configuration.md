@@ -52,8 +52,10 @@ What a subscription does depends on which source answers `docs:*`:
 | Bundled snapshot, or docs unavailable | The subscription is accepted and never fires: the content is immutable for the process. No watcher is started. |
 
 Subscription state belongs to one server instance, so one session's subscription never notifies
-another. `bridge-health` reports it on the `docs` family as `subscriptions`: `off` (no subscriber),
-`watching`, `degraded (reason)` or `static`.
+another. While `docs` is available, `bridge-health` reports it on the `docs` family as
+`subscriptions`: `off` (no subscriber), `watching`, `degraded (reason)`, or `static` when the
+snapshot answers. An unavailable `docs` family carries no `subscriptions` field; it reports its
+reason and remedy instead.
 
 ## Launching the Java children
 

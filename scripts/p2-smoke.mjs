@@ -330,8 +330,8 @@ function assertBootsDark({
   assert.equal(docsRepos.isError, true);
   assert.equal(JSON.parse(docsRepos.content[0].text).error, "family_unavailable");
 
-  // The registry index is also a resource, advertised without subscriptions and read from the
-  // snapshot in the installed package.
+  // The registry index is also a resource, advertised as subscribable (never firing over the
+  // snapshot) and read from the snapshot in the installed package.
   assert.deepEqual(initialize.capabilities.resources, { subscribe: true }, "the server must advertise resources with subscribe");
   assert.deepEqual(subscribed, {}, "subscribing to the registry index must succeed over the snapshot");
   assert.match(String(subscribeRefused?.message), /code -32602/, "subscribing to any other resource must be invalid params");
