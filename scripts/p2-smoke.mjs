@@ -235,6 +235,8 @@ function assertBootsDark({
   docsExcluded,
   docsRepos,
   docsIndexResource,
+  promptList,
+  routePrompt,
   capless,
   unbuilt,
   ungenerated,
@@ -333,6 +335,24 @@ function assertBootsDark({
   assert.equal(docsIndexResource.contents[0].uri, "exeris://docs/adr-index");
   assert.equal(docsIndexResource.contents[0].mimeType, "text/markdown");
   assert.match(docsIndexResource.contents[0].text, /^# ADR Index \(fixture\)/);
+
+  // Prompts are listed with no checkout, and a prompt that needs routing data says so
+  // instead of inventing a source.
+  assert.deepEqual(initialize.capabilities.prompts, {}, "the server must advertise prompts, and not list changes");
+  assert.deepEqual(
+    promptList.prompts.map((p) => p.name).sort(),
+    [
+      "author-domain",
+      "diagnose-build-failure",
+      "draft-adr",
+      "explain-my-build",
+      "migrate-sdk-version",
+      "review-three-tier-violations",
+      "route-this-task",
+      "wall-audit",
+    ],
+  );
+  assert.match(routePrompt.messages.map((m) => m.content.text ?? "").join("\n"), /EXERIS_ECOSYSTEM_ROOT/);
 
   assert.ok(!capless.isError, `caps-list_capabilities errored on a cap-less project: ${capless.content[0].text}`);
   const caplessPayload = JSON.parse(capless.content[0].text);
@@ -519,6 +539,11 @@ async function interrogate(project, home, extraEnv) {
 
     // The same registry as a resource, read from the snapshot through the real transport.
     const docsIndexResource = await client.request("resources/read", { uri: "exeris://docs/adr-index" });
+    const promptList = await client.request("prompts/list", {});
+    const routePrompt = await client.request("prompts/get", {
+      name: "route-this-task",
+      arguments: { task: "Add a field to an entity" },
+    });
 
     // The live counterpart: caps:* is up on this machine, and the project has
     // no cap-manifest.json, so the contract says a clean present:false answer
@@ -614,6 +639,8 @@ async function interrogate(project, home, extraEnv) {
       docsExcluded,
       docsRepos,
       docsIndexResource,
+      promptList,
+      routePrompt,
       capless,
       unbuilt,
       ungenerated,
