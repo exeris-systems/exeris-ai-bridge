@@ -248,7 +248,7 @@ async function preview(
 
       const produced = collectProduced(launch.outputDir, maxFilesBytes);
       if (produced.limit !== null) return limitResult(target, generator, produced.limit, run, scrub);
-      const diff = diffAgainstL1(produced.files, projectRoot, l1Root);
+      const diff = diffAgainstL1(produced.files, projectRoot, l1Root, maxFilesBytes);
       if (diff.limit !== null) return limitResult(target, generator, diff.limit, run, scrub);
 
       return jsonResult({ ...report, files: group(diff.files, diff.removed) });
