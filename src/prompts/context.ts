@@ -98,8 +98,9 @@ export function ecosystemRoutingMessage(ctx: PromptContext): PromptMessage {
     return text(
       "Routing data is not available: the top-level routing rules live in the ecosystem's CLAUDE.md, " +
         "which is read only from an ecosystem checkout, and this bridge has none. Remedy: set " +
-        "EXERIS_ECOSYSTEM_ROOT to the directory that holds the Exeris repositories, or run the bridge " +
-        "from inside a checkout, then request this prompt again. Until then, do not guess the owning " +
+        "EXERIS_DOCS_ROOT to an exeris-docs checkout that sits beside the other Exeris repositories " +
+        "(its parent directory is the ecosystem root), or install the bridge as a sibling of " +
+        "exeris-docs, then request this prompt again. Until then, do not guess the owning " +
         "repository; say that routing needs a checkout.",
     );
   }

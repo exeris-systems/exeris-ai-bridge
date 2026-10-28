@@ -244,7 +244,7 @@ test("checkout: route-this-task embeds the ecosystem routing rules", async () =>
   const client = await connect(checkout);
   const result = await client.getPrompt({ name: "route-this-task", arguments: { task: "x" } });
   assert.match(flatten(result), /Boundary changes go to exeris-kernel/);
-  assert.doesNotMatch(flatten(result), /EXERIS_ECOSYSTEM_ROOT/);
+  assert.doesNotMatch(flatten(result), /EXERIS_DOCS_ROOT/);
 });
 
 test("snapshot: route-this-task says routing needs a checkout and gives the remedy", async () => {
@@ -252,7 +252,8 @@ test("snapshot: route-this-task says routing needs a checkout and gives the reme
   const result = await client.getPrompt({ name: "route-this-task", arguments: { task: "x" } });
   const body = flatten(result);
   assert.match(body, /Routing data is not available/);
-  assert.match(body, /EXERIS_ECOSYSTEM_ROOT/);
+  assert.match(body, /EXERIS_DOCS_ROOT/);
+  assert.doesNotMatch(body, /EXERIS_ECOSYSTEM_ROOT/, "the remedy names only variables the bridge reads");
   assert.doesNotMatch(body, /Boundary changes go to exeris-kernel/);
   assert.deepEqual(resourceUris(result), []);
 });
