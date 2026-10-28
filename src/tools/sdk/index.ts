@@ -68,7 +68,7 @@ export function registerSdkTools(
   ];
 }
 
-function loadCatalog(
+export function loadCatalog(
   bundle: AvailableBundle,
   rootOverride?: string,
 ): { catalog: AnnotationCatalog } | { errorResult: CallToolResult } {
@@ -91,7 +91,7 @@ function loadCatalog(
   }
 }
 
-function loadAstSchema(
+export function loadAstSchema(
   bundle: AvailableBundle,
   rootOverride?: string,
 ): { schema: ParsedAstSchema } | { errorResult: CallToolResult } {
@@ -385,67 +385,11 @@ function listDeprecationsTool(
 
       const forRemovalOnly = Boolean(args.forRemovalOnly);
       const pkgFilter = typeof args.package === "string" ? args.package.trim().toLowerCase() : undefined;
-
-      let annotations = catalog.annotations;
-      if (pkgFilter) {
-        annotations = annotations.filter((a) => a.package.toLowerCase().includes(pkgFilter));
-      }
-
-      const deprecatedAnnotations: Array<{
-        name: string;
-        qualifiedName: string;
-        package: string;
-        forRemoval: boolean;
-        since: string;
-        replacement: string | null;
-      }> = [];
-
-      for (const a of annotations) {
-        if (a.deprecated) {
-          if (!forRemovalOnly || a.deprecated.forRemoval) {
-            deprecatedAnnotations.push({
-              name: a.name,
-              qualifiedName: a.qualifiedName,
-              package: a.package,
-              forRemoval: a.deprecated.forRemoval,
-              since: a.deprecated.since,
-              replacement: a.deprecated.replacement ?? null,
-            });
-          }
-        }
-      }
-
-      const deprecatedAttributes: Array<{
-        annotation: string;
-        qualifiedName: string;
-        package: string;
-        attribute: string;
-        type: string;
-        default: string | null;
-        forRemoval: boolean;
-        since: string;
-        replacement: string | null;
-      }> = [];
-
-      for (const a of annotations) {
-        for (const attr of a.attributes) {
-          if (attr.deprecated) {
-            if (!forRemovalOnly || attr.deprecated.forRemoval) {
-              deprecatedAttributes.push({
-                annotation: a.name,
-                qualifiedName: a.qualifiedName,
-                package: a.package,
-                attribute: attr.name,
-                type: attr.type,
-                default: attr.default ?? null,
-                forRemoval: attr.deprecated.forRemoval,
-                since: attr.deprecated.since,
-                replacement: attr.deprecated.replacement ?? null,
-              });
-            }
-          }
-        }
-      }
+      const { deprecatedAnnotations, deprecatedAttributes } = collectDeprecations(
+        catalog,
+        forRemovalOnly,
+        pkgFilter,
+      );
 
       return jsonResult({
         sdkVersion: catalog.sdkVersion,
@@ -457,6 +401,98 @@ function listDeprecationsTool(
       });
     }),
   };
+}
+
+export interface DeprecationReport {
+  readonly deprecatedAnnotations: Array<{
+    name: string;
+    qualifiedName: string;
+    package: string;
+    forRemoval: boolean;
+    since: string;
+    replacement: string | null;
+  }>;
+  readonly deprecatedAttributes: Array<{
+    annotation: string;
+    qualifiedName: string;
+    package: string;
+    attribute: string;
+    type: string;
+    default: string | null;
+    forRemoval: boolean;
+    since: string;
+    replacement: string | null;
+  }>;
+}
+
+/** The deprecated annotations and attributes of `catalog`, shared by `sdk-list_deprecations` and the prompts that embed it. */
+export function collectDeprecations(
+  catalog: AnnotationCatalog,
+  forRemovalOnly: boolean,
+  pkgFilter?: string,
+): DeprecationReport {
+  let annotations = catalog.annotations;
+  if (pkgFilter) {
+    annotations = annotations.filter((a) => a.package.toLowerCase().includes(pkgFilter));
+  }
+
+  const deprecatedAnnotations: Array<{
+    name: string;
+    qualifiedName: string;
+    package: string;
+    forRemoval: boolean;
+    since: string;
+    replacement: string | null;
+  }> = [];
+
+  for (const a of annotations) {
+    if (a.deprecated) {
+      if (!forRemovalOnly || a.deprecated.forRemoval) {
+        deprecatedAnnotations.push({
+          name: a.name,
+          qualifiedName: a.qualifiedName,
+          package: a.package,
+          forRemoval: a.deprecated.forRemoval,
+          since: a.deprecated.since,
+          replacement: a.deprecated.replacement ?? null,
+        });
+      }
+    }
+  }
+
+  const deprecatedAttributes: Array<{
+    annotation: string;
+    qualifiedName: string;
+    package: string;
+    attribute: string;
+    type: string;
+    default: string | null;
+    forRemoval: boolean;
+    since: string;
+    replacement: string | null;
+  }> = [];
+
+  for (const a of annotations) {
+    for (const attr of a.attributes) {
+      if (attr.deprecated) {
+        if (!forRemovalOnly || attr.deprecated.forRemoval) {
+          deprecatedAttributes.push({
+            annotation: a.name,
+            qualifiedName: a.qualifiedName,
+            package: a.package,
+            attribute: attr.name,
+            type: attr.type,
+            default: attr.default ?? null,
+            forRemoval: attr.deprecated.forRemoval,
+            since: attr.deprecated.since,
+            replacement: attr.deprecated.replacement ?? null,
+          });
+        }
+      }
+    }
+  }
+
+  return { deprecatedAnnotations, deprecatedAttributes };
 }
 
 function getAstSchemaTool(

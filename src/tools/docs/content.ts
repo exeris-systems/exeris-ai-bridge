@@ -16,6 +16,9 @@ export const ADR_INDEX_FILENAME = "adr-index.md";
 export const HLA_FILENAME = "high-level-architecture.md";
 export const WHITEPAPER_FILENAME = "b2b-technical-whitepaper.md";
 
+/** The policy that lists the drift patterns a three-tier review sweeps for; read only to embed in a prompt. */
+export const DRIFT_PATTERNS_FILE = ".agents/policies/drift-patterns.md";
+
 export type TemplateKind = "ADR" | "RFC" | "RESEARCH";
 export const TEMPLATE_KINDS: TemplateKind[] = ["ADR", "RFC", "RESEARCH"];
 const TEMPLATE_FILES: Record<TemplateKind, string> = {
@@ -62,6 +65,10 @@ export function readAdrIndexMarkdown(config: DocsRoots): DocsContent {
 
 export function readTemplate(config: DocsRoots, kind: TemplateKind): DocsContent {
   return readSandboxedFile(config, config.docsRoot, TEMPLATE_FILES[kind], `${kind}-TEMPLATE.md`);
+}
+
+export function readDriftPatterns(config: DocsRoots): DocsContent {
+  return readSandboxedFile(config, config.docsRoot, DRIFT_PATTERNS_FILE, "drift-patterns.md");
 }
 
 export function readHla(config: DocsRoots): DocsContent {

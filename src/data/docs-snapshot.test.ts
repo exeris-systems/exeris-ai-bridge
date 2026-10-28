@@ -58,6 +58,7 @@ test("the snapshot carries the registry tier and each licensed, public, in-scope
   assert.deepEqual(
     manifest.files.map((f) => `${f.repo}/${f.path}`),
     [
+      "exeris-docs/.agents/policies/drift-patterns.md",
       "exeris-docs/adr-index.md",
       "exeris-docs/adr/ADR-001-local-record.md",
       "exeris-docs/b2b-technical-whitepaper.md",
@@ -130,6 +131,14 @@ test("an absent snapshot is unavailable with a remedy, not an error", () => {
 test("a file that no longer matches its digest takes the snapshot dark", async () => {
   await build();
   appendFileSync(join(work, "docs", "exeris-sdk", "docs", "adr", "ADR-003-sibling-by-url.md"), "tampered\n");
+  const snapshot = loadDocsSnapshot(work);
+  assert.equal(snapshot.state, "unavailable");
+  assert.match(snapshot.state === "unavailable" ? snapshot.reason : "", /does not match the digest/);
+});
+
+test("a drift-patterns policy that no longer matches its digest takes the snapshot dark", async () => {
+  await build();
+  appendFileSync(join(work, "docs", "exeris-docs", ".agents", "policies", "drift-patterns.md"), "tampered\n");
   const snapshot = loadDocsSnapshot(work);
   assert.equal(snapshot.state, "unavailable");
   assert.match(snapshot.state === "unavailable" ? snapshot.reason : "", /does not match the digest/);

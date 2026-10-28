@@ -82,6 +82,30 @@ ADR that is not in the registry or has no servable content answers with the MCP 
 error (`-32002`); docs being unavailable answers with an internal error whose data is the
 `family_unavailable` reason and remedy.
 
+## Prompts
+
+Eight stateless prompt templates, listed in every session on every transport. A prompt returns
+messages built from its template and the arguments you give it: the bridge keeps no state, runs no
+loop and calls no model or tool. Where a step needs a tool, the prompt tells the agent to call it.
+Context is embedded as resource messages (the `exeris://docs/*` resources) or as bundled SDK data;
+where it cannot be embedded, the prompt says which resource to read instead. Arguments are strings,
+at most 256 characters, except `diff` (64 KiB) and `output` (64,000 characters).
+
+| Prompt | Arguments | Pre-loads | Needs a local server |
+| --- | --- | --- | --- |
+| `review-three-tier-violations` | `diff?` | HLA, ADR-006, ADR-024, the cap-tier Wall rule | no |
+| `draft-adr` | `title?` | ADR template, registry index | no |
+| `route-this-task` | `task` | the ecosystem's routing rules, from an ecosystem checkout only | no |
+| `wall-audit` | `target?` | ADR-006 | no |
+| `author-domain` | `entity`, `area?` | SDK scoping rules, AST schema | `lsp-*` and `build-*` steps |
+| `explain-my-build` | none | nothing; calls `build-explain_artefacts`, `build-get_detach_state` | yes |
+| `diagnose-build-failure` | `output` | SDK deprecation list | the `build-explain_diagnostic` step |
+| `migrate-sdk-version` | `targetVersion?` | SDK deprecation list | no |
+
+`route-this-task` without an ecosystem checkout answers that routing needs one and names the remedy
+(`EXERIS_ECOSYSTEM_ROOT`, or running from a checkout). An unknown prompt, an unknown argument, a
+missing required argument or one over its bound is rejected as invalid params.
+
 ## Configuration
 
 Nothing needs setting for an application. Every variable is optional, and none can stop the server

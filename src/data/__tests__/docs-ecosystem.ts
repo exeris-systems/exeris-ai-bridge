@@ -33,6 +33,7 @@ const ADR_INDEX = `# ADR Index (fixture)
 const FILES: Readonly<Record<string, string>> = {
   "exeris-docs/.snapshot-commit": "fixture-docs-commit\n",
   "exeris-docs/LICENSE": "                                 Apache License\n                           Version 2.0, January 2004\n                        http://www.apache.org/licenses/\n\n   (Fixture: the header the snapshot builder recognises; not a licence grant.)\n",
+  "exeris-docs/.agents/policies/drift-patterns.md": "# Drift patterns (fixture)\n\n1. A stand-in structural pattern.\n",
   "exeris-docs/adr/ADR-001-local-record.md": "# ADR-001 Local record\n\nThe Wall is mentioned here.\n",
   "exeris-docs/b2b-technical-whitepaper.md": "# Whitepaper (fixture)\n",
   "exeris-docs/high-level-architecture.md": "# HLA (fixture)\n\nThree-tier model.\n",
