@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -45,6 +47,8 @@ const DARK_CONFIG: BridgeConfig = {
 // It also empirically confirms (or retires) the `exec:java`-shares-stdout
 // caveat: if Maven leaked logging onto the JSON-RPC stdout, the handshake would
 // fail with an LspFramingError instead of returning data.
+
+const execFileAsync = promisify(execFile);
 
 const command = process.env.EXERIS_LSP_COMMAND?.trim();
 const skip = !process.env.EXERIS_LSP_IT
@@ -173,6 +177,70 @@ test(
       // Read-only invariant check: assert that Order.java on disk was NOT modified by the preview
       const onDiskSource = readFileSync(join(workspace, "com", "example", "shop", "Order.java"), "utf-8");
       assert.equal(onDiskSource, ORDER_SOURCE, "preview must NOT modify on-disk source");
+    } finally {
+      client.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  },
+);
+
+const CUSTOMER_SOURCE = `package com.example.shop;
+
+import eu.exeris.sdk.annotations.ExerisDomain;
+
+@ExerisDomain(name = "Customer", restApi = true)
+public class Customer {
+    private String email;
+}
+`;
+
+// The server caches its scan and drops it only on a save or a watched-files
+// notification. A file written by a different process reaches the server only
+// through the client's watcher, so the next list_domains must include it.
+test(
+  "lsp-list_domains sees a domain written by a second process after the first scan",
+  { skip, timeout: REQUEST_TIMEOUT_MS * 2 + 30_000 },
+  async () => {
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), "exeris-lsp-it-watch-")));
+    mkdirSync(join(workspace, "com", "example", "shop"), { recursive: true });
+    writeFileSync(join(workspace, "com", "example", "shop", "Order.java"), ORDER_SOURCE);
+
+    const tokens = command!.split(/\s+/);
+    const config: LspConfig = {
+      state: "available",
+      command: tokens[0],
+      args: tokens.slice(1),
+      source: "env-command",
+      workspaceRoot: workspace,
+    };
+    const client = new LspClient(config, { requestTimeoutMs: REQUEST_TIMEOUT_MS, watchDebounceMs: 100 });
+    const tools = new Map(registerLspTools(DARK_CONFIG, client).map((t) => [t.definition.name, t]));
+    const listDomains = async (): Promise<string[]> =>
+      (parseJson(await tools.get("lsp-list_domains")!.handler({})) as { qualifiedName: string }[])
+        .map((d) => d.qualifiedName)
+        .sort();
+
+    try {
+      // First scan populates the server's cache and completes the handshake.
+      assert.deepEqual(await listDomains(), ["com.example.shop.Order"]);
+      // Give the server time to send its registration and the watcher to arm.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      await execFileAsync(process.execPath, [
+        "-e",
+        "require('node:fs').writeFileSync(process.argv[1], process.argv[2])",
+        join(workspace, "com", "example", "shop", "Customer.java"),
+        CUSTOMER_SOURCE,
+      ]);
+
+      const deadline = Date.now() + 15_000;
+      let seen: string[] = [];
+      while (Date.now() < deadline) {
+        seen = await listDomains();
+        if (seen.length === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      assert.deepEqual(seen, ["com.example.shop.Customer", "com.example.shop.Order"]);
     } finally {
       client.dispose();
       rmSync(workspace, { recursive: true, force: true });

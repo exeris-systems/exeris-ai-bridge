@@ -9,7 +9,7 @@ import type {
 } from "../../config/env.js";
 import { isSdkAvailable, loadBundle, readBundleEntry, type BundleState } from "../../data/bundle.js";
 import type { KernelAdapter, KernelCloseReason, KernelStatus } from "../../transport/kernel-adapter.js";
-import type { LspClient, LspCloseReason, LspStatus } from "../../transport/lsp-client.js";
+import type { LspClient, LspCloseReason, LspStatus, LspWatchStatus } from "../../transport/lsp-client.js";
 import type { RegisteredTool } from "../types.js";
 import { getServerVersion } from "../../version.js";
 import { resolveProjectToolingVersion } from "../../config/tooling-pin.js";
@@ -129,7 +129,7 @@ function healthTool(
         modeSource: config.modeSource,
         families: [
           docsFamilyReport(config.docs),
-          childFamilyReport("lsp", config.lsp, transports.lsp?.status()),
+          childFamilyReport("lsp", config.lsp, transports.lsp?.status(), transports.lsp?.watchStatus()),
           childFamilyReport("kernel", config.kernel, transports.kernel?.status()),
           // Two families, one resolution: build:* and caps:* both read the
           // user's project and are dark together. Reported separately because
@@ -162,6 +162,8 @@ interface FamilyReport {
   readonly reason?: string;
   readonly remedy?: string;
   readonly transport?: TransportReport | null;
+  /** lsp:* only: whether other processes' workspace writes reach the server. `watching`, `degraded (reason)` or `off`. */
+  readonly watch?: string;
   readonly versionSkew?: VersionSkewReport;
   /** build:* — the project's pinned tooling version against the bundled generator catalogue's. */
   readonly toolingSkew?: ToolingSkewReport;
@@ -280,6 +282,7 @@ function childFamilyReport(
   family: ToolFamily,
   config: LspConfig | KernelConfig | Unavailable,
   transport: LspStatus | KernelStatus | undefined,
+  watch?: LspWatchStatus,
 ): FamilyReport {
   if (config.state === "unavailable") return darkFamilyReport(family, config);
   const report: FamilyReport = {
@@ -287,6 +290,7 @@ function childFamilyReport(
     state: "available",
     source: config.source,
     transport: transport === undefined ? null : describeTransport(transport),
+    ...(watch === undefined ? {} : { watch: describeWatch(watch) }),
   };
   // Only the local-repository rung resolves a version, and when it does the
   // operator needs to see WHICH one — "kernel:* is live" is a different claim
@@ -298,6 +302,10 @@ function childFamilyReport(
 
 function darkFamilyReport(family: ToolFamily, config: Unavailable): FamilyReport {
   return { family, state: "unavailable", reason: config.reason, remedy: config.remedy };
+}
+
+function describeWatch(watch: LspWatchStatus): string {
+  return watch.state === "degraded" ? `degraded (${watch.reason})` : watch.state;
 }
 
 /**
