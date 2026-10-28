@@ -59,7 +59,11 @@ export interface DiffReport {
   readonly files: readonly FileDiff[];
   /** Files present in the L1 tree that the run no longer produces, sorted. */
   readonly removed: readonly string[];
-  /** Set when the L1 tree is larger than the listing caps; `removed` is then incomplete. */
+  /**
+   * Set when the L1 tree is larger than the listing caps (`removed` is then incomplete), or when
+   * the committed files that would be read for comparison total more than the size budget (no L1
+   * file is read then). Any non-null limit makes the whole report unusable.
+   */
   readonly limit: PreviewLimit | null;
 }
 
@@ -147,16 +151,31 @@ export function collectProduced(dir: string, maxBytes: number = DEFAULT_MAX_FILE
  *
  * `l1Root` is read only if it resolves inside `projectRoot`; a link that leaves
  * the project makes the L1 tree read as empty rather than read what it points at.
+ *
+ * The L1 files that are read are those whose path the run produced. Their sizes, taken from the
+ * listing, are summed and checked against `maxBytes` before any of them is read, so a committed
+ * file that is too large is refused rather than read into memory.
  */
 export function diffAgainstL1(
   produced: ReadonlyMap<string, string>,
   projectRoot: string,
   l1Root: string,
+  maxBytes: number = DEFAULT_MAX_FILES_BYTES,
 ): DiffReport {
   const confined = confinedL1Root(projectRoot, l1Root);
   const listing = confined === null ? { files: [], limit: null } : listFiles(confined);
   const existing = new Map<string, string>();
   for (const entry of listing.files) existing.set(entry.relative, entry.absolute);
+
+  const readBytes = listing.files.reduce((sum, e) => sum + (produced.has(e.relative) ? e.size : 0), 0);
+  const sizeLimit = checkFilesSize(readBytes, maxBytes);
+  if (sizeLimit !== null) {
+    return {
+      files: [],
+      removed: [],
+      limit: { ...sizeLimit, message: `The committed files to compare total more than the ${maxBytes}-byte size cap.` },
+    };
+  }
 
   const files: FileDiff[] = [];
   for (const [path, content] of [...produced].sort(([a], [b]) => a.localeCompare(b, "en"))) {
