@@ -317,8 +317,9 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
 
   // Sibling probes answered so far, per directory. A probe is a synchronous
   // stat, and every event of a burst asks the same few questions. An answer
-  // holds until the build file it was about is created or removed, or the
-  // window flushes, so a burst costs one stat per (directory, file).
+  // holds until the build file it was about is created or removed, a rescan is
+  // requested, a new directory is about to be walked, or the window flushes,
+  // so a burst costs one stat per (directory, file).
   const probes = new Map<string, Map<string, boolean>>();
   const hasSibling: SiblingProbe = (directory, file) => {
     const key = directory.join(sep);
@@ -353,6 +354,8 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
   };
 
   const collapse = (): void => {
+    // A rescan means the tree may have been replaced, so no probe answer about it still holds.
+    probes.clear();
     overflow = true;
     buffer.clear();
     schedule();
@@ -555,6 +558,8 @@ export function watchRoot(root: string, options: WatchOptions): WatchHandle {
       }
       if (closed || degradedReason !== null) return;
       if (isDirectory && !directoryWatchers.has(path) && (maxDepth === undefined || depthOf(dirname(path)) < maxDepth)) {
+        // A directory that is new at this path may sit where another stood.
+        probes.clear();
         await walk(path, true);
         return;
       }

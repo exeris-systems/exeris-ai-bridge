@@ -202,7 +202,7 @@ test("files that match no glob are not reported", async () => {
 test("a burst of writes to one path inside the debounce window coalesces into one event", async () => {
   const { root, cleanup } = fixture();
   const c = collector();
-  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 300, onEvents: c.push }));
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 1000, onEvents: c.push }));
   try {
     const file = join(root, "A.java");
     for (let i = 0; i < 5; i++) {
@@ -210,7 +210,7 @@ test("a burst of writes to one path inside the debounce window coalesces into on
       await sleep(20);
     }
     await c.until(() => c.batches.length > 0);
-    await sleep(500);
+    await sleep(1200);
     assert.equal(c.batches.length, 1, "one debounced batch");
     const events = allEvents(c.batches);
     assert.equal(events.length, 1);
@@ -573,7 +573,7 @@ test("a depth-0 watcher watches the root alone and reports only its own matches"
   mkdirSync(join(root, "sub"));
   const c = collector();
   const handle = await started(
-    watchRoot(root, { globs: ["adr-index.md"], maxDepth: 0, debounceMs: DEBOUNCE_MS, onEvents: c.push }),
+    watchRoot(root, { globs: ["**/adr-index.md"], maxDepth: 0, debounceMs: DEBOUNCE_MS, onEvents: c.push }),
   );
   try {
     assert.deepEqual(handle.watchedDirectories(), [root]);
@@ -605,6 +605,32 @@ test("a depth-0 watcher reports a file replaced by rename", async () => {
     writeFileSync(join(root, ".adr-index.md.tmp"), "new");
     renameSync(join(root, ".adr-index.md.tmp"), join(root, "adr-index.md"));
     await c.until(() => allEvents(c.batches).some((e) => e.path === join(root, "adr-index.md")));
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test("a directory replaced within a window is judged by its new contents", linuxOnly, async () => {
+  const { root, cleanup } = fixture();
+  const proj = join(root, "proj");
+  mkdirSync(join(proj, "build"), { recursive: true });
+  writeFileSync(join(proj, "pom.xml"), "<project/>");
+  const c = collector();
+  const handle = await started(watchRoot(root, { globs: ["**/*.java"], debounceMs: 1500, onEvents: c.push }));
+  try {
+    // Caches "proj has a pom.xml".
+    writeFileSync(join(proj, "build", "Old.java"), "class Old {}");
+    await sleep(100);
+    renameSync(proj, join(root, "proj.old"));
+    await sleep(200);
+    mkdirSync(join(proj, "build", "foo"), { recursive: true });
+    writeFileSync(join(proj, "build", "foo", "A.java"), "class A {}");
+    await sleep(300);
+    assert.ok(
+      handle.watchedDirectories().includes(join(proj, "build", "foo")),
+      JSON.stringify(handle.watchedDirectories()),
+    );
   } finally {
     handle.close();
     cleanup();

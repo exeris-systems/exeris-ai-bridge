@@ -64,8 +64,13 @@ export function createAdrIndexSubscriptions(
   let handle: WatchHandle | null = null;
   let startFailure: string | null = null;
 
+  // Deferred past the current turn: a failure while subscribing is observed
+  // inside the subscribe handler, and the reply to that request must be the
+  // first thing the subscriber hears.
   const fire = (): void => {
-    if (subscribed.has(ADR_INDEX_URI)) notify(ADR_INDEX_URI);
+    setImmediate(() => {
+      if (subscribed.has(ADR_INDEX_URI)) notify(ADR_INDEX_URI);
+    });
   };
 
   const stop = (): void => {
@@ -104,7 +109,12 @@ export function createAdrIndexSubscriptions(
       }
       const first = subscribed.size === 0;
       subscribed.add(uri);
-      if (first && docs.state === "available") start(docs);
+      // A watcher that failed or degraded is replaced by the next subscribe.
+      const degraded = startFailure !== null || handle?.state().state === "degraded";
+      if ((first || degraded) && docs.state === "available") {
+        stop();
+        start(docs);
+      }
       await handle?.ready;
     },
     unsubscribe(uri) {

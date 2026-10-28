@@ -240,3 +240,34 @@ test("a watcher that cannot start is reported degraded and tells the subscriber 
   await until(() => c.updated.length > 0);
   assert.deepEqual(c.resources.subscriptionWatch(), { state: "degraded", reason: "cannot start the watcher (EACCES)" });
 });
+
+test("the reply to subscribe precedes any notification, even when the watcher cannot start", async () => {
+  const c = await connect(checkout, () => {
+    throw Object.assign(new Error("x"), { code: "EACCES" });
+  });
+  const order: string[] = [];
+  c.client.setNotificationHandler(ResourceUpdatedNotificationSchema, () => {
+    order.push("notification");
+  });
+  await c.client.subscribeResource({ uri: URI });
+  order.push("reply");
+  await until(() => order.includes("notification"));
+  assert.deepEqual(order, ["reply", "notification"]);
+});
+
+test("subscribing again replaces a degraded watcher", async () => {
+  let calls = 0;
+  const w = countingWatch();
+  const c = await connect(checkout, (root, options) => {
+    const handle = w.watchRootFn(root, options);
+    return ++calls === 1 ? { ...handle, state: () => ({ state: "degraded", reason: "ENOSPC" }) } : handle;
+  });
+  await c.client.subscribeResource({ uri: URI });
+  assert.deepEqual(c.resources.subscriptionWatch(), { state: "degraded", reason: "ENOSPC" });
+  await c.client.subscribeResource({ uri: URI });
+  assert.equal(w.started(), 2);
+  assert.equal(w.closed(), 1);
+  assert.deepEqual(c.resources.subscriptionWatch(), { state: "watching" });
+  writeFileSync(indexFile, "edited");
+  await until(() => c.updated.length > 0);
+});
