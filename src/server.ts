@@ -9,6 +9,7 @@ import {
 import { loadConfig, type BridgeConfig } from "./config/env.js";
 import { buildInstructions } from "./instructions.js";
 import { loadBundle, isSdkAvailable, type BundleState } from "./data/bundle.js";
+import { registerPrompts } from "./prompts/index.js";
 import { registerResources } from "./resources/index.js";
 import { registerBridgeTools } from "./tools/bridge/index.js";
 import { registerBuildTools } from "./tools/build/index.js";
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
 
   const server = new Server(
     { name: SERVER_NAME, version: getServerVersion() },
-    { capabilities: { tools: {}, resources: {} }, instructions: buildInstructions(config, bundle) },
+    { capabilities: { tools: {}, resources: {}, prompts: {} }, instructions: buildInstructions(config, bundle) },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
   });
 
   registerResources(server, config);
+  registerPrompts(server, config, bundle);
 
   await server.connect(new StdioServerTransport());
 }
