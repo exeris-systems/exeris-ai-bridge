@@ -216,7 +216,7 @@ Obligation 2 sources `docs:*` from the `exeris-docs/` filesystem, and the "Two P
 
 1. **A checkout outranks the snapshot.** When `EXERIS_DOCS_ROOT` or the install-neighbour layout resolves a docs root, `docs:*` reads it exactly as before. Only when no docs root resolves does the family serve the bundled snapshot, and `bridge:health` reports which of the two answered, with the snapshot's per-repository commits.
 
-2. **The snapshot is the registry tier, not the documentation trees.** It holds `adr-index.md`, the record each index row links (in `exeris-docs` or a sibling repository), the HLA, the whitepaper, the decision templates and `exeris-docs/.agents/policies/drift-patterns.md`, which the `review-three-tier-violations` prompt embeds and which is never a listed resource. `docs-list_adrs`, `docs-get_adr`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template` and `docs-search` answer from it, `docs-search` over the snapshot's files only. The per-repository tools (`docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc`) browse sibling `docs/` trees and stay checkout-only: without a checkout they return the family's structured `reason` + `remedy`.
+2. **The snapshot is the registry tier, not the documentation trees.** It holds `adr-index.md`, the record each index row links (in `exeris-docs` or a sibling repository), the HLA, the whitepaper and the decision templates. `docs-list_adrs`, `docs-get_adr`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template` and `docs-search` answer from it, `docs-search` over the snapshot's files only. The per-repository tools (`docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc`) browse sibling `docs/` trees and stay checkout-only: without a checkout they return the family's structured `reason` + `remedy`. *(Extended by the 2026-10-28 amendment "The Snapshot Carries the Drift-Patterns Policy, and the Preview Does Not Rest on the Generators' Containment" below: the snapshot also holds the drift-patterns policy.)*
 
 3. **Built at release from the default branch, never from a working tree.** `prepack` assembles the snapshot from each source repository's default branch at a recorded commit, and the manifest records repository, commit and `sha256` per file, with the same integrity check the `sdk:*` corpus carries. A working tree is on whatever branch its owner has checked out, so reading one would make the package's content depend on the release machine. Network access happens at build time only; at runtime the family still reads local files and nothing else.
 
@@ -280,8 +280,8 @@ Obligation 1 names "stdio and SSE transports". The MCP specification has since r
 
 ### Risks and assumptions
 
-- **Assumes:** the generator writes only under the output directory it is given, for well-formed metadata. `CodegenMain` (`--output-dir`) and `exeris-gen generate` (`--output`) both write their files, and the manifest of what a run emitted, under that root, but neither contains its writes when a metadata name carries a path segment: the file then lands outside the output directory (exeris-tooling#430). Point 3 therefore does not rest on the generators. The bridge validates the metadata corpus before either generator starts, and runs the TypeScript child under Node's permission model with writes allowed only to the scratch directory. The Java child has no runtime confinement, so for it the corpus validation is the guard.
-- **Assumes:** `exeris-tooling` 0.9.0 publishes `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` to Maven Central (ADR-091), so the version `build-get_starter` pins resolves for an application developer. `exeris-codegen-cli` 0.10.0 is the launchable Java generator: a shaded jar run as `java -jar` with `--metadata-dir` and `--output-dir` (ADR-097) on JDK 25 or newer, and `build-preview_generation` launches the one at the version the project pins, from the local Maven repository. When that jar is not there or no JDK 25 runs, the tool reports the Java side unavailable with that reason and its remedy.
+- **Assumes:** the generator writes only under the output directory it is given. `CodegenMain` (`--output-dir`) and `exeris-gen generate` (`--output`) both write their files, and the manifest of what a run emitted, under that root. Point 3 rests on this as much as on the bridge's own code. *(Replaced by the 2026-10-28 amendment "The Snapshot Carries the Drift-Patterns Policy, and the Preview Does Not Rest on the Generators' Containment" below: the generators confine their writes only for well-formed metadata, and point 3 rests on the bridge's own validation.)*
+- **Assumes:** `exeris-tooling` 0.9.0 publishes `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` to Maven Central (ADR-091), so the version `build-get_starter` pins resolves for an application developer. A launchable Java generator is not assumed: until `exeris-tooling` publishes one, `build-preview_generation` covers the TypeScript generator and reports the Java side unavailable with that reason. *(Replaced by the 2026-10-28 amendment "The Snapshot Carries the Drift-Patterns Policy, and the Preview Does Not Rest on the Generators' Containment" below: `exeris-codegen-cli` 0.10.0 is the launchable Java generator.)*
 - **Reversed by:** a generator run observed writing outside the directory it was given. Points 2 and 3 then no longer hold together, and the preview is withdrawn until the generator can be confined. Also reversed, in favour of a narrower shape, by `exeris-tooling` publishing a mode that returns the generated files without writing them: the bridge then consumes that and creates no directory at all.
 - **Risk:** a generator of a different version than the project pins answers for the wrong contract; point 4 refuses rather than falls back, and the agent sees it first, as a structured `reason`.
 
@@ -391,6 +391,31 @@ Item 3 of the 2026-06-24 amendment keeps the bridge off `exeris/applyMutation`. 
 - ADR-003 (`exeris-sdk`, Entity-First): why the brief references the source model and never re-encodes it.
 - The 2026-08-16 "Two Personas" amendment above: the P2 track the discovery step belongs to.
 - The 2026-09-30 amendments above: the hosted family split that makes `build-validate_brief` local only.
+
+## The Snapshot Carries the Drift-Patterns Policy, and the Preview Does Not Rest on the Generators' Containment (2026-10-28 amendment)
+
+Two statements of fact in earlier amendments no longer match what ships. The 2026-09-30 snapshot amendment lists the files the registry snapshot holds, and the `review-three-tier-violations` prompt, admitted by the 2026-10-27 amendment, embeds a file that list does not name. The 2026-10-04 amendment rests its third point on the generators writing only under the directory they are given, and assumes no launchable Java generator. Neither generator contains its writes for a metadata name carrying a path segment (exeris-tooling#430), and `exeris-tooling` 0.10.0 publishes a launchable Java generator. This amendment restates those facts. It decides nothing new.
+
+### The Decision
+
+1. **The registry snapshot also holds `exeris-docs/.agents/policies/drift-patterns.md`.** It extends the content list in point 2 of the 2026-09-30 snapshot amendment. The `review-three-tier-violations` prompt embeds the file, and it is never a listed resource. It is vendored, checked against its digest and filtered for visibility exactly as the rest of the snapshot is.
+
+2. **The generators confine their writes only for well-formed metadata, so point 3 of the 2026-10-04 amendment rests on the bridge, not on them.** This replaces that amendment's first "Assumes". `CodegenMain` (`--output-dir`) and `exeris-gen generate` (`--output`) write under the root they are given unless a metadata name carries a path segment, and then the file lands outside it (exeris-tooling#430). The bridge therefore validates the metadata corpus before either generator starts, and refuses a corpus whose names could not be a Java identifier or a package. It also runs the TypeScript child under Node's permission model, with writes allowed only to the scratch directory. The Java child has no runtime confinement, so for it the corpus validation is the guard.
+
+3. **`exeris-codegen-cli` 0.10.0 is the launchable Java generator.** This replaces the sentence in that amendment's second "Assumes" which says a launchable Java generator is not assumed. It is a shaded jar run as `java -jar` with `--metadata-dir` and `--output-dir` (ADR-097) on JDK 25 or newer. `build-preview_generation` launches the jar at the version the project pins, from the local Maven repository. When that jar is absent or no JDK 25 runs, the tool reports the Java side unavailable with that reason and its remedy.
+
+### What this amendment does NOT change
+
+- **The decisions of the 2026-09-30 and 2026-10-04 amendments.** The snapshot is still the registry tier, built at release from default branches. The preview still writes only into its own temporary directory and resolves the project's own generator version.
+- **The "Reversed by" of the 2026-10-04 amendment.** A generator run observed writing outside its directory despite the bridge's validation still withdraws the preview.
+- **The tool surface.** No tool, input schema or output shape changes.
+
+### Cross-references for this amendment
+
+- The 2026-09-30 snapshot amendment and the 2026-10-04 `build:*` amendment above, whose statements points 1 to 3 restate.
+- The 2026-10-27 amendment above, which admits the prompt that embeds the drift-patterns policy.
+- exeris-tooling#430: neither generator contains its writes for a metadata name carrying a path segment.
+- ADR-097 (`exeris-tooling`): the `exeris-codegen-cli` entry point, arguments and exit codes.
 
 ## Cross-references
 
