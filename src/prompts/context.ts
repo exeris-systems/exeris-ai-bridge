@@ -4,6 +4,7 @@ import type { DocsRoots } from "../config/env.js";
 import {
   readAdrContent,
   readAdrIndexMarkdown,
+  readDriftPatterns,
   readHla,
   readSandboxedFile,
   readTemplate,
@@ -57,6 +58,28 @@ export const adrIndexMessage = (ctx: PromptContext): PromptMessage =>
   withDocs(ctx, "exeris://docs/adr-index", readAdrIndexMarkdown);
 
 export const hlaMessage = (ctx: PromptContext): PromptMessage => withDocs(ctx, "exeris://docs/hla", readHla);
+
+/**
+ * The drift-patterns policy, embedded only. Its URI is not a listed resource and
+ * `resources/read` does not serve it; the prompt is its one reader.
+ */
+export const driftPatternsMessage = (ctx: PromptContext): PromptMessage => {
+  const docs = ctx.config.docs;
+  const uri = "exeris://docs/policy/drift-patterns";
+  if (docs.state === "unavailable") {
+    return driftFallback(uri, `${docs.reason} ${docs.remedy}`);
+  }
+  const read = readDriftPatterns(docs);
+  return read.ok ? embedded(uri, read) : driftFallback(uri, read.message);
+};
+
+function driftFallback(uri: string, reason: string): PromptMessage {
+  return text(
+    `Context not pre-loaded: the drift-patterns policy (${uri}) could not be embedded: ${reason} ` +
+      "Read exeris-docs/.agents/policies/drift-patterns.md from an exeris-docs checkout before scanning, " +
+      "and if you cannot, say so instead of scanning from memory.",
+  );
+}
 
 export const adrMessage = (ctx: PromptContext, number: number): PromptMessage =>
   withDocs(ctx, `exeris://docs/adr/${String(number).padStart(3, "0")}`, (d) => readAdrContent(d, number));

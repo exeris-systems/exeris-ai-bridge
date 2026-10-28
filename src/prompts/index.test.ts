@@ -220,7 +220,13 @@ for (const [mode, pick] of [
   test(`${mode}: context is embedded as resource messages`, async () => {
     const client = await connect(pick());
     const review = await client.getPrompt({ name: "review-three-tier-violations" });
-    assert.deepEqual(resourceUris(review), ["exeris://docs/hla", "exeris://docs/adr/006"]);
+    assert.deepEqual(resourceUris(review), [
+      "exeris://docs/hla",
+      "exeris://docs/adr/006",
+      "exeris://docs/policy/drift-patterns",
+    ]);
+    assert.match(flatten(review), /Drift patterns \(fixture\)/);
+    assert.doesNotMatch(flatten(review), /Postgres-only graph/);
     assert.match(flatten(review), /ADR-006 The Wall \(fixture\)/);
     assert.match(flatten(review), /HLA \(fixture\)/);
     // ADR-024 is absent from the fixture registry, so it falls back to an instruction to read the URI.
@@ -259,6 +265,15 @@ test("checkout: route-this-task reads CLAUDE.md through the sandbox and refuses 
   const result = await (await connect(checkout)).getPrompt({ name: "route-this-task", arguments: { task: "x" } });
   assert.doesNotMatch(flatten(result), /SECRET OUTSIDE CONTENT/);
   assert.match(flatten(result), /Do not guess the owning repository/);
+});
+
+test("a drift-patterns policy that cannot be read falls back to naming the file", async () => {
+  rmSync(join(work, "ecosystem", "exeris-docs", ".agents", "policies", "drift-patterns.md"));
+  const missing = flatten(await (await connect(checkout)).getPrompt({ name: "review-three-tier-violations" }));
+  assert.match(missing, /Read exeris-docs\/\.agents\/policies\/drift-patterns\.md/);
+  assert.doesNotMatch(missing, /Drift patterns \(fixture\)/);
+  const dark = flatten(await (await connect(unavailable)).getPrompt({ name: "review-three-tier-violations" }));
+  assert.match(dark, /Read exeris-docs\/\.agents\/policies\/drift-patterns\.md/);
 });
 
 test("docs unavailable: prompts still render, telling the agent to read the URIs", async () => {

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileS
 import { dirname, join } from "node:path";
 
 import { localLinkCandidates, parseAdrIndex } from "../tools/docs/adr-index.js";
+import { DRIFT_PATTERNS_FILE } from "../tools/docs/content.js";
 import { isServableRepo } from "../tools/docs/index.js";
 import {
   DOCS_SNAPSHOT_DIRNAME,
@@ -21,7 +22,8 @@ import {
 // ./docs-snapshot.ts.
 //
 // What goes in: the registry's own files (adr-index.md, the HLA, the
-// whitepaper, the decision templates) and the record each public index row
+// whitepaper, the decision templates, the drift-patterns policy the three-tier
+// review prompt embeds) and the record each public index row
 // links, wherever it lives. What decides whether a repository contributes at
 // all: its name passes the public-scope policy the per-repo tools apply, it is
 // public, and its licence permits redistributing its documentation.
@@ -40,6 +42,7 @@ export const REGISTRY_FILES: readonly string[] = [
   "templates/ADR-TEMPLATE.md",
   "templates/RFC-TEMPLATE.md",
   "templates/RESEARCH-TEMPLATE.md",
+  DRIFT_PATTERNS_FILE,
 ];
 
 const LICENCE_FILES: readonly string[] = ["LICENSE", "LICENSE.md", "LICENSE.txt"];

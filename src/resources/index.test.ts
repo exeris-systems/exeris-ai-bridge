@@ -238,3 +238,8 @@ test("unavailable docs: read reports it with the reason and remedy; a malformed 
   const bad = await rejection(client.readResource({ uri: "exeris://docs/nope" }));
   assert.equal(bad.code, ErrorCode.InvalidParams);
 });
+
+test("the drift-patterns policy is embedded in a prompt only and is not readable as a resource", async () => {
+  const err = await rejection(connect(checkout).then((c) => c.readResource({ uri: "exeris://docs/policy/drift-patterns" })));
+  assert.equal(err.code, ErrorCode.InvalidParams);
+});
