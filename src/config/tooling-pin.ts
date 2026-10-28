@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveInside } from "../fs/sandbox.js";
-import { APP_GROUP_IDS, parsePom, readBounded, resolveValue, tagValue } from "./pom.js";
+import { APP_GROUP_IDS, parsePom, readBounded, resolveValue, tagValue, withoutNestedBlocks } from "./pom.js";
 
 // The exeris-tooling release a project pins, read offline from its own files.
 // Shared by the generator resolution (which launches the pinned release) and the
@@ -58,7 +58,7 @@ function codegenPluginVersion(body: string, properties: Map<string, string>): st
   const pluginRegex = /<plugin>([\s\S]*?)<\/plugin>/gi;
   let match: RegExpExecArray | null;
   while ((match = pluginRegex.exec(body)) !== null) {
-    const block = match[1];
+    const block = withoutNestedBlocks(match[1]);
     if (tagValue(block, "artifactId") !== CODEGEN_PLUGIN) continue;
     const raw = tagValue(block, "version");
     if (raw === null) continue;

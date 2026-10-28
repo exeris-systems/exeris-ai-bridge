@@ -36,7 +36,7 @@ function isPathSafe(value: string): boolean {
 }
 
 function isNameKey(key: string): boolean {
-  return key === "name" || key === "module" || key.endsWith("Name");
+  return key === "name" || key === "module" || key.endsWith("Name") || key.endsWith("Names");
 }
 
 function isPackageKey(key: string): boolean {
@@ -47,7 +47,8 @@ function isPackageKey(key: string): boolean {
  * Check every `*.json` under `dir` (recursively, as the TypeScript generator reads
  * it): it parses to an object; its top-level `entityName` is a Java simple name and
  * its `packageName` a dotted Java name; and every other string under a name key
- * (`name`, `*Name`, `module`) or package key (`*Package`) is free of path
+ * (`name`, `*Name`, `*Names`, `module`) or package key (`*Package`), including each
+ * string element of an array (nested arrays too) under such a key, is free of path
  * separators, `..` segments and control characters. A symbolic link is refused,
  * since the Java generator would read through it. Returns the first problem.
  *
@@ -115,29 +116,36 @@ function checkFile(content: string, file: string): MetadataProblem | null {
   }
 
   let nodes = 0;
-  const stack: { value: unknown; depth: number }[] = [{ value: parsed, depth: 0 }];
+  // `key` is the object key a value sits under; array elements inherit it, so a list of
+  // names is held to the same rule as a single name.
+  const stack: { value: unknown; depth: number; key?: string }[] = [{ value: parsed, depth: 0 }];
   while (stack.length > 0) {
-    const { value, depth } = stack.pop()!;
+    const { value, depth, key: inherited } = stack.pop()!;
     nodes += 1;
     if (nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) {
       return { file, reason: "The metadata is nested or populated beyond what the preview reads." };
     }
-    if (Array.isArray(value)) {
-      for (const item of value) stack.push({ value: item, depth: depth + 1 });
+    if (typeof value === "string") {
+      const problem = checkString(inherited, value, file);
+      if (problem !== null) return problem;
+    } else if (Array.isArray(value)) {
+      for (const item of value) stack.push({ value: item, depth: depth + 1, key: inherited });
     } else if (typeof value === "object" && value !== null) {
       for (const [key, child] of Object.entries(value)) {
-        if (typeof child === "string") {
-          if (isNameKey(key) && !isPathSafe(child)) {
-            return { file, reason: `${key} ${show(child)} contains a path separator, a '..' segment or a control character.` };
-          }
-          if (isPackageKey(key) && !isPackageName(child)) {
-            return { file, reason: `${key} ${show(child)} is not a dotted Java package name.` };
-          }
-        } else {
-          stack.push({ value: child, depth: depth + 1 });
-        }
+        stack.push({ value: child, depth: depth + 1, key });
       }
     }
+  }
+  return null;
+}
+
+function checkString(key: string | undefined, value: string, file: string): MetadataProblem | null {
+  if (key === undefined) return null;
+  if (isNameKey(key) && !isPathSafe(value)) {
+    return { file, reason: `${key} ${show(value)} contains a path separator, a '..' segment or a control character.` };
+  }
+  if (isPackageKey(key) && !isPackageName(value)) {
+    return { file, reason: `${key} ${show(value)} is not a dotted Java package name.` };
   }
   return null;
 }
