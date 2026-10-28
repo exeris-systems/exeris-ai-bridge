@@ -63,6 +63,25 @@ missing answers with a structured `family_unavailable` result naming the reason 
 repositories; the other `docs-*` tools answer from a registry snapshot bundled in the package.
 `lsp-*` needs a locally built `exeris-platform-lsp`, which publishes no runnable jar yet.
 
+## Resources
+
+The registry tier of `docs-*` is also available as MCP resources, all `text/markdown`, listed in
+every session. A read goes through the same checkout-or-snapshot resolution and public-scope policy
+as the tools.
+
+| URI | Content |
+| --- | --- |
+| `exeris://docs/adr-index` | The ADR registry index |
+| `exeris://docs/adr/{NNN}` | One ADR by its three-digit number; a record from a repository that is not served publicly names its owning repository and GitHub URL |
+| `exeris://docs/hla` | The high-level architecture |
+| `exeris://docs/whitepaper` | The B2B technical whitepaper |
+| `exeris://docs/template/{ADR\|RFC\|RESEARCH}` | A decision-doc template |
+
+A URI outside this set, or an ADR number that is not three digits, is rejected as invalid params. An
+ADR that is not in the registry or has no servable content answers with the MCP resource-not-found
+error (`-32002`); docs being unavailable answers with an internal error whose data is the
+`family_unavailable` reason and remedy.
+
 ## Configuration
 
 Nothing needs setting for an application. Every variable is optional, and none can stop the server
