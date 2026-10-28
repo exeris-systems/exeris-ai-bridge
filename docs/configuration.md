@@ -38,6 +38,23 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 
 `EXERIS_DOCS_ROOT` points at the `exeris-docs` checkout the `docs:*` tools read from. It is **optional when the bridge is cloned as a sibling of `exeris-docs`** under `~/exeris-systems/` (the default resolves `../exeris-docs` relative to the install) — set it explicitly for npm-installed or relocated deployments. The filesystem sandbox is anchored on this root and its sibling repos; the server refuses to read anything outside it. With no checkout to resolve, `docs:*` answers from the **registry snapshot bundled in the published package**: `adr-index.md`, every public record it links from a repository whose licence permits redistribution, the HLA, the whitepaper and the templates, read from each repository's default branch when the package was packed (`data/docs/NOTICE.md` lists the commits and licences). `bridge-health` reports which source answered. The per-repository tools (`docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc`) need a checkout, and a record from a repository the snapshot leaves out answers with its GitHub URL. An `EXERIS_DOCS_ROOT` that is set but does not resolve takes `docs:*` dark rather than falling back to the snapshot.
 
+### Subscribing to the registry index
+
+The server advertises `resources.subscribe`. Only `exeris://docs/adr-index` is subscribable; any
+other URI is rejected as invalid params (`-32602`) with a message naming it, and unsubscribing from
+a URI that was never subscribed succeeds.
+
+What a subscription does depends on which source answers `docs:*`:
+
+| Source | Behaviour |
+| --- | --- |
+| `exeris-docs` checkout | The first subscription starts a watcher on the checkout's own directory, for `adr-index.md` only (no recursion into the tree). Each debounced burst of changes, including a replacement by rename as editors and `git checkout` write, sends one `notifications/resources/updated` with `{ uri }`. The last unsubscribe, and closing the server, stop the watcher. If the watcher cannot be started or later fails, the subscriber is notified once to read again and `bridge-health` reports the state. |
+| Bundled snapshot, or docs unavailable | The subscription is accepted and never fires: the content is immutable for the process. No watcher is started. |
+
+Subscription state belongs to one server instance, so one session's subscription never notifies
+another. `bridge-health` reports it on the `docs` family as `subscriptions`: `off` (no subscriber),
+`watching`, `degraded (reason)` or `static`.
+
 ## Launching the Java children
 
 Both child-process families resolve their launch spec through a **ladder**, first hit wins, nothing on it touches the network:

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -415,3 +415,66 @@ test("a retried handshake closes the previous attempt's channel", async () => {
     client.dispose();
   }
 });
+
+test("a RelativePattern based in a directory named `..x` is inside the root", async () => {
+  const f = fixture((root) => {
+    mkdirSync(join(root, "..x"));
+    return {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "client/registerCapability",
+      params: {
+        registrations: [
+          {
+            id: "w1",
+            method: "workspace/didChangeWatchedFiles",
+            registerOptions: {
+              watchers: [{ globPattern: { baseUri: pathToFileURL(join(root, "..x")).href, pattern: "*.java" } }],
+            },
+          },
+        ],
+      },
+    };
+  });
+  try {
+    await f.start();
+    await until(() => replyTo(f.channel, 5) !== undefined, "registration reply");
+    assert.equal(replyTo(f.channel, 5).error, undefined);
+    assert.equal(replyTo(f.channel, 5).result, null);
+    await sleep(100);
+
+    const file = join(f.root, "..x", "In.java");
+    await writeFromOtherProcess(file, "class In {}");
+    await until(() => watched(f.channel).length > 0, "didChangeWatchedFiles");
+    const uris = watched(f.channel).flatMap((m) => m.params.changes.map((c: { uri: string }) => c.uri));
+    assert.ok(uris.includes(pathToFileURL(file).href), JSON.stringify(uris));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test(
+  "a directory of sources moved out of the root invalidates the server's scan",
+  { skip: process.platform === "linux" ? false : "owned per-directory watching is Linux-only" },
+  async () => {
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "exeris-lsp-outside-")));
+    const f = fixture(registerJavaWatcher(6));
+    try {
+      mkdirSync(join(f.root, "sub", "inner"));
+      await writeFromOtherProcess(join(f.root, "sub", "inner", "A.java"), "class A {}");
+      await f.start();
+      await until(() => replyTo(f.channel, 6) !== undefined, "registration reply");
+      await sleep(150);
+
+      renameSync(join(f.root, "sub"), join(outside, "sub"));
+      await until(() => watched(f.channel).length > 0, "didChangeWatchedFiles");
+      // The server drops its whole scan on any watched-files notification; the
+      // root is the change that stands for everything under the vanished directory.
+      const uris = watched(f.channel).flatMap((m) => m.params.changes.map((c: { uri: string }) => c.uri));
+      assert.ok(uris.includes(pathToFileURL(f.root).href), JSON.stringify(uris));
+    } finally {
+      f.cleanup();
+      rmSync(outside, { recursive: true, force: true });
+    }
+  },
+);

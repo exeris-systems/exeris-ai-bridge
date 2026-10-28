@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
+import type { ResourcesHandle } from "../../resources/index.js";
 import type { BridgeConfig, KernelConfig, LspConfig, Unavailable } from "../../config/env.js";
 import { KernelAdapter, type KernelChannel } from "../../transport/kernel-adapter.js";
 import { LspClient, LspTransportError, type LspChannel, type LspCloseReason } from "../../transport/lsp-client.js";
@@ -93,7 +94,7 @@ const NO_BUNDLE: BundleState = {
 async function call(
   config: BridgeConfig,
   name: string,
-  transports?: { lsp?: LspClient; kernel?: KernelAdapter },
+  transports?: { lsp?: LspClient; kernel?: KernelAdapter; resources?: ResourcesHandle },
   bundle: BundleState = NO_BUNDLE,
   rootOverride?: string,
 ) {
@@ -167,6 +168,19 @@ test("bridge-health reports a degraded lsp watch with its reason", async () => {
   lsp.watchStatus = () => ({ state: "degraded", reason: "the workspace root is the home directory" });
   const body = await call(LIVE, "bridge-health", { lsp });
   assert.equal(body.families[1].watch, "degraded (the workspace root is the home directory)");
+});
+
+test("bridge-health reports what a docs subscription does", async () => {
+  for (const [state, expected] of [
+    [{ state: "off" }, "off"],
+    [{ state: "static" }, "static"],
+    [{ state: "watching" }, "watching"],
+    [{ state: "degraded", reason: "ENOSPC" }, "degraded (ENOSPC)"],
+  ] as const) {
+    const body = await call(LIVE, "bridge-health", { resources: { subscriptionWatch: () => state } });
+    assert.equal(body.families[0].subscriptions, expected);
+  }
+  assert.equal((await call(LIVE, "bridge-health")).families[0].subscriptions, undefined);
 });
 
 test("bridge-health reports the launch source and child state of a live family", async () => {
