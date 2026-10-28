@@ -17,6 +17,9 @@ export interface PromptArgumentSpec {
   readonly description: string;
   readonly required: boolean;
   readonly maxLength: number;
+  /** When set, a supplied value must match it; `patternHint` says what is accepted. */
+  readonly pattern?: RegExp;
+  readonly patternHint?: string;
 }
 
 export interface PromptDefinition {
@@ -44,3 +47,7 @@ export function toListedPrompt(def: PromptDefinition): Prompt {
 /** Argument bounds, in characters. */
 export const SHORT_ARG_MAX = 256;
 export const LONG_ARG_MAX = 65_536;
+
+/** A name, never a path: lowercase letters, digits and hyphens, starting with a letter or digit. */
+export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+export const SLUG_MAX = 64;

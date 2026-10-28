@@ -1,5 +1,5 @@
 import { astSchemaMessage, fenced, NEEDS_LOCAL_SERVER, scopingRulesMessage, text } from "./context.js";
-import { SHORT_ARG_MAX, type PromptDefinition } from "./types.js";
+import { SHORT_ARG_MAX, SLUG_MAX, SLUG_PATTERN, type PromptDefinition } from "./types.js";
 
 export const authorDomain: PromptDefinition = {
   name: "author-domain",
@@ -15,13 +15,16 @@ export const authorDomain: PromptDefinition = {
     },
     {
       name: "area",
-      description: "Optional bounded area; selects docs/briefs/<area>.brief.yaml.",
+      description: "Optional bounded area, a slug (lowercase letters, digits, hyphens); selects docs/briefs/<area>.brief.yaml.",
       required: false,
-      maxLength: SHORT_ARG_MAX,
+      maxLength: SLUG_MAX,
+      pattern: SLUG_PATTERN,
+      patternHint: "an area is a name, never a path: lowercase letters, digits and hyphens, starting with a letter or digit",
     },
   ],
   render(ctx, args) {
-    const area = args.area?.trim();
+    // `area` passed the slug check at the validation layer, so it is a name and cannot alter the path it is spliced into.
+    const area = args.area;
     const briefPath =
       area !== undefined && area.length > 0
         ? `docs/briefs/${area}.brief.yaml`

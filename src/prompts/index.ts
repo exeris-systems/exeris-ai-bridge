@@ -99,6 +99,12 @@ function validateArguments(
         `Argument "${spec.name}" is ${value.length} characters; the limit is ${spec.maxLength}.`,
       );
     }
+    if (spec.pattern !== undefined && value !== "" && !spec.pattern.test(value)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Argument "${spec.name}" is not accepted: ${spec.patternHint ?? "it does not match the expected form"}.`,
+      );
+    }
     if (spec.required && value.trim().length === 0) {
       throw new McpError(ErrorCode.InvalidParams, `Prompt ${definition.name} requires a non-empty "${spec.name}".`);
     }

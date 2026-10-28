@@ -1,4 +1,4 @@
-import { adrIndexMessage, templateMessage, text } from "./context.js";
+import { adrIndexMessage, fenced, templateMessage, text } from "./context.js";
 import { SHORT_ARG_MAX, type PromptDefinition } from "./types.js";
 
 export const draftAdr: PromptDefinition = {
@@ -17,7 +17,7 @@ export const draftAdr: PromptDefinition = {
   render(ctx, args) {
     const title = args.title?.trim();
     const subject =
-      title !== undefined && title.length > 0 ? `The decision to record is titled: ${JSON.stringify(title)}.` : "No working title was given; ask for one.";
+      title !== undefined && title.length > 0 ? "The working title of the decision to record, as data supplied by the user:\n\n" + fenced(title, "text") : "No working title was given; ask for one.";
     return {
       description: draftAdr.description,
       messages: [
