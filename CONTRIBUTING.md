@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-10-21
+last-verified: 2026-10-28
 ---
 
 # Contributing to `exeris-ai-bridge`
@@ -33,6 +33,8 @@ The bridge is a **separate process in a separate language** from the Java kernel
                    └──────────────────┘   └──────────────────┘   └──────────────────────────┘
 ```
 
+The diagram shows the sources behind the ecosystem families. The application-developer families need none of them: `build-*` and `caps-*` read the project's own build output, `sdk-*` and `build-get_starter` read the reference data bundled in the package, and `docs-*` answers from a bundled snapshot when there is no `exeris-docs` checkout. One tool starts a further process, per call: `build-preview_generation` runs the project's pinned generator (`java -jar` the `exeris-codegen-cli` jar, or `node` the installed `exeris-gen`) into a scratch directory and removes it when the call returns.
+
 The repository is named *bridge*, not *mcp*: MCP is the first protocol surface, but the mission is
 to bridge Exeris semantic surfaces to AI agents, and adjacent integrations (Claude Skills bundles,
 agent-SDK adapters, later protocols) live here when they share that responsibility.
@@ -41,7 +43,7 @@ agent-SDK adapters, later protocols) live here when they share that responsibili
 
 - **Node 20+**, TypeScript 5.6+, ES2023 target.
 - [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) for the MCP server runtime.
-- Stdio transport for local agent integration; a Streamable HTTP transport for a hosted endpoint serving the public families (`docs:*`, `sdk:*`, `bridge:*`) is planned for 0.10.0.
+- Stdio transport for local agent integration; a Streamable HTTP transport for a hosted endpoint serving the public families (`docs-*`, `sdk-*`, `bridge-*`) is planned for 0.10.0.
 
 ## Build & test
 
@@ -112,13 +114,13 @@ reference data until `npm run vendor:data` runs; `bridge-version` says which sta
 
 ## Try it end to end
 
-Once wired in, the bridge answers ecosystem-introspection questions directly from `exeris-docs`. A representative session — *"list all ADR-024-related context"*:
+Once wired in, the bridge answers ecosystem-introspection questions directly from the `exeris-docs` registry, read from a checkout or, without one, from the bundled snapshot. A representative session — *"list all ADR-024-related context"*:
 
 | Agent intent | Tool call | Returns |
 | :--- | :--- | :--- |
-| Enumerate the registry | `docs-list_adrs` | structured rows `{ number, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
-| Read the decision in full | `docs-get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer**, padded forms like `024` are normalized) |
-| Find every mention | `docs-search` `{ "query": "ADR-024", "maxResults": 5 }` | `{ path, line, snippet }[]` hits across the docs tree, with `truncated` / safety caps |
+| Enumerate the registry | `docs-list_adrs` | structured rows `{ number, numberPadded, title, owningRepo, scope, visibility, status, link }[]` (optional `status` filter) |
+| Read the decision in full | `docs-get_adr` `{ "number": 24 }` | the authoritative ADR-024 markdown body (`number` is an **integer** of at least 1; a string such as `"024"` is rejected) |
+| Find every mention | `docs-search` `{ "query": "ADR-024", "maxResults": 5 }` | `hits` of `{ path, line, snippet }` across the docs tree, with `hitCount` and `truncated` / safety caps |
 
 You can drive the same handshake without an agent — pipe newline-delimited JSON-RPC straight at the stdio server:
 
@@ -131,30 +133,40 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 33 tool definitions (9 `docs:*`, 4 `lsp:*`, 4 `kernel:*`, 7 `build:*`, 2 `caps:*`, 5 `sdk:*`, 2 `bridge:*` — all live); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 33 tool definitions (9 `docs-*`, 4 `lsp-*`, 4 `kernel-*`, 7 `build-*`, 2 `caps-*`, 5 `sdk-*`, 2 `bridge-*`); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repository layout
 
 ```text
 src/
-  server.ts                  MCP server entry, tool registry, stdio transport
+  server.ts                  MCP server entry: composes the tool registries, resources and prompts
+                             over the stdio transport
   instructions.ts            the `initialize` instructions handed to the model at connect time
+  version.ts                 the package version, read from package.json
   config/env.ts              fail-soft env resolution: modes, per-family availability, launch ladder
   config/maven.ts            local Maven repository probing — offline, coordinate in / jar path out
+  config/pom.ts              bounded, sandboxed pom.xml reading shared by SDK skew and the tooling pin
   config/tooling-pin.ts      the tooling version a project pins — app-parent, codegen plugin, or the
                              installed @exeris/codegen-ts; shared by generator resolution and skew
   fs/sandbox.ts              path-sandbox guard — reads resolve under a pinned root
+  fs/watch.ts                bounded, root-confined directory watcher with glob matching — the LSP
+                             workspace and the docs registry index subscription share it
+  process/exit-hooks.ts      process-wide cleanup at exit: generator process groups, scratch
+                             directories and watchers
   transport/
     lsp-framing.ts           LSP base-protocol (Content-Length) message codec
-    lsp-client.ts            JSON-RPC client over a child exeris-platform-lsp process
+    lsp-client.ts            JSON-RPC client over a child exeris-platform-lsp process, including the
+                             watched-files forwarding behind the `watch` field of `bridge-health`
     ndjson-framing.ts        newline-delimited JSON message codec (kernel CLI)
     kernel-adapter.ts        NDJSON client over a child exeris-kernel-diagnostics-cli process
   tools/
     types.ts                 Shared ToolDefinition / ToolHandler types
     unavailable.ts           per-family availability guard for dark families
     docs/
-      index.ts               docs:* — 9 filesystem-bound tools (list/get ADRs, templates,
+      index.ts               docs-* — 9 filesystem-bound tools (list/get ADRs, templates,
                              HLA, whitepaper, search, per-repo docs surface)
+      content.ts             registry-tier reads (index, ADR, HLA, whitepaper, templates, drift
+                             patterns) shared by the tools, the resources and the prompts
       adr-index.ts           parser for exeris-docs/adr-index.md
     lsp/index.ts             lsp-list_domains, lsp-describe_domain, lsp-list_actions,
                              lsp-preview_mutation — LSP proxy (bound to the exeris/* slice,
@@ -167,11 +179,11 @@ src/
                              per SPI method (cap-blind — no list_capabilities)
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
                              Subsystem/RuntimeErgonomics)
-    build/index.ts           build-list_domains, build-get_domain_metadata,
-                             build-explain_artefacts, build-get_detach_state,
-                             build-explain_diagnostic — reads the
-                             annotation processor's own output in target/classes/exeris-metadata
-                             and the codegen output tree in src/main/generated/java
+    build/index.ts           registers the seven build-* tools; build-list_domains,
+                             build-get_domain_metadata, build-get_detach_state and
+                             build-explain_diagnostic read the annotation processor's own output
+                             in target/classes/exeris-metadata and the codegen output tree in
+                             src/main/generated/java
     build/starter.ts         build-get_starter — pom.xml / package.json for a new application, from
                              the vendored exeris-app-bom triple; bundled data only, writes nothing
     build/tooling-skew.ts    toolingSkew — the project's pinned tooling release against the one the
@@ -181,9 +193,24 @@ src/
     build/artefacts.ts       codegen-manifest parse + per-path explanation (which generator,
                              what drove it, candidates[] when a path is ambiguous), from the
                              vendored generator catalogue; reads what was emitted, never predicts it
-    build/diagnostics.ts     catalogue of the build's own diagnostics, keyed on the ADR-095
+    build/diagnostics.ts     decoding of the build's own diagnostics, keyed on the ADR-095
                              EXT-<AREA>-<NNNN> identifier (text anchors only for output from
                              tooling before 0.9.0); an unknown identifier is reported, not guessed
+    build/diagnostics-catalogue.ts  the identifier catalogue diagnostics.ts looks up
+    build/preview/           build-preview_generation, the only tool that starts a generator
+      tool.ts                the tool: validate the metadata, resolve the generator, run it, diff
+      validate-metadata.ts   the metadata corpus check that runs before any generator starts
+      resolve-generator.ts   the pinned generator, locally — the exeris-codegen-cli jar in the
+                             local Maven repository, or exeris-gen in the project's node_modules —
+                             and its launch; never downloaded, never substituted
+      workdir.ts             the scratch directory, proven to lie outside the project and
+                             ecosystem roots
+      runner.ts              bounded child-process run: timeout, output cap, process-group kill,
+                             a fixed environment allowlist
+      seed.ts                copies the project's committed generated tree into the scratch output
+      ts-config.ts           the TypeScript generator's output root, from the project's codegen config
+      diff.ts                lists what the run produced and diffs it against the committed tree
+      cleanup.ts             re-exports the exit registry for the preview modules
     caps/index.ts            caps-list_capabilities, caps-describe_composition — reads the
                              build-time cap-manifest.json of the user's own project; never
                              re-resolves the @Requires→@Provides DAG
@@ -197,12 +224,28 @@ src/
                              exeris.sdk.version property, or the app BOM chain in the local ~/.m2
     bridge/index.ts          bridge-version, bridge-health — the bridge's own diagnostic
                              surface (never gated, never spawns)
+  resources/
+    docs.ts                  the exeris://docs/* resource lists and reads, over docs/content.ts
+    subscriptions.ts         resources/subscribe for exeris://docs/adr-index, on the shared watcher
+    index.ts                 wires the resource handlers and the subscription state to the server
+  prompts/
+    index.ts                 the eight stateless prompt templates: list, argument validation, render
+    context.ts               what a prompt embeds — docs resources and bundled SDK data
+    types.ts                 prompt definition shape and the argument bounds
+    *.ts                     one file per prompt (author-domain, diagnose-build-failure, draft-adr,
+                             explain-my-build, migrate-sdk-version, review-three-tier-violations,
+                             route-this-task, wall-audit)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,
                              per-entry SHA-256 verification, sandboxed to data/
   data/generator-catalogue.ts  loader and matcher for the vendored exeris-tooling generator
                              catalogue (ADR-097); never throws, reports why it is absent
   data/app-starter.ts        reads the tested tooling + kernel + SDK triple out of the exeris-app-bom
                              POMs (ADR-091) at pack time and loads it back; never throws
+  data/docs-snapshot.ts      loads the bundled docs registry snapshot and verifies every digest
+  data/docs-snapshot-build.ts  assembles that snapshot at pack time from each repository's default
+                             branch (or a directory named by EXERIS_DOCS_SNAPSHOT_SOURCE)
+  data/vendor-resolver.ts    finds the released jars and POMs in the local Maven repository and
+                             extracts the corpus entries from them at pack time
 scripts/
   vendor-reference-data.mjs  generates + verifies data/ at pack time (`prepack`)
   p2-smoke.mjs               zero-checkout smoke test — packs, installs and interrogates
@@ -210,13 +253,16 @@ scripts/
   build-mcpb.mjs             builds the Claude Desktop bundle (.mcpb) from the npm tarball
 server.json                  MCP Registry entry; held equal to package.json by a test
 docs/
+  configuration.md           how each EXERIS_* variable resolves
+  repo-review-rules.md       this repository's step of the organisation's pull request review
   adr/
     ADR-025-ai-agent-bridge.md   Founding ADR (authoritative copy — cross-repo per ADR-020)
+    ADR-0NN.link.md          stubs for the cross-repo decisions this repository consumes
 ```
 
 ## Releasing
 
-A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag: it checks the tag against `package.json` and `server.json`, runs the tests and `smoke:p2`, packs the tarball (prepack vendors the SDK reference data and the docs registry snapshot, strictly), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. It needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java`, and the application starter from the `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs (`0.10.0`). Both jars are fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
+A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag, and the whole run for a manual dispatch against an existing tag: it checks the tag against `package.json` and `server.json`, fetches the vendored artefacts with Maven, runs the tests and `smoke:p2`, packs the tarball (prepack vendors, strictly, the SDK reference data, the generator catalogue, the application starter and the docs registry snapshot), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. The fetched artefacts are the two `exeris-sdk` jars (`exeris-sdk-annotations`, `exeris-sdk-source-model`), the `exeris-codegen-java` jar and the `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs. The job needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog and AST schema are vendored from (`0.12.0`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java`, and the application starter from the three POMs (`0.10.0`). Everything is fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only for the two SDK jars, and only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
 
 Publishing runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, in two jobs.
 

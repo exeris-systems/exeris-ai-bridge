@@ -42,6 +42,9 @@ The server is also listed in the [MCP Registry](https://registry.modelcontextpro
 - Node 20 or newer.
 - `kernel-*` only: JDK 25 or newer, and `eu.exeris:exeris-kernel-diagnostics-cli` in your local
   Maven repository, which a build of an Exeris application puts there.
+- `build-preview_generation` only: for `java`, JDK 25 or newer and `eu.exeris:exeris-codegen-cli`,
+  at the tooling version your project pins, in your local Maven repository; for `ts`,
+  `@exeris/codegen-ts` in your project's own `node_modules`.
 - No network at run time. The bridge reads artefacts already in `~/.m2` and never downloads.
 
 ## Tools
@@ -51,7 +54,7 @@ missing answers with a structured `family_unavailable` result naming the reason 
 
 | Family | Answers | Tools |
 | --- | --- | --- |
-| `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means, and the build files for a new application, what the generator would write now; whether your project pins a different tooling release than the bundled generator catalogue (`toolingSkew`) | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic`, `build-get_starter`, `build-preview_generation` |
+| `build-*` | What your last build emitted, which files codegen owns, what a build diagnostic means, the build files for a new application, and what the generator would write now; `toolingSkew` says whether your project pins a different tooling release than the bundled generator catalogue | `build-list_domains`, `build-get_domain_metadata`, `build-explain_artefacts`, `build-get_detach_state`, `build-explain_diagnostic`, `build-get_starter`, `build-preview_generation` |
 | `caps-*` | The capability composition your build validated | `caps-list_capabilities`, `caps-describe_composition` |
 | `sdk-*` | The SDK's annotations, deprecations, scoping rules and AST schema; whether your project pins a different SDK | `sdk-list_annotations`, `sdk-describe_annotation`, `sdk-list_deprecations`, `sdk-get_scoping_rules`, `sdk-get_ast_schema` |
 | `docs-*` | The Exeris ADRs, the high-level architecture, the whitepaper and the decision templates | `docs-list_adrs`, `docs-get_adr`, `docs-search`, `docs-get_hla`, `docs-get_whitepaper`, `docs-get_template`, `docs-list_repos`, `docs-list_repo_docs`, `docs-get_repo_doc` |
@@ -60,7 +63,8 @@ missing answers with a structured `family_unavailable` result naming the reason 
 | `bridge-*` | The server itself: version, bundled data, and why a family is unavailable | `bridge-version`, `bridge-health` |
 
 `docs-list_repos`, `docs-list_repo_docs` and `docs-get_repo_doc` need a checkout of the Exeris
-repositories; the other `docs-*` tools answer from a registry snapshot bundled in the package.
+repositories; the other `docs-*` tools answer from a checkout when there is one, and otherwise from a
+registry snapshot bundled in the package.
 `lsp-*` needs a locally built `exeris-platform-lsp`, which publishes no runnable jar yet.
 
 ## Resources
@@ -94,11 +98,12 @@ messages built from its template and the arguments you give it: the bridge keeps
 loop and calls no model or tool. Where a step needs a tool, the prompt tells the agent to call it.
 Context is embedded as resource messages (the `exeris://docs/*` resources) or as bundled SDK data;
 where it cannot be embedded, the prompt says which resource to read instead. Arguments are strings,
-at most 256 characters, except `diff` (64 KiB) and `output` (64,000 characters).
+at most 256 characters, except `diff` (65,536 characters), `output` (64,000) and `area` (64, lowercase
+letters, digits and hyphens).
 
 | Prompt | Arguments | Pre-loads | Needs a local server |
 | --- | --- | --- | --- |
-| `review-three-tier-violations` | `diff?` | HLA, ADR-006, ADR-024, the cap-tier Wall rule | no |
+| `review-three-tier-violations` | `diff?` | HLA, ADR-006, ADR-024, the drift-patterns policy, the cap-tier Wall rule | no |
 | `draft-adr` | `title?` | ADR template, registry index | no |
 | `route-this-task` | `task` | the ecosystem's routing rules, from an ecosystem checkout only | no |
 | `wall-audit` | `target?` | ADR-006 | no |
@@ -107,9 +112,9 @@ at most 256 characters, except `diff` (64 KiB) and `output` (64,000 characters).
 | `diagnose-build-failure` | `output` | SDK deprecation list | the `build-explain_diagnostic` step |
 | `migrate-sdk-version` | `targetVersion?` | SDK deprecation list | no |
 
-`route-this-task` without an ecosystem checkout answers that routing needs one and names the remedy
-(`EXERIS_ECOSYSTEM_ROOT`, or running from a checkout). An unknown prompt, an unknown argument, a
-missing required argument or one over its bound is rejected as invalid params.
+`route-this-task` without an ecosystem checkout answers that routing needs one and names a remedy.
+An unknown prompt, an unknown argument, a missing required argument or one over its bound is
+rejected as invalid params.
 
 ## Configuration
 
@@ -124,7 +129,7 @@ from booting.
 | `EXERIS_KERNEL_COMMAND` / `EXERIS_KERNEL_JAR` | resolved from the local repository | Launch the kernel diagnostics CLI explicitly |
 | `EXERIS_LSP_COMMAND` / `EXERIS_LSP_JAR` | none | Launch `exeris-platform-lsp` |
 | `EXERIS_LSP_WORKSPACE` | the working directory | The workspace the language server indexes |
-| `EXERIS_DOCS_ROOT` | the bundled snapshot | An `exeris-docs` checkout to read instead |
+| `EXERIS_DOCS_ROOT` | a sibling `exeris-docs` checkout if present, else the bundled snapshot | The `exeris-docs` checkout to read |
 | `EXERIS_BRIDGE_MODE` | `app` | `contributor` for work on Exeris itself: source checkouts win over published jars |
 
 How each variable resolves, the launch ladder for the Java children, and the bundled reference
@@ -136,7 +141,7 @@ data are described in the
 Call `bridge-health`. It reports every family's state, with the reason and the remedy for each
 one that is unavailable, without starting any child process. `bridge-version` reports the build
 and the upstream releases its bundled data came from. The server also writes a one-line summary
-(`mode=… docs=… lsp=… kernel=… build=… caps=…`) to stderr, which MCP clients show in their logs.
+(`mode=… docs=… lsp=… kernel=… build=… caps=… sdk=…`) to stderr, which MCP clients show in their logs.
 
 ## Versioning
 
