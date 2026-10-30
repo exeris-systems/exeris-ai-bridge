@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { deflateRawSync } from "node:zlib";
 
 // A jar built from named entries, for tests that need a Maven artefact whose
-// contents they control. Entries are stored, not compressed: `unzip -p` reads
-// them the same, and the writer stays a few lines of code.
+// contents they control. Entries are stored unless deflate is asked for.
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -21,22 +21,29 @@ function crc32(data: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** Write a jar at `path` holding `entries` (name to text), creating its directory. */
-export function writeJar(path: string, entries: Readonly<Record<string, string>>): void {
+/** Write a jar at `path` holding `entries` (name to text), stored or deflated, creating its directory. */
+export function writeJar(
+  path: string,
+  entries: Readonly<Record<string, string>>,
+  options: { readonly deflate?: boolean } = {},
+): void {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(entries)) {
     const nameBytes = Buffer.from(name, "utf8");
-    const data = Buffer.from(text, "utf8");
-    const crc = crc32(data);
+    const raw = Buffer.from(text, "utf8");
+    const data = options.deflate === true ? deflateRawSync(raw) : raw;
+    const method = options.deflate === true ? 8 : 0;
+    const crc = crc32(raw);
 
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
+    local.writeUInt32LE(raw.length, 22);
     local.writeUInt16LE(nameBytes.length, 26);
     locals.push(local, nameBytes, data);
 
@@ -44,9 +51,10 @@ export function writeJar(path: string, entries: Readonly<Record<string, string>>
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
+    central.writeUInt32LE(raw.length, 24);
     central.writeUInt16LE(nameBytes.length, 28);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, nameBytes);

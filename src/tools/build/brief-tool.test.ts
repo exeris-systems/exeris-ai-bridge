@@ -268,7 +268,7 @@ test("a project with no briefs says none exist and never says ready", async () =
     assert.ok(!res.isError, raw);
     assert.equal(payload?.present, false);
     assert.deepEqual(payload?.briefs, []);
-    assert.match(String(payload?.reason), /No briefs exist/);
+    assert.match(String(payload?.notice), /No briefs exist/);
     assert.equal(raw.includes('"ready": true'), false);
   }
 });
@@ -651,6 +651,145 @@ test("the brief schema states no format keyword, so skipping format validation l
   };
   walk(JSON.parse(SCHEMA_TEXT), "");
   assert.deepEqual(formats, []);
+});
+
+// ---- skew is the schema used against the pin ----------------------------------------------
+
+test("a project schema that matches the pin is aligned and carries no warning", async () => {
+  const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m");
+  assert.equal(b.skew.schemaSource, "project");
+  assert.equal(b.skew.status, "aligned");
+  assert.equal(b.skew.warning, undefined);
+});
+
+test("a pin whose jar is absent falls back to the bundled schema, and a newer brief is not validated against it", async () => {
+  const newer = fixture("ready").replace("briefSchema: 0.13.0", "briefSchema: 0.14.0");
+  const root = project({ sdk: "0.14.0", briefs: { "n.brief.yaml": newer, "o.brief.yaml": fixture("minimal") } });
+  const n = await one(root, "n", undefined, emptyM2());
+  assert.equal(n.skew.schemaSource, "bundled");
+  assert.equal(n.skew.schemaSdkVersion, "0.13.1");
+  assert.equal(n.skew.projectSdkVersion, "0.14.0");
+  assert.equal(n.skew.status, "skew_detected");
+  assert.match(String(n.skew.warning), /bundled with this bridge, from 0\.13\.1/);
+  assert.match(String(n.skew.warning), /0\.14\.0 is newer/);
+  assert.equal(n.valid, false);
+  assert.equal(n.ready, false);
+  assert.equal(n.errors[0].path, "/briefSchema");
+  assert.match(n.errors[0].message, /newer than the SDK 0\.13\.1 whose brief schema was used/);
+  // A brief at the schema's own release is validated, with the skew still reported.
+  const o = await one(root, "o", undefined, emptyM2());
+  assert.equal(o.valid, true);
+  assert.equal(o.skew.status, "skew_detected");
+});
+
+test("with no readable pin a brief newer than the schema used is still not validated", async () => {
+  const newer = fixture("ready").replace("briefSchema: 0.13.0", "briefSchema: 0.14.0");
+  const b = await one(project({ sdk: null, briefs: { "n.brief.yaml": newer } }), "n");
+  assert.equal(b.skew.projectSdkVersion, undefined);
+  assert.equal(b.skew.schemaSdkVersion, "0.13.1");
+  assert.equal(b.skew.status, "skew_detected");
+  assert.equal(b.valid, false);
+  assert.equal(b.errors[0].path, "/briefSchema");
+  assert.equal(b.skew.briefSchema, "0.14.0");
+});
+
+// ---- the jar is read in-process, and a failure says what failed ----------------------------
+
+test("a corrupt pinned jar is reported as unreadable with its cause, not as lacking the entry", async () => {
+  const repo = emptyM2();
+  const jar = join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar");
+  mkdirSync(dirname(jar), { recursive: true });
+  writeFileSync(jar, Buffer.alloc(300, 1));
+  const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m", undefined, repo);
+  assert.equal(b.skew.schemaSource, "bundled");
+  assert.match(String(b.skew.note), /could not be read from .*end-of-central-directory/);
+  assert.equal(/carries no/.test(String(b.skew.note)), false);
+  assert.equal(b.valid, true);
+});
+
+test("a pinned jar without the entry says it carries none", async () => {
+  const repo = emptyM2();
+  writeJar(join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar"), { "x.txt": "y" });
+  const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m", undefined, repo);
+  assert.match(String(b.skew.note), /carries no META-INF\/exeris\/brief-schema\.json/);
+});
+
+test("a deflated schema in the pinned jar is used", async () => {
+  const repo = emptyM2();
+  writeJar(
+    join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar"),
+    { [ENTRY]: stricterSchema() },
+    { deflate: true },
+  );
+  const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m", undefined, repo);
+  assert.equal(b.skew.schemaSource, "project");
+  assert.equal(b.valid, false);
+});
+
+// ---- the frozen top-level shape ------------------------------------------------------------
+
+test("a call with briefs and a call with none answer with the same keys", async () => {
+  const none = (await run(project())).payload!;
+  const some = (await run(project({ briefs: { "a.brief.yaml": fixture("minimal") } }))).payload!;
+  assert.deepEqual(Object.keys(none).sort(), Object.keys(some).sort());
+  assert.deepEqual(Object.keys(some).sort(), ["briefs", "ignored", "ignoredTruncated", "notice", "present", "referenceSource"]);
+  assert.equal(some.present, true);
+  assert.equal(none.present, false);
+});
+
+test("present means a brief file was read: an area with no file is not present", async () => {
+  const { payload } = await run(project({ briefs: { "a.brief.yaml": fixture("minimal") } }), { area: "zzz" });
+  assert.equal(payload?.present, false);
+  assert.equal(payload?.briefs.length, 1);
+  assert.equal(payload?.briefs[0].ready, false);
+});
+
+test("the ignored list is capped and says when it was cut", async () => {
+  const briefs: Record<string, string> = { "a.brief.yaml": fixture("minimal") };
+  for (let i = 0; i < 25; i += 1) briefs[`Bad${i}.brief.yaml`] = "x";
+  const { payload } = await run(project({ briefs }));
+  assert.equal((payload?.ignored as string[]).length, 20);
+  assert.equal(payload?.ignoredTruncated, true);
+});
+
+test("reference resolution that never ran is not_read, and one that found no directory is absent", async () => {
+  const unparsable = await run(project({ briefs: { "a.brief.yaml": "- x\n" } }));
+  assert.equal((unparsable.payload?.referenceSource as { state: string }).state, "not_read");
+  const built = await run(project({ briefs: { "a.brief.yaml": fixture("minimal") } }));
+  assert.equal((built.payload?.referenceSource as { state: string }).state, "absent");
+});
+
+test("a metadata directory that is a symlink out of the project is unusable, not absent", async () => {
+  const outside = scratch("exeris-brief-outside-");
+  writeFileSync(join(outside, "Invoice.json"), JSON.stringify(INVOICE["Invoice.json"]));
+  const root = project({ briefs: { "r.brief.yaml": fixture("ready") } });
+  mkdirSync(join(root, "target", "classes"), { recursive: true });
+  symlinkSync(outside, join(root, "target", "classes", "exeris-metadata"));
+  const { payload } = await run(root, { area: "r" });
+  const source = payload?.referenceSource as { state: string; reason: string };
+  assert.equal(source.state, "unusable");
+  assert.match(source.reason, /sandbox escape/);
+  assert.equal(payload?.briefs[0].unchecked.length, 3);
+});
+
+test("metadata beyond the total byte cap is unusable and the cap is named", async () => {
+  const root = project({ briefs: { "r.brief.yaml": fixture("ready") } });
+  const dir = join(root, "target", "classes", "exeris-metadata");
+  mkdirSync(dir, { recursive: true });
+  const pad = "x".repeat(900 * 1024);
+  for (let i = 0; i < 19; i += 1) {
+    writeFileSync(join(dir, `E${i}.json`), JSON.stringify({ schemaVersion: "1", entityName: `E${i}`, packageName: "p", pad }));
+  }
+  const { payload } = await run(root, { area: "r" });
+  const source = payload?.referenceSource as { state: string; reason: string };
+  assert.equal(source.state, "unusable");
+  assert.match(source.reason, /16777216 bytes/);
+});
+
+test("the definition names the pom chain read from the local Maven repository and the not-validated outcome", () => {
+  const description = toolFor(null).definition.description ?? "";
+  assert.match(description, /app BOM poms it inherits from/);
+  assert.match(description, /valid:false, ready:false with the skew reported, and is not validated/);
 });
 
 test("the fixture directory holds exactly the SDK's nine briefs", () => {

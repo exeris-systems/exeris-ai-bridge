@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ProjectConfig } from "../../config/env.js";
-import { resolveInside } from "../../fs/sandbox.js";
+import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import { referenceKey } from "./brief.js";
 import { classifyMetadataFile, parseMetadataEnvelope } from "./shapes.js";
 
@@ -18,6 +18,9 @@ export const MAX_SOURCE_FILES = 2_000;
 
 /** Largest single metadata file read, in bytes. */
 export const MAX_SOURCE_FILE_BYTES = 1024 * 1024;
+
+/** Most metadata bytes read across all files for one call. */
+export const MAX_SOURCE_TOTAL_BYTES = 16 * 1024 * 1024;
 
 export type BriefSource =
   | { readonly state: "absent" }
@@ -36,7 +39,10 @@ export function readBriefSource(project: ProjectConfig): BriefSource {
   let dir: string;
   try {
     dir = resolveInside(project.projectRoot, join(project.projectRoot, METADATA_DIR));
-  } catch {
+  } catch (err) {
+    if (err instanceof SandboxEscapeError && err.resolved !== null) {
+      return { state: "unusable", reason: `${METADATA_DIR} resolves outside the project root (sandbox escape); it was not read.` };
+    }
     return { state: "absent" };
   }
   let names: string[];
@@ -51,11 +57,17 @@ export function readBriefSource(project: ProjectConfig): BriefSource {
   }
 
   const elements = new Set<string>();
+  let total = 0;
   for (const file of files) {
     try {
       const path = resolveInside(dir, join(dir, file));
-      if (statSync(path).size > MAX_SOURCE_FILE_BYTES) {
+      const size = statSync(path).size;
+      if (size > MAX_SOURCE_FILE_BYTES) {
         return { state: "unusable", reason: `${METADATA_DIR}/${file} is larger than ${MAX_SOURCE_FILE_BYTES} bytes.` };
+      }
+      total += size;
+      if (total > MAX_SOURCE_TOTAL_BYTES) {
+        return { state: "unusable", reason: `${METADATA_DIR} holds more than ${MAX_SOURCE_TOTAL_BYTES} bytes of domain files.` };
       }
       const envelope = parseMetadataEnvelope(JSON.parse(readFileSync(path, "utf8")), file);
       addElements(elements, envelope.entityName, envelope.packageName, envelope.metadata);

@@ -124,6 +124,8 @@ export function compileBriefSchema(schemaText: string): BriefValidator {
   const cached = compiled.get(key);
   if (cached !== undefined) return cached;
 
+  // The schema text comes from the bundle or from the user's own local Maven
+  // repository, never from tool input.
   // A fresh instance per schema: two schemas can share an $id, and one
   // instance refuses to hold both. Unknown keywords (the SDK's x-exeris-*
   // annotations) are ignored; nothing is fetched, so a remote $ref cannot load.

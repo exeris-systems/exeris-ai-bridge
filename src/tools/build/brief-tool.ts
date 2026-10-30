@@ -1,15 +1,15 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ProjectConfig, Unavailable } from "../../config/env.js";
 import { findArtifactJar, resolveLocalRepository } from "../../config/maven.js";
 import { assertBriefSchemaFormat, BriefSchemaFormatError, type BriefSchemaState } from "../../data/brief-schema.js";
-import { extractFromJar } from "../../data/vendor-resolver.js";
+import { readJarEntry } from "../../data/jar-entry.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
-import { computeVersionSkew, resolveProjectSdkVersion, type VersionSkewReport } from "../sdk/skew.js";
+import { resolveProjectSdkVersion, type SdkVersionResolution } from "../sdk/skew.js";
 import {
   compareCore,
   compileBriefSchema,
@@ -26,8 +26,9 @@ import {
 import { readBriefSource, type BriefSource } from "./brief-source.js";
 
 // build-validate_brief. Reads docs/briefs/*.brief.yaml of the user's project and
-// the brief schema; writes nothing and opens no network connection. The brief
-// contract is the SDK's (ADR-106); this tool is its validator and nothing else.
+// the brief schema; writes nothing, starts no process and opens no network
+// connection. The brief contract is the SDK's (ADR-106); this tool is its
+// validator and nothing else.
 
 /** Where briefs live, relative to the project root. */
 export const BRIEFS_DIR = "docs/briefs";
@@ -37,6 +38,9 @@ export const BRIEF_SUFFIX = ".brief.yaml";
 
 /** Most briefs validated in one call; more than this needs an `area`. */
 export const MAX_BRIEFS = 50;
+
+/** Most stray file names listed under `ignored`. */
+export const MAX_IGNORED = 20;
 
 /** An area is a name, never a path. */
 export const AREA_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -59,7 +63,8 @@ type SchemaSource = "project" | "bundled";
 
 interface Contract {
   readonly validate: BriefValidator;
-  readonly pin: string | null;
+  /** The SDK release a brief is held to: the used schema's own, else the project's pin. */
+  readonly reference: string | null;
   readonly skew: Record<string, unknown>;
 }
 
@@ -72,7 +77,7 @@ export function validateBriefTool(
     definition: {
       name: "build-validate_brief",
       description:
-        `Check the pre-construction brief(s) of this project, docs/briefs/<area>.brief.yaml, against the brief schema (ADR-106) and say whether each is ready for authoring. Reads only the brief files, the project's pom.xml, the brief schema and, when present, target/classes/exeris-metadata; writes nothing and uses no network, and is local only: the family needs the project root, so private product intent never reaches a hosted endpoint. The schema is the one inside the project's pinned eu.exeris:exeris-sdk-source-model jar in the local Maven repository (never downloaded), else the schema bundled with this bridge; \`skew.schemaSource\` says which. A project pinned below SDK ${FIRST_BRIEF_SDK} has no brief contract and gets a reason instead; a brief whose briefSchema is newer than the pinned SDK is reported as skew and not validated. \`valid\` means the schema passes. \`ready\` means valid and no blocking open question is still 'open'; an absent, empty or invalid brief is never ready. \`assumed\` lists the questions decided on credit with their owner. EARS criteria are checked by structure, never by text. Where the project has been built, each fulfilledBy reference is resolved against the emitted DomainMetadata (an entity by qualified class name; an action, rule or saga as <entity>#<member>); \`unresolved\` names those that match nothing and does not change readiness, and without metadata every reference is \`unchecked\`. Optional \`area\` names one brief; without it every brief directly under docs/briefs is validated, up to ${MAX_BRIEFS}.`,
+        `Check the pre-construction brief(s) of this project, docs/briefs/<area>.brief.yaml, against the brief schema (ADR-106) and say whether each is ready for authoring. Reads only the brief files, the project's pom.xml (and the app BOM poms it inherits from, read from the local Maven repository), the brief schema and, when present, target/classes/exeris-metadata; writes nothing, starts no process and uses no network, and is local only: the family needs the project root, so private product intent never reaches a hosted endpoint. The schema is the one inside the project's pinned eu.exeris:exeris-sdk-source-model jar in the local Maven repository (never downloaded), else the schema bundled with this bridge; \`skew.schemaSource\` says which. A project pinned below SDK ${FIRST_BRIEF_SDK} has no brief contract and gets a reason instead. A brief whose briefSchema is newer than the SDK of the schema used is returned valid:false, ready:false with the skew reported, and is not validated. \`valid\` means the schema passes. \`ready\` means valid and no blocking open question is still 'open'; an absent, empty or invalid brief is never ready. \`assumed\` lists the questions decided on credit with their owner. EARS criteria are checked by structure, never by text. Where the project has been built, each fulfilledBy reference is resolved against the emitted DomainMetadata (an entity by qualified class name; an action, rule or saga as <entity>#<member>); \`unresolved\` names those that match nothing and does not change readiness, and without metadata every reference is \`unchecked\`. Optional \`area\` names one brief; without it every brief directly under docs/briefs is validated, up to ${MAX_BRIEFS}.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -109,13 +114,17 @@ export function validateBriefTool(
           `${BRIEFS_DIR} holds ${requested.length} briefs; the limit is ${MAX_BRIEFS} per call. Pass 'area' to validate one.`,
         );
       }
+      const stray = {
+        ignored: names.ignored.slice(0, MAX_IGNORED),
+        ignoredTruncated: names.ignored.length > MAX_IGNORED,
+      };
       if (requested.length === 0) {
         return jsonResult({
           present: false,
           briefs: [],
-          reason: `No briefs exist: ${BRIEFS_DIR} holds no *${BRIEF_SUFFIX} file. Nothing is ready.`,
-          remedy: `Write the discovery brief to ${BRIEFS_DIR}/<area>${BRIEF_SUFFIX} (the brief schema is the resource exeris://sdk/brief-schema), then call this again.`,
-          ...(names.ignored.length === 0 ? {} : { ignored: names.ignored }),
+          referenceSource: describeSource(undefined),
+          ...stray,
+          notice: `No briefs exist: ${BRIEFS_DIR} holds no *${BRIEF_SUFFIX} file, so nothing is ready. Write the discovery brief to ${BRIEFS_DIR}/<area>${BRIEF_SUFFIX} (the brief schema is the resource exeris://sdk/brief-schema), then call this again.`,
         });
       }
 
@@ -123,12 +132,14 @@ export function validateBriefTool(
       if ("result" in contract) return contract.result;
 
       const memo: { source?: BriefSource } = {};
+      let filesRead = 0;
       const briefs = requested.map((name) => {
         const read = dir.kind === "ok" ? readBrief(dir.path, name) : ({ kind: "absent" } as const);
         if (read.kind === "absent") {
           return entry(name, refused(`no brief: ${BRIEFS_DIR}/${name}${BRIEF_SUFFIX} does not exist`), contract.skew);
         }
         if (read.kind === "refused") return entry(name, refused(read.message), contract.skew);
+        filesRead += 1;
 
         const parsed = parseBriefYaml(read.text);
         if (parsed.kind === "invalid") {
@@ -136,15 +147,20 @@ export function validateBriefTool(
         }
         const declared = parsed.value.briefSchema;
         if (
-          contract.pin !== null &&
+          contract.reference !== null &&
           typeof declared === "string" &&
-          (compareCore(declared, contract.pin) ?? 0) > 0
+          (compareCore(declared, contract.reference) ?? 0) > 0
         ) {
-          const warning = `The brief's briefSchema ${declared} is newer than the SDK ${contract.pin} this project pins, so it was not validated.`;
+          const warning = `The brief's briefSchema ${declared} is newer than the SDK ${contract.reference} whose brief schema was used, so it was not validated.`;
           return entry(
             name,
-            refused(`${warning} Raise the project's SDK version, or write the brief against ${contract.pin}.`, "/briefSchema"),
-            { ...contract.skew, status: "skew_detected", briefSchema: declared, warning },
+            refused(`${warning} Raise the project's SDK version to ${declared} or later, or write the brief against ${contract.reference}.`, "/briefSchema"),
+            {
+              ...contract.skew,
+              status: "skew_detected",
+              briefSchema: declared,
+              warning: [contract.skew.warning, warning].filter((w) => typeof w === "string").join(" "),
+            },
           );
         }
 
@@ -158,20 +174,22 @@ export function validateBriefTool(
       });
 
       return jsonResult({
-        present: true,
-        briefsDir: BRIEFS_DIR,
-        count: briefs.length,
+        present: filesRead > 0,
         briefs,
         referenceSource: describeSource(memo.source),
-        ...(names.ignored.length === 0 ? {} : { ignored: names.ignored }),
+        ...stray,
+        notice: null,
       });
     }),
   };
 }
 
 function describeSource(source: BriefSource | undefined) {
-  if (source === undefined || source.state === "absent") {
-    return { state: "absent", note: "target/classes/exeris-metadata does not exist or was not needed, so every fulfilledBy reference is unchecked." };
+  if (source === undefined) {
+    return { state: "not_read", note: "No brief reached reference resolution, so the emitted metadata was not read." };
+  }
+  if (source.state === "absent") {
+    return { state: "absent", note: "target/classes/exeris-metadata does not exist, so every fulfilledBy reference is unchecked." };
   }
   return source.state === "unusable" ? { state: "unusable", reason: source.reason } : { state: "present" };
 }
@@ -231,7 +249,7 @@ type BriefRead =
   | { readonly kind: "absent" }
   | { readonly kind: "refused"; readonly message: string };
 
-/** One brief's text, confined to the briefs directory and bounded in size. */
+/** One brief's text, confined to the briefs directory and read no further than the size limit. */
 function readBrief(dir: string, area: string): BriefRead {
   const file = `${area}${BRIEF_SUFFIX}`;
   let path: string;
@@ -243,20 +261,35 @@ function readBrief(dir: string, area: string): BriefRead {
     }
     return { kind: "absent" };
   }
+  let fd: number | null = null;
   try {
-    const stat = statSync(path);
+    fd = openSync(path, "r");
+    const stat = fstatSync(fd);
     if (!stat.isFile()) return { kind: "refused", message: `${BRIEFS_DIR}/${file} is not a regular file.` };
     if (stat.size > MAX_BRIEF_BYTES) {
       return { kind: "refused", message: `${BRIEFS_DIR}/${file} is ${stat.size} bytes; the limit is ${MAX_BRIEF_BYTES}. It was not read.` };
     }
-    const buffer = readFileSync(path);
-    if (buffer.length > MAX_BRIEF_BYTES) {
+    const buffer = Buffer.alloc(MAX_BRIEF_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const n = readSync(fd, buffer, length, buffer.length - length, length);
+      if (n === 0) break;
+      length += n;
+    }
+    if (length > MAX_BRIEF_BYTES) {
       return { kind: "refused", message: `${BRIEFS_DIR}/${file} is larger than ${MAX_BRIEF_BYTES} bytes. It was not read.` };
     }
-    return { kind: "ok", text: buffer.toString("utf8") };
+    return { kind: "ok", text: buffer.toString("utf8", 0, length) };
   } catch {
     return { kind: "refused", message: `${BRIEFS_DIR}/${file} could not be read.` };
+  } finally {
+    if (fd !== null) closeSync(fd);
   }
+}
+
+function sameVersion(a: string, b: string): boolean {
+  const c = compareCore(a, b);
+  return c === null ? a === b : c === 0;
 }
 
 /**
@@ -271,23 +304,11 @@ function resolveContract(
   const resolution = resolveProjectSdkVersion(project.projectRoot, env);
   const pin = resolution.version !== null && versionCore(resolution.version) !== null ? resolution.version : null;
   const bundledVersion = bundled.state === "available" ? bundledSdkVersion(bundled.text, bundled.sourceArtifact) : "unknown";
-  const base: VersionSkewReport = computeVersionSkew(bundledVersion, project.projectRoot, env);
 
-  const skewOf = (source: SchemaSource, schemaSdkVersion: string, note?: string): Record<string, unknown> => ({
-    ...base,
-    ...(base.status === "unknown" && base.reason === undefined
-      ? {
-          reason:
-            pin === null
-              ? "The project's pinned SDK version could not be read from its pom.xml."
-              : "The bundled brief schema does not state which SDK it came from.",
-        }
-      : {}),
-    ...(pin === null ? {} : { projectSdkVersion: pin }),
-    schemaSource: source,
-    schemaSdkVersion,
-    ...(note === undefined ? {} : { note }),
-  });
+  const skewOf = (source: SchemaSource, schemaSdkVersion: string, note?: string): Record<string, unknown> =>
+    skewReport(resolution, pin, bundledVersion, source, schemaSdkVersion, note);
+  const referenceOf = (schemaSdkVersion: string): string | null =>
+    versionCore(schemaSdkVersion) !== null ? schemaSdkVersion : pin;
 
   if (pin !== null && (compareCore(pin, FIRST_BRIEF_SDK) ?? 0) < 0) {
     return {
@@ -307,12 +328,9 @@ function resolveContract(
   if (pin !== null) {
     const fromProject = projectSchema(pin, env);
     if (fromProject.kind === "ok") {
+      const version = schemaVersionOf(fromProject.text) ?? pin;
       try {
-        return {
-          validate: compileBriefSchema(fromProject.text),
-          pin,
-          skew: skewOf("project", schemaVersionOf(fromProject.text) ?? pin),
-        };
+        return { validate: compileBriefSchema(fromProject.text), reference: referenceOf(version), skew: skewOf("project", version) };
       } catch {
         return {
           result: jsonResult(
@@ -320,7 +338,7 @@ function resolveContract(
               error: "brief_schema_unusable",
               reason: `The brief schema in the project's pinned eu.exeris:exeris-sdk-source-model:${pin} jar cannot be compiled as JSON Schema draft 2020-12.`,
               remedy: "Rebuild or re-download that SDK release into the local Maven repository.",
-              skew: skewOf("project", pin),
+              skew: skewOf("project", version),
             },
             true,
           ),
@@ -352,7 +370,11 @@ function resolveContract(
     };
   }
   try {
-    return { validate: compileBriefSchema(bundled.text), pin, skew: skewOf("bundled", bundledVersion, note) };
+    return {
+      validate: compileBriefSchema(bundled.text),
+      reference: referenceOf(bundledVersion),
+      skew: skewOf("bundled", bundledVersion, note),
+    };
   } catch {
     return {
       result: jsonResult(
@@ -366,6 +388,50 @@ function resolveContract(
       ),
     };
   }
+}
+
+/**
+ * The `sdk-*` skew shape, computed from the SDK release of the schema actually
+ * used against the release the project pins.
+ */
+function skewReport(
+  resolution: SdkVersionResolution,
+  pin: string | null,
+  bundledVersion: string,
+  source: SchemaSource,
+  schemaSdkVersion: string,
+  note: string | undefined,
+): Record<string, unknown> {
+  let status: "aligned" | "skew_detected" | "unknown";
+  let reason: string | undefined;
+  let warning: string | undefined;
+  if (pin === null) {
+    status = "unknown";
+    reason = resolution.reason ?? "The project's pinned SDK version could not be read from its pom.xml.";
+  } else if (versionCore(schemaSdkVersion) === null) {
+    status = "unknown";
+    reason = "The brief schema used does not state which SDK it came from.";
+  } else if (sameVersion(pin, schemaSdkVersion)) {
+    status = "aligned";
+  } else {
+    status = "skew_detected";
+    warning =
+      source === "bundled"
+        ? `Project pins Exeris SDK ${pin}, but the brief schema used is the one bundled with this bridge, from ${schemaSdkVersion}.`
+        : `Project pins Exeris SDK ${pin}, but the brief schema in its jar declares ${schemaSdkVersion}.`;
+  }
+  return {
+    status,
+    bundledSdkVersion: bundledVersion,
+    ...(pin === null ? {} : { projectSdkVersion: pin }),
+    ...(resolution.source === undefined ? {} : { source: resolution.source }),
+    ...(resolution.coordinate === undefined ? {} : { sourceCoordinate: resolution.coordinate }),
+    ...(reason === undefined ? {} : { reason }),
+    ...(warning === undefined ? {} : { warning }),
+    schemaSource: source,
+    schemaSdkVersion,
+    ...(note === undefined ? {} : { note }),
+  };
 }
 
 type ProjectSchema =
@@ -383,19 +449,20 @@ function projectSchema(pin: string, env: NodeJS.ProcessEnv): ProjectSchema {
       reason: `eu.exeris:exeris-sdk-source-model:${pin} is not in the local Maven repository, so the bundled brief schema was used. Run mvn once to populate it; the bridge never downloads.`,
     };
   }
-  let text: string;
-  try {
-    const bytes = extractFromJar(jar, SCHEMA_ENTRY);
-    if (bytes.length > MAX_SCHEMA_BYTES) {
-      return { kind: "absent", reason: `The brief schema in the pinned jar is larger than ${MAX_SCHEMA_BYTES} bytes, so the bundled one was used.` };
-    }
-    text = bytes.toString("utf8");
-  } catch {
+  const read = readJarEntry(jar, SCHEMA_ENTRY, MAX_SCHEMA_BYTES);
+  if (read.kind === "absent") {
     return {
       kind: "absent",
-      reason: `eu.exeris:exeris-sdk-source-model:${pin} carries no readable ${SCHEMA_ENTRY}, so the bundled brief schema was used.`,
+      reason: `eu.exeris:exeris-sdk-source-model:${pin} carries no ${SCHEMA_ENTRY}, so the bundled brief schema was used.`,
     };
   }
+  if (read.kind === "failed") {
+    return {
+      kind: "absent",
+      reason: `${SCHEMA_ENTRY} could not be read from eu.exeris:exeris-sdk-source-model:${pin}: ${read.reason}. The bundled brief schema was used.`,
+    };
+  }
+  const text = read.bytes.toString("utf8");
   try {
     assertBriefSchemaFormat(text);
   } catch (err) {
