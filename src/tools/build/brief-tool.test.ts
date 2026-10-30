@@ -635,6 +635,24 @@ test("the definition states what it reads, that it writes nothing, local-only, t
 });
 
 // A guard against the fixtures drifting from the files the tests were written for.
+// ajv is built without format validation, so a schema that starts relying on
+// `format` would be enforced by the SDK's reader and silently skipped here.
+test("the brief schema states no format keyword, so skipping format validation loses nothing", () => {
+  const formats: string[] = [];
+  const walk = (node: unknown, path: string): void => {
+    if (Array.isArray(node)) {
+      node.forEach((v, i) => walk(v, `${path}/${i}`));
+    } else if (typeof node === "object" && node !== null) {
+      for (const [k, v] of Object.entries(node)) {
+        if (k === "format" && typeof v === "string") formats.push(path);
+        walk(v, `${path}/${k}`);
+      }
+    }
+  };
+  walk(JSON.parse(SCHEMA_TEXT), "");
+  assert.deepEqual(formats, []);
+});
+
 test("the fixture directory holds exactly the SDK's nine briefs", () => {
   const names = readdirSync(BRIEFS).filter((n) => n.endsWith(".brief.yaml")).map((n) => n.replace(".brief.yaml", "")).sort();
   assert.deepEqual(names, [...ALL_FIXTURES].sort());

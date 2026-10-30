@@ -217,7 +217,7 @@ function listAreas(dir: string): { areas: string[]; ignored: string[] } {
   }
   const areas: string[] = [];
   const ignored: string[] = [];
-  for (const file of files.sort()) {
+  for (const file of files.toSorted((a, b) => a.localeCompare(b))) {
     if (!file.endsWith(BRIEF_SUFFIX)) continue;
     const name = file.slice(0, -BRIEF_SUFFIX.length);
     if (AREA_PATTERN.test(name) && name.length <= MAX_AREA_LENGTH) areas.push(name);

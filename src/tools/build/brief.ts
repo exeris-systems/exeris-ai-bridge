@@ -78,10 +78,10 @@ export function parseBriefYaml(text: string): ParsedBrief {
   if (faults.length > 0) {
     return {
       kind: "invalid",
-      errors: faults.slice(0, MAX_ERRORS).map((f) => ({
-        path: "",
-        message: `YAML: ${f.message.split("\n")[0]}${f.linePos ? ` (line ${f.linePos[0].line})` : ""}`,
-      })),
+      errors: faults.slice(0, MAX_ERRORS).map((f) => {
+        const line = f.linePos ? ` (line ${f.linePos[0].line})` : "";
+        return { path: "", message: `YAML: ${f.message.split("\n")[0]}${line}` };
+      }),
     };
   }
   let value: unknown;
@@ -167,7 +167,7 @@ function toProblems(errors: readonly ErrorObject[]): BriefProblem[] {
 }
 
 function escapePointer(segment: string): string {
-  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
 /** The readiness facts the schema cannot state. */
