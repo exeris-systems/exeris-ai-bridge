@@ -168,7 +168,7 @@ function paths(b: BriefOut): string[] {
 // ---- the SDK's own fixtures ---------------------------------------------------------------
 
 // The expected verdicts are the ones exeris-sdk's BriefSchemaContractTest asserts
-// for the same twelve documents (nine at tag v0.13.1, three from exeris-sdk#258).
+// for the same documents; test/fixtures/briefs/README.md names where each was copied from.
 const SDK_VERDICTS: Record<string, { valid: boolean; ready: boolean }> = {
   ready: { valid: true, ready: true },
   minimal: { valid: true, ready: true },
