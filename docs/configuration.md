@@ -14,7 +14,7 @@ How `@exeris/ai-bridge` resolves its configuration. The short table is in the
 
 ## Resolution never fails
 
-**Every `EXERIS_*` variable is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 33 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=… sdk=…`) goes to stderr, which MCP clients surface in their logs.
+**Every `EXERIS_*` variable is optional, and none of them can stop the server from booting.** Config resolution never fails: a dependency that does not resolve disables its own family and leaves the rest running. The tool surface does not change — `tools/list` always advertises all 34 tools, because 1.0 freezes it under semver and clients cache it — but a call into a disabled family returns a structured `family_unavailable` result naming the reason and the remedy instead of a transport error. A one-line boot summary (`mode=… docs=… lsp=… kernel=… build=… caps=… sdk=…`) goes to stderr, which MCP clients surface in their logs.
 
 When something is dark, **`bridge-health` is the tool to call**. It reports the resolved mode and every family's state with its reason and remedy, and — for the two families backed by a child process — that process's current state, *without starting it*. A family reports more than its state where there is more to know:
 
@@ -36,6 +36,15 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 ## Project root
 
 `EXERIS_PROJECT_ROOT` points at **the developer's own project** — the tree `build-*` and `caps-*` report on, and where `sdk-*` reads the SDK version your project pins. It is optional: with nothing set, the bridge walks up from its working directory, at most twelve directories, to the nearest `pom.xml`, which is the right answer when an agent starts the server inside the project it is working on, and lands on the owning module rather than the aggregator in a multi-module build. Set it explicitly when the agent's working directory is somewhere else. An explicit root is taken as given and is **not** required to contain a `pom.xml` — naming it is how you escape our guessing. Reads are sandboxed to this root exactly as `docs-*` reads are sandboxed to the docs root, including for paths the bridge builds itself. A root that does not resolve to a directory takes `build-*` and `caps-*` dark.
+
+## Briefs
+
+`build-validate_brief` checks the discovery briefs of **the developer's own project**: `docs/briefs/<area>.brief.yaml` under the project root, never anywhere else. It is local only by family, reads nothing but the briefs, the project's `pom.xml`, the brief schema and, when present, `target/classes/exeris-metadata`, and writes nothing. Its bounds, each named in the answer that hits it:
+
+- `area` is a name matching `^[a-z0-9][a-z0-9-]*$`, at most 64 characters, resolved inside `docs/briefs`; a path, an uppercase name or a symlink that leaves `docs/briefs` is refused. Without it every `*.brief.yaml` directly in that directory is validated, at most 50 per call; files whose stem is not such a name are listed under `ignored`.
+- A brief larger than 256 KiB is not read. It is parsed as one YAML 1.2 core-schema document: no custom tags, unique keys, at most 10 alias expansions; a second document, a non-mapping root or an empty file is an error, not a brief.
+- The schema is the one inside the `eu.exeris:exeris-sdk-source-model` jar the project pins, in the local Maven repository (the version `sdk-*` reads from `pom.xml`; never downloaded), else the schema bundled in the package; `skew.schemaSource` says which, and `skew` also carries the `sdk-*` status, the project and bundled SDK versions and the brief's own `briefSchema`. A schema declaring a `briefSchemaFormat` this build does not read is refused from either source. A project pinned below SDK 0.13.0 has no brief contract and gets a reason and no verdict. A brief whose `briefSchema` is newer than the pinned SDK is reported as skew (`valid` and `ready` false) and not validated.
+- `valid` is the schema passing; `ready` is valid with no blocking question still `open`. `assumed` lists every question decided on credit with its owner. A `fulfilledBy` reference resolves against the emitted `DomainMetadata` (an entity by qualified class name, an action, rule or saga as `<entity>#<member>`); `unresolved` does not change readiness, and without metadata, or with metadata that cannot be read in full, every reference is `unchecked`. `cap-manifest.json` is never read.
 
 ## Mode
 

@@ -1,0 +1,11 @@
+briefSchema: 0.13.0
+purpose: Keep a list of customers.
+nonGoals:
+  - Marketing.
+actors:
+  - name: Clerk
+workflows:
+  - name: Register a customer
+    criteria:
+      - kind: when
+        trigger: a clerk submits the form
