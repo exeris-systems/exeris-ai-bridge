@@ -227,15 +227,20 @@ function fixtureRow() {
   };
 }
 
-function extractWith(catalogue: string) {
-  return (_jar: string, entry: string) =>
-    Buffer.from(entry.endsWith("generator-catalogue.json") ? catalogue : `extracted ${entry}`);
+const BRIEF_SCHEMA_TEXT = JSON.stringify({ briefSchemaFormat: 1, sdkVersion: "0.13.1" });
+
+function extractWith(catalogue: string, briefSchema: string = BRIEF_SCHEMA_TEXT) {
+  return (_jar: string, entry: string) => {
+    if (entry.endsWith("generator-catalogue.json")) return Buffer.from(catalogue);
+    if (entry.endsWith("brief-schema.json")) return Buffer.from(briefSchema);
+    return Buffer.from(`extracted ${entry}`);
+  };
 }
 
 function repoWithAllJars(): string {
   const repo = join(tempDir, "valid-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
   writeStarterPoms(repo, "0.10.0");
   return repo;
@@ -278,8 +283,8 @@ test("collectSources vendors the application starter from the BOM POMs", () => {
 
 test("collectSources fails in strict mode when the BOM is absent", () => {
   const repo = join(tempDir, "no-bom-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
   assert.throws(
     () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
@@ -289,8 +294,8 @@ test("collectSources fails in strict mode when the BOM is absent", () => {
 
 test("collectSources keeps the other entries in non-strict mode when the BOM is absent", () => {
   const repo = join(tempDir, "no-bom-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
   const warnings: string[] = [];
   const entries = collectSources({
@@ -299,14 +304,14 @@ test("collectSources keeps the other entries in non-strict mode when the BOM is 
     warnFn: (m) => warnings.push(m),
     extractFn: extractWith(CATALOGUE_TEXT),
   });
-  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema", "generator-catalogue"]);
+  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema", "brief-schema", "generator-catalogue"]);
   assert.ok(warnings.some((w) => /exeris-app-bom/.test(w)));
 });
 
 test("collectSources refuses a BOM whose versions are not literals", () => {
   const repo = join(tempDir, "expr-bom-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   createFakeArtifact(repo, "exeris-codegen-java", "0.10.0");
   writeStarterPoms(
     repo,
@@ -326,14 +331,62 @@ test("collectSources extracts entries when jars are found", () => {
     extractFn: extractWith(CATALOGUE_TEXT),
   });
 
-  assert.equal(entries.length, 4);
+  assert.equal(entries.length, 5);
   assert.equal(entries[0].id, "annotation-catalog");
-  assert.equal(entries[0].sourceArtifact, "eu.exeris:exeris-sdk-annotations:0.12.0");
+  assert.equal(entries[0].sourceArtifact, "eu.exeris:exeris-sdk-annotations:0.13.1");
   assert.equal(entries[1].id, "ast-schema");
-  assert.equal(entries[1].sourceArtifact, "eu.exeris:exeris-sdk-source-model:0.12.0");
-  assert.equal(entries[2].id, "generator-catalogue");
-  assert.equal(entries[2].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
-  assert.equal(entries[2].bytes.toString("utf8"), CATALOGUE_TEXT);
+  assert.equal(entries[1].sourceArtifact, "eu.exeris:exeris-sdk-source-model:0.13.1");
+  assert.equal(entries[2].id, "brief-schema");
+  assert.equal(entries[2].sourceArtifact, "eu.exeris:exeris-sdk-source-model:0.13.1");
+  assert.equal(entries[2].bytes.toString("utf8"), BRIEF_SCHEMA_TEXT);
+  assert.equal(entries[3].id, "generator-catalogue");
+  assert.equal(entries[3].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
+  assert.equal(entries[3].bytes.toString("utf8"), CATALOGUE_TEXT);
+});
+
+test("collectSources refuses a brief schema of a format it does not read", () => {
+  assert.throws(
+    () =>
+      collectSources({
+        repo: repoWithAllJars(),
+        strict: true,
+        extractFn: extractWith(CATALOGUE_TEXT, JSON.stringify({ briefSchemaFormat: 2 })),
+      }),
+    /briefSchemaFormat 2/,
+  );
+});
+
+test("collectSources refuses a brief schema that declares no format", () => {
+  assert.throws(
+    () =>
+      collectSources({
+        repo: repoWithAllJars(),
+        strict: true,
+        extractFn: extractWith(CATALOGUE_TEXT, JSON.stringify({ sdkVersion: "0.13.1" })),
+      }),
+    /briefSchemaFormat undefined/,
+  );
+});
+
+test("collectSources fails when the source-model jar lacks the brief schema", () => {
+  const missing = (_jar: string, entry: string): Buffer => {
+    if (entry.endsWith("brief-schema.json")) throw new Error("Failed to extract brief-schema.json");
+    return extractWith(CATALOGUE_TEXT)(_jar, entry);
+  };
+  assert.throws(
+    () => collectSources({ repo: repoWithAllJars(), strict: true, extractFn: missing }),
+    /brief-schema\.json/,
+  );
+});
+
+test("collectSources does not take an SDK jar older than the brief schema", () => {
+  const repo = join(tempDir, "old-sdk-repo");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  assert.throws(
+    () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
+    /Could not find required Exeris SDK jars/,
+  );
 });
 
 test("the tooling version is pinned separately from the SDK version", () => {
@@ -341,12 +394,12 @@ test("the tooling version is pinned separately from the SDK version", () => {
   createFakeArtifact(repo, "exeris-codegen-java", "0.11.0");
   const entries = collectSources({
     repo,
-    explicitVersion: "0.12.0",
+    explicitVersion: "0.13.1",
     toolingVersion: "0.10.0",
     strict: true,
     extractFn: extractWith(CATALOGUE_TEXT),
   });
-  assert.equal(entries[2].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
+  assert.equal(entries[3].sourceArtifact, "eu.exeris:exeris-codegen-java:0.10.0");
 });
 
 test("collectSources refuses a generator catalogue of a format it does not read", () => {
@@ -363,8 +416,8 @@ test("collectSources refuses a generator catalogue of a format it does not read"
 
 test("collectSources fails in strict mode when the codegen jar is missing", () => {
   const repo = join(tempDir, "sdk-only-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   assert.throws(
     () => collectSources({ repo, strict: true, extractFn: extractWith(CATALOGUE_TEXT) }),
     /exeris-codegen-java jar.*EXERIS_TOOLING_VERSION/,
@@ -373,8 +426,8 @@ test("collectSources fails in strict mode when the codegen jar is missing", () =
 
 test("collectSources keeps the SDK entries in non-strict mode when the codegen jar is missing", () => {
   const repo = join(tempDir, "sdk-only-repo");
-  createFakeArtifact(repo, "exeris-sdk-annotations", "0.12.0");
-  createFakeArtifact(repo, "exeris-sdk-source-model", "0.12.0");
+  createFakeArtifact(repo, "exeris-sdk-annotations", "0.13.1");
+  createFakeArtifact(repo, "exeris-sdk-source-model", "0.13.1");
   const warnings: string[] = [];
   const entries = collectSources({
     repo,
@@ -382,7 +435,7 @@ test("collectSources keeps the SDK entries in non-strict mode when the codegen j
     warnFn: (m) => warnings.push(m),
     extractFn: extractWith(CATALOGUE_TEXT),
   });
-  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema"]);
+  assert.deepEqual(entries.map((e) => e.id), ["annotation-catalog", "ast-schema", "brief-schema"]);
   assert.ok(warnings.some((w) => /exeris-codegen-java/.test(w)));
 });
 

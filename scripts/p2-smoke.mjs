@@ -235,6 +235,7 @@ function assertBootsDark({
   docsExcluded,
   docsRepos,
   docsIndexResource,
+  briefSchemaResource,
   subscribed,
   subscribeRefused,
   promptList,
@@ -268,7 +269,7 @@ function assertBootsDark({
   // The bundle ships inside the tarball, so unlike every other surface it is
   // live on a bare machine, carrying reference data entries for the P2 families.
   assert.equal(version.bundle.state, "available", "the bundled reference data did not survive packaging");
-  assert.equal(version.bundle.entryCount, 4); // annotation catalog, AST schema, generator catalogue, application starter
+  assert.equal(version.bundle.entryCount, 5); // annotation catalog, AST schema, brief schema, generator catalogue, application starter
   assert.equal(version.bundle.bridgeVersion, PKG.version);
 
   assert.equal(health.mode, "app");
@@ -424,6 +425,15 @@ function assertBootsDark({
   const sdkAstPayload = JSON.parse(sdkAst.content[0].text);
   assert.equal(sdkAstPayload.definition, "DomainMetadata");
 
+  assert.equal(briefSchemaResource.contents.length, 1);
+  assert.equal(briefSchemaResource.contents[0].uri, "exeris://sdk/brief-schema");
+  assert.equal(briefSchemaResource.contents[0].mimeType, "application/schema+json");
+  assert.equal(
+    JSON.parse(briefSchemaResource.contents[0].text).briefSchemaFormat,
+    1,
+    "the brief schema did not survive packaging",
+  );
+
   assert.ok(!sdkDescribe.isError, `sdk-describe_annotation errored: ${sdkDescribe.content[0].text}`);
   const sdkDescribePayload = JSON.parse(sdkDescribe.content[0].text);
   assert.equal(sdkDescribePayload.name, "ExerisDomain");
@@ -543,6 +553,8 @@ async function interrogate(project, home, extraEnv) {
 
     // The same registry as a resource, read from the snapshot through the real transport.
     const docsIndexResource = await client.request("resources/read", { uri: "exeris://docs/adr-index" });
+    // The SDK's brief schema: a static resource served from the bundle, with no project root.
+    const briefSchemaResource = await client.request("resources/read", { uri: "exeris://sdk/brief-schema" });
     // A subscription is accepted over the snapshot: the content cannot change, so it never fires.
     const subscribed = await client.request("resources/subscribe", { uri: "exeris://docs/adr-index" });
     const subscribeRefused = await client.request("resources/subscribe", { uri: "exeris://docs/hla" }).catch((err) => err);
@@ -646,6 +658,7 @@ async function interrogate(project, home, extraEnv) {
       docsExcluded,
       docsRepos,
       docsIndexResource,
+      briefSchemaResource,
       subscribed,
       subscribeRefused,
       promptList,

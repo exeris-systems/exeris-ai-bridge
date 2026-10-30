@@ -11,6 +11,7 @@ import {
   AppStarterFormatError,
   parseAppStarterPoms,
 } from "./app-starter.js";
+import { assertBriefSchemaFormat, BRIEF_SCHEMA_ENTRY, BriefSchemaFormatError } from "./brief-schema.js";
 import {
   CatalogueFormatError,
   GENERATOR_CATALOGUE_ENTRY,
@@ -347,7 +348,8 @@ export interface CollectSourcesOptions {
 }
 
 /**
- * Collect reference data sources: the SDK annotation catalog and AST schema,
+ * Collect reference data sources: the SDK annotation catalog, AST schema and
+ * brief schema,
  * the codegen pipeline's generator catalogue, and the application starter's
  * tested version triple.
  */
@@ -393,8 +395,8 @@ function collectSdkSources(
   },
 ): SourceEntry[] {
   const { repo, warnFn, failFn, findJar, extract, allowSnapshots, explicitVersion } = options;
-  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.12.0" });
-  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.12.0" });
+  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.13.1" });
+  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.13.1" });
 
   if (!ann || !model) {
     if (options.strict) {
@@ -408,6 +410,16 @@ function collectSdkSources(
     return [];
   }
 
+  const briefSchema = extract(model.jar, "META-INF/exeris/brief-schema.json");
+  try {
+    assertBriefSchemaFormat(briefSchema.toString("utf8"));
+  } catch (err) {
+    if (err instanceof BriefSchemaFormatError) {
+      return failFn(`exeris-sdk-source-model ${model.version}: ${err.message}`);
+    }
+    throw err;
+  }
+
   return [
     {
       id: "annotation-catalog",
@@ -417,6 +429,11 @@ function collectSdkSources(
     {
       id: "ast-schema",
       bytes: extract(model.jar, "META-INF/exeris/ast-schema.json"),
+      sourceArtifact: `eu.exeris:exeris-sdk-source-model:${model.version}`,
+    },
+    {
+      id: BRIEF_SCHEMA_ENTRY,
+      bytes: briefSchema,
       sourceArtifact: `eu.exeris:exeris-sdk-source-model:${model.version}`,
     },
   ];

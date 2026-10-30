@@ -10,11 +10,14 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ErrorCode, McpError, ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { BridgeConfig } from "../config/env.js";
+import type { BundleState } from "../data/bundle.js";
 import { writeDocsEcosystemFixture } from "../data/__tests__/docs-ecosystem.js";
 import { buildDocsSnapshot, directoryReader } from "../data/docs-snapshot-build.js";
 import { loadDocsSnapshot } from "../data/docs-snapshot.js";
 import { watchRoot, type WatchHandle, type WatchOptions } from "../fs/watch.js";
 import { registerResources, type ResourcesHandle } from "./index.js";
+
+const ABSENT_BUNDLE: BundleState = { state: "unavailable", reason: "not under test", remedy: "not under test" };
 
 const DARK = { state: "unavailable" as const, reason: "not under test", remedy: "not under test" };
 const URI = "exeris://docs/adr-index";
@@ -98,7 +101,7 @@ interface Connected {
 
 async function connect(config: BridgeConfig, watchRootFn?: (root: string, options: WatchOptions) => WatchHandle): Promise<Connected> {
   const server = new Server({ name: "test", version: "0" }, { capabilities: { resources: { subscribe: true } } });
-  const resources = registerResources(server, config, { debounceMs: DEBOUNCE_MS, ...(watchRootFn ? { watchRootFn } : {}) });
+  const resources = registerResources(server, config, ABSENT_BUNDLE, { debounceMs: DEBOUNCE_MS, ...(watchRootFn ? { watchRootFn } : {}) });
   const client = new Client({ name: "test-client", version: "0" });
   const updated: string[] = [];
   client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => {

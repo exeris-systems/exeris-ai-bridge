@@ -10,11 +10,14 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
 import type { BridgeConfig } from "../config/env.js";
+import type { BundleState } from "../data/bundle.js";
 import { writeDocsEcosystemFixture } from "../data/__tests__/docs-ecosystem.js";
 import { buildDocsSnapshot, directoryReader } from "../data/docs-snapshot-build.js";
 import { loadDocsSnapshot } from "../data/docs-snapshot.js";
 import { registerResources } from "./index.js";
 import { RESOURCE_NOT_FOUND } from "./docs.js";
+
+const ABSENT_BUNDLE: BundleState = { state: "unavailable", reason: "not under test", remedy: "not under test" };
 
 const DARK = { state: "unavailable" as const, reason: "not under test", remedy: "not under test" };
 
@@ -71,7 +74,7 @@ afterEach(async () => {
 /** A client connected to the real resource handlers over an in-memory transport. */
 async function connect(config: BridgeConfig): Promise<Client> {
   const server = new Server({ name: "test", version: "0" }, { capabilities: { resources: { subscribe: true } } });
-  registerResources(server, config);
+  registerResources(server, config, ABSENT_BUNDLE);
   const client = new Client({ name: "test-client", version: "0" });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
