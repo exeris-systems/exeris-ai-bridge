@@ -22,6 +22,10 @@ import { collectSources, resolveMavenRepo } from "../dist/data/vendor-resolver.j
 // eu.exeris:exeris-app-bom, -app-parent and -app-starter POMs at EXERIS_TOOLING_VERSION;
 // --strict fails if the BOM is absent.
 //
+// The brief schema (data/brief-schema.json) is read from the
+// eu.exeris:exeris-sdk-source-model jar beside the AST schema and accepted by the
+// briefSchemaFormat it declares; a format this build does not read fails the run.
+//
 // The generator catalogue (data/generator-catalogue.json) is read from the
 // eu.exeris:exeris-codegen-java jar at EXERIS_TOOLING_VERSION and accepted by the
 // catalogueFormat it declares; a format this build does not read fails the run.
@@ -50,7 +54,7 @@ async function emit(strict = false) {
   const repo = resolveMavenRepo({
     explicitVersion,
     checkArtifacts: ["exeris-sdk-annotations", "exeris-sdk-source-model"],
-    minVersion: "0.12.0",
+    minVersion: "0.13.1",
   });
 
   let sources;

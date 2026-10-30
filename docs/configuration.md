@@ -48,7 +48,7 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 ### Subscribing to the registry index
 
 The server advertises `resources.subscribe`. Only `exeris://docs/adr-index` is subscribable; any
-other URI is rejected as invalid params (`-32602`) with a message naming the one subscribable URI,
+other URI, including `exeris://sdk/brief-schema`, is rejected as invalid params (`-32602`) with a message naming the one subscribable URI,
 and unsubscribing from a URI that was never subscribed succeeds.
 
 What a subscription does depends on which source answers `docs-*`:
@@ -66,7 +66,7 @@ reason and remedy instead.
 
 ## Resources and prompts
 
-Neither has a variable of its own. The `exeris://docs/*` resources and the eight prompt templates are fixed lists, identical in every mode and environment for the reason `tools/list` is; what varies is whether a read or a render finds its content.
+Neither has a variable of its own. The `exeris://docs/*` resources and the eight prompt templates are fixed lists, identical in every mode and environment for the reason `tools/list` is; what varies is whether a read or a render finds its content. `exeris://sdk/brief-schema` is the one resource that depends on the bundle: it is listed only when the bundle carries the brief schema, and it needs no project and no ecosystem root. Reading it with the entry missing, corrupt or of a `briefSchemaFormat` this build does not read answers with an internal error whose data names the `sdk` family, the reason and the remedy.
 
 - **Resources** read the registry tier of `docs-*` — the same functions, the same checkout-or-snapshot resolution, the same sandbox and public-scope policy — so `EXERIS_DOCS_ROOT` decides what they return. With `docs` unavailable, a read answers with an internal error whose data is the `family_unavailable` reason and remedy.
 - **Prompts** embed that content as resource messages and the bundled SDK data as text. Where context cannot be embedded, the prompt says which resource to read instead. `route-this-task` embeds the ecosystem's top-level `CLAUDE.md`, which only a checkout has: over the snapshot, or with `docs` unavailable, it answers that routing needs a checkout.
@@ -108,9 +108,9 @@ The published package carries a small read-only corpus so an application develop
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 4, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.10.0", "eu.exeris:exeris-codegen-java:0.10.0", "eu.exeris:exeris-sdk-annotations:0.12.0", "eu.exeris:exeris-sdk-source-model:0.12.0"] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 5, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.10.0", "eu.exeris:exeris-codegen-java:0.10.0", "eu.exeris:exeris-sdk-annotations:0.13.1", "eu.exeris:exeris-sdk-source-model:0.13.1"] }
 ```
 
-The bundle ships with the **annotation catalog and AST schema** (from the released `exeris-sdk` jars), the **generator catalogue** (from the released `exeris-codegen-java` jar) and the **application starter** (the tested tooling + kernel + SDK triple, from the released `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs at `EXERIS_TOOLING_VERSION`; `build-get_starter` reads it), all generated at prepack time, from the local Maven repository: the SDK jars at `EXERIS_SDK_VERSION` and the tooling artefacts at `EXERIS_TOOLING_VERSION`. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
+The bundle ships with the **annotation catalog, AST schema and brief schema** (from the released `exeris-sdk` jars; the brief schema is pinned by the `briefSchemaFormat` it declares, and `exeris://sdk/brief-schema` serves it), the **generator catalogue** (from the released `exeris-codegen-java` jar) and the **application starter** (the tested tooling + kernel + SDK triple, from the released `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs at `EXERIS_TOOLING_VERSION`; `build-get_starter` reads it), all generated at prepack time, from the local Maven repository: the SDK jars at `EXERIS_SDK_VERSION` and the tooling artefacts at `EXERIS_TOOLING_VERSION`. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.
 
-`prepack` runs the script with `--strict`, so a published package always carries all four entries and the registry snapshot: a missing SDK jar, generator-catalogue jar, application-starter POM or snapshot source fails the pack. `npm run vendor:data` is not strict: it writes what it finds, warns about what it cannot, and writes an empty bundle when no local Maven repository holds the SDK jars. A generator-catalogue or starter format this build does not read fails the run in either mode. The registry snapshot under `data/docs/` is read from GitHub at pack time, or from a directory named by `EXERIS_DOCS_SNAPSHOT_SOURCE`; `GITHUB_TOKEN`, when set, only raises the API rate limit.
+`prepack` runs the script with `--strict`, so a published package always carries all five entries and the registry snapshot: a missing SDK jar, generator-catalogue jar, application-starter POM or snapshot source fails the pack. `npm run vendor:data` is not strict: it writes what it finds, warns about what it cannot, and writes an empty bundle when no local Maven repository holds the SDK jars. A generator-catalogue, brief-schema or starter format this build does not read fails the run in either mode. The registry snapshot under `data/docs/` is read from GitHub at pack time, or from a directory named by `EXERIS_DOCS_SNAPSHOT_SOURCE`; `GITHUB_TOKEN`, when set, only raises the API rate limit.

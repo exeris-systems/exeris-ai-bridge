@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       instructions: buildInstructions(config, bundle),
     },
   );
-  const resources = registerResources(server, config);
+  const resources = registerResources(server, config, bundle);
 
   const tools = new Map<string, { definition: ToolDefinition; handler: ToolHandler }>();
 

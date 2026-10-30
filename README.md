@@ -80,11 +80,12 @@ as the tools.
 | `exeris://docs/hla` | The high-level architecture |
 | `exeris://docs/whitepaper` | The B2B technical whitepaper |
 | `exeris://docs/template/{ADR\|RFC\|RESEARCH}` | A decision-doc template |
+| `exeris://sdk/brief-schema` | The JSON Schema of a discovery brief (ADR-106), `application/schema+json`; static, served from the bundled data with no project or ecosystem root, and listed only when the bundle carries it |
 
 `exeris://docs/adr-index` can be subscribed to (`resources/subscribe`): from an `exeris-docs`
 checkout the server sends `notifications/resources/updated` once per burst of changes to the file,
 including a replacement by rename; from the bundled snapshot the content cannot change, so the
-subscription is accepted and never fires. Any other URI is rejected as invalid params.
+subscription is accepted and never fires. Any other URI, `exeris://sdk/brief-schema` included, is rejected as invalid params.
 
 A URI outside this set, or an ADR number that is not three digits, is rejected as invalid params. An
 ADR that is not in the registry or has no servable content answers with the MCP resource-not-found
@@ -149,8 +150,8 @@ The package follows semver. Until 1.0, a minor release may change a tool's outpu
 release notes list every change a client may notice. At 1.0 the tool names and input schemas are
 frozen.
 
-0.8.0 targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.12.0 and `exeris-tooling` 0.10.0, all on Maven
-Central.
+The next release targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.13.1 and `exeris-tooling` 0.10.0, all on
+Maven Central.
 
 ## Links
 
