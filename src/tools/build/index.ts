@@ -5,12 +5,14 @@ import type { BridgeConfig, ProjectConfig, Unavailable } from "../../config/env.
 import { resolveProjectToolingVersion } from "../../config/tooling-pin.js";
 import { loadBundle, type BundleState } from "../../data/bundle.js";
 import { loadAppStarter } from "../../data/app-starter.js";
+import { loadBriefSchema } from "../../data/brief-schema.js";
 import { loadGeneratorCatalogue, type CatalogueState } from "../../data/generator-catalogue.js";
 import { resolveInside, SandboxEscapeError } from "../../fs/sandbox.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RegisteredTool } from "../types.js";
 import { guard } from "../unavailable.js";
 import { getStarterTool } from "./starter.js";
+import { validateBriefTool, type BriefDeps } from "./brief-tool.js";
 import {
   looksLikeExerisOutput,
   MAX_DIAGNOSTIC_CHARS,
@@ -66,6 +68,7 @@ export function registerBuildTools(
   bundle: BundleState = loadBundle(),
   rootOverride?: string,
   preview: PreviewDeps = {},
+  brief: BriefDeps = {},
 ): RegisteredTool[] {
   const catalogue = loadGeneratorCatalogue(bundle, rootOverride);
   const handle: BuildFamily =
@@ -80,6 +83,7 @@ export function registerBuildTools(
     explainDiagnosticTool(handle),
     getStarterTool(loadAppStarter(bundle, rootOverride)),
     previewGenerationTool(handle, config.ecosystemRoot, preview, catalogue),
+    validateBriefTool(handle, loadBriefSchema(bundle, rootOverride), brief),
   ];
 }
 

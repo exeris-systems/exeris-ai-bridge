@@ -1,0 +1,63 @@
+briefSchema: 0.13.0
+purpose: Issue invoices to customers and record their payment.
+goals:
+  - An invoice reaches the customer the day the order ships.
+nonGoals:
+  - Payment collection; the payment provider owns it.
+actors:
+  - name: Accountant
+    description: Issues and corrects invoices.
+    roles: [finance]
+  - name: Customer
+glossary:
+  - term: Invoice
+    meaning: A request for payment for one shipped order.
+    dataScope: TENANT
+    concernHints: [Saga, EventSourced]
+    fulfilledBy:
+      - kind: entity
+        ref: com.acme.billing.Invoice
+workflows:
+  - name: Issue an invoice
+    actors: [Accountant]
+    criteria:
+      - kind: when
+        trigger: an order ships
+        response: the system issues an invoice for the order
+      - kind: while
+        condition: the invoice is unpaid
+        response: the system shows it as outstanding
+      - kind: if
+        trigger: the customer's tax id is missing
+        response: the system holds the invoice for review
+      - kind: ubiquitous
+        response: the system numbers invoices without gaps
+    fulfilledBy:
+      - kind: action
+        ref: com.acme.billing.Invoice#issue
+      - kind: rule
+        ref: com.acme.billing.Invoice#gaplessNumber
+nonFunctional:
+  - category: retention
+    requirement: Invoices are kept for ten years.
+integrations:
+  - name: Payment provider
+    direction: inbound
+    purpose: Reports payments against invoices.
+candidateCapabilities: [billing]
+openQuestions:
+  - id: Q1
+    question: Which tax regimes apply?
+    blocking: true
+    status: assumed
+    assumption: EU VAT only.
+    owner: Head of Finance
+  - id: Q2
+    question: Are credit notes in scope?
+    blocking: true
+    status: resolved
+    answer: No; a later area.
+  - id: Q3
+    question: Should reminders be emailed?
+    blocking: false
+    status: open
