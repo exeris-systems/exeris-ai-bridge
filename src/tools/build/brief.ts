@@ -107,6 +107,87 @@ function errorText(err: unknown): string {
   return (err instanceof Error ? err.message : String(err)).split("\n")[0];
 }
 
+/**
+ * The reader requirements a format-1 brief schema may list. Validity is the
+ * schema's constraints plus these: the first is met by the schema's closed
+ * objects, the other two by {@link rulesOutsideSchema}.
+ */
+export const KNOWN_READER_REQUIREMENTS: readonly string[] = [
+  "UNKNOWN_PROPERTIES_ARE_ERRORS",
+  "QUESTION_IDS_ARE_UNIQUE",
+  "WORKFLOW_ACTORS_ARE_DECLARED",
+];
+
+/** A brief schema states a reader requirement this build does not implement. */
+export class UnknownReaderRequirementError extends Error {
+  readonly id: string;
+
+  constructor(id: string) {
+    super(`the brief schema states the reader requirement ${id}, which this bridge does not implement`);
+    this.name = "UnknownReaderRequirementError";
+    this.id = id;
+  }
+}
+
+/** A missing or malformed list counts as empty: both rules still apply under format 1. */
+function assertKnownRequirements(schema: object): void {
+  const list = (schema as Record<string, unknown>)["x-exeris-reader-requirements"];
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    const id = typeof item === "object" && item !== null ? (item as Record<string, unknown>).id : undefined;
+    if (typeof id === "string" && !KNOWN_READER_REQUIREMENTS.includes(id)) {
+      throw new UnknownReaderRequirementError(id);
+    }
+  }
+}
+
+const NON_BLANK = /\S/;
+
+function isText(value: unknown): value is string {
+  return typeof value === "string" && NON_BLANK.test(value);
+}
+
+/**
+ * The two format-1 validity rules JSON Schema cannot express: an open
+ * question's `id` is unique in the brief, and each workflow actor names a
+ * declared actor. Each applies only where the structure is present and
+ * well-typed, since the schema reports the wrong shapes itself.
+ *
+ * @param document - The parsed brief.
+ */
+function rulesOutsideSchema(document: Record<string, unknown>): BriefProblem[] {
+  const problems: BriefProblem[] = [];
+
+  if (Array.isArray(document.openQuestions)) {
+    const seen = new Map<string, number>();
+    document.openQuestions.forEach((q: unknown, i: number) => {
+      const id = typeof q === "object" && q !== null ? (q as Record<string, unknown>).id : undefined;
+      if (!isText(id)) return;
+      const first = seen.get(id);
+      if (first === undefined) seen.set(id, i);
+      else problems.push({ path: `/openQuestions/${i}/id`, message: `repeats the id of /openQuestions/${first}` });
+    });
+  }
+
+  if (Array.isArray(document.actors) && Array.isArray(document.workflows)) {
+    const declared = new Set<string>();
+    for (const a of document.actors) {
+      const name = typeof a === "object" && a !== null ? (a as Record<string, unknown>).name : undefined;
+      if (isText(name)) declared.add(name);
+    }
+    document.workflows.forEach((w: unknown, i: number) => {
+      const actors = typeof w === "object" && w !== null ? (w as Record<string, unknown>).actors : undefined;
+      if (!Array.isArray(actors)) return;
+      actors.forEach((actor: unknown, k: number) => {
+        if (isText(actor) && !declared.has(actor)) {
+          problems.push({ path: `/workflows/${i}/actors/${k}`, message: "names no actor the brief declares" });
+        }
+      });
+    });
+  }
+  return problems;
+}
+
 /** A compiled brief schema. */
 export type BriefValidator = (document: unknown) => BriefProblem[];
 
@@ -129,11 +210,16 @@ export function compileBriefSchema(schemaText: string): BriefValidator {
   // A fresh instance per schema: two schemas can share an $id, and one
   // instance refuses to hold both. Unknown keywords (the SDK's x-exeris-*
   // annotations) are ignored; nothing is fetched, so a remote $ref cannot load.
+  const schema = JSON.parse(schemaText) as object;
+  assertKnownRequirements(schema);
   const ajv = new Ajv2020({ allErrors: true, strict: false });
-  const validate: ValidateFunction = ajv.compile(JSON.parse(schemaText) as object);
+  const validate: ValidateFunction = ajv.compile(schema);
   const validator: BriefValidator = (document) => {
-    if (validate(document)) return [];
-    return toProblems(validate.errors ?? []);
+    const found = validate(document) ? [] : toProblems(validate.errors ?? []);
+    if (typeof document === "object" && document !== null && !Array.isArray(document)) {
+      found.push(...rulesOutsideSchema(document as Record<string, unknown>));
+    }
+    return found.slice(0, MAX_ERRORS);
   };
   if (compiled.size >= MAX_COMPILED) {
     const oldest = compiled.keys().next();

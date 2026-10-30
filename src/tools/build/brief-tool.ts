@@ -20,6 +20,7 @@ import {
   readBriefFacts,
   refused,
   versionCore,
+  UnknownReaderRequirementError,
   type BriefValidator,
   type BriefVerdict,
 } from "./brief.js";
@@ -331,13 +332,18 @@ function resolveContract(
       const version = schemaVersionOf(fromProject.text) ?? pin;
       try {
         return { validate: compileBriefSchema(fromProject.text), reference: referenceOf(version), skew: skewOf("project", version) };
-      } catch {
+      } catch (err) {
+        const unknown = err instanceof UnknownReaderRequirementError;
         return {
           result: jsonResult(
             {
               error: "brief_schema_unusable",
-              reason: `The brief schema in the project's pinned eu.exeris:exeris-sdk-source-model:${pin} jar cannot be compiled as JSON Schema draft 2020-12.`,
-              remedy: "Rebuild or re-download that SDK release into the local Maven repository.",
+              reason: unknown
+                ? `The brief schema in the project's pinned eu.exeris:exeris-sdk-source-model:${pin} jar cannot be used: ${err.message}, and validating without it would call an invalid brief valid.`
+                : `The brief schema in the project's pinned eu.exeris:exeris-sdk-source-model:${pin} jar cannot be compiled as JSON Schema draft 2020-12.`,
+              remedy: unknown
+                ? "Upgrade @exeris/ai-bridge to a release that implements this requirement."
+                : "Rebuild or re-download that SDK release into the local Maven repository.",
               skew: skewOf("project", version),
             },
             true,
@@ -375,12 +381,15 @@ function resolveContract(
       reference: referenceOf(bundledVersion),
       skew: skewOf("bundled", bundledVersion, note),
     };
-  } catch {
+  } catch (err) {
     return {
       result: jsonResult(
         {
           error: "brief_schema_unusable",
-          reason: "The bundled brief schema cannot be compiled as JSON Schema draft 2020-12.",
+          reason:
+            err instanceof UnknownReaderRequirementError
+              ? `The bundled brief schema cannot be used: ${err.message}, and validating without it would call an invalid brief valid.`
+              : "The bundled brief schema cannot be compiled as JSON Schema draft 2020-12.",
           remedy: "Upgrade @exeris/ai-bridge.",
           skew: skewOf("bundled", bundledVersion, note),
         },

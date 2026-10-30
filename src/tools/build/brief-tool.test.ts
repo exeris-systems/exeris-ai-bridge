@@ -83,6 +83,9 @@ const ALL_FIXTURES = [
   "gap-dangling-fulfilled-by",
   "gap-re-encoded-structure",
   "gap-workflow-without-response",
+  "gap-repeated-question-id",
+  "gap-undeclared-workflow-actor",
+  "gap-unknown-concern-hint",
 ];
 
 /** The bundle as the package ships it: the brief schema vendored from the 0.13.1 release. */
@@ -165,11 +168,14 @@ function paths(b: BriefOut): string[] {
 // ---- the SDK's own fixtures ---------------------------------------------------------------
 
 // The expected verdicts are the ones exeris-sdk's BriefSchemaContractTest asserts
-// for the same nine documents at the same tag.
+// for the same twelve documents (nine at tag v0.13.1, three from exeris-sdk#258).
 const SDK_VERDICTS: Record<string, { valid: boolean; ready: boolean }> = {
   ready: { valid: true, ready: true },
   minimal: { valid: true, ready: true },
   "gap-workflow-without-response": { valid: false, ready: false },
+  "gap-repeated-question-id": { valid: false, ready: false },
+  "gap-undeclared-workflow-actor": { valid: false, ready: false },
+  "gap-unknown-concern-hint": { valid: false, ready: false },
   "gap-blocking-question-open": { valid: true, ready: false },
   "gap-assumption-without-owner": { valid: false, ready: false },
   "gap-re-encoded-structure": { valid: false, ready: false },
@@ -178,7 +184,7 @@ const SDK_VERDICTS: Record<string, { valid: boolean; ready: boolean }> = {
   "empty-object": { valid: false, ready: false },
 };
 
-test("the bridge agrees with the SDK's verdict on every one of its nine fixtures", async () => {
+test("the bridge agrees with the SDK's verdict on every one of its twelve fixtures", async () => {
   assert.deepEqual(Object.keys(SDK_VERDICTS).sort(), [...ALL_FIXTURES].sort());
   for (const name of ALL_FIXTURES) {
     const b = await one(project({ briefs: { [`${name}.brief.yaml`]: fixture(name) } }), name);
@@ -653,6 +659,79 @@ test("the brief schema states no format keyword, so skipping format validation l
   assert.deepEqual(formats, []);
 });
 
+// ---- validity is the schema plus its reader requirements -----------------------------------
+
+/** The 0.13.1 schema as released: it lists only UNKNOWN_PROPERTIES_ARE_ERRORS. */
+function listing(ids: readonly string[] | undefined): string {
+  const schema = JSON.parse(SCHEMA_TEXT) as Record<string, unknown>;
+  if (ids === undefined) delete schema["x-exeris-reader-requirements"];
+  else schema["x-exeris-reader-requirements"] = ids.map((id) => ({ id }));
+  return JSON.stringify(schema);
+}
+
+test("the released 0.13.1 schema lists only the unknown-properties requirement", () => {
+  const ids = (JSON.parse(SCHEMA_TEXT)["x-exeris-reader-requirements"] as { id: string }[]).map((r) => r.id);
+  assert.deepEqual(ids, ["UNKNOWN_PROPERTIES_ARE_ERRORS"]);
+});
+
+test("a repeated open-question id is reported at the later question", async () => {
+  const b = await one(project({ briefs: { "q.brief.yaml": fixture("gap-repeated-question-id") } }), "q");
+  assert.equal(b.valid, false);
+  assert.equal(b.ready, false);
+  assert.deepEqual(b.errors, [{ path: "/openQuestions/1/id", message: "repeats the id of /openQuestions/0" }]);
+});
+
+test("a workflow actor that no declared actor carries is reported at that actor", async () => {
+  const b = await one(project({ briefs: { "w.brief.yaml": fixture("gap-undeclared-workflow-actor") } }), "w");
+  assert.equal(b.valid, false);
+  assert.deepEqual(b.errors, [{ path: "/workflows/0/actors/1", message: "names no actor the brief declares" }]);
+});
+
+test("both rules apply under a schema that lists only the unknown-properties requirement", async () => {
+  for (const [name, path] of [["gap-repeated-question-id", "/openQuestions/1/id"], ["gap-undeclared-workflow-actor", "/workflows/0/actors/1"]]) {
+    const b = await one(project({ briefs: { "x.brief.yaml": fixture(name) } }), "x", listing(["UNKNOWN_PROPERTIES_ARE_ERRORS"]), emptyM2());
+    assert.equal(b.valid, false, name);
+    assert.deepEqual(paths(b), [path], name);
+  }
+});
+
+test("a schema with no requirements list, or a malformed one, still has both rules applied", async () => {
+  for (const text of [listing(undefined), JSON.stringify({ ...JSON.parse(SCHEMA_TEXT), "x-exeris-reader-requirements": "nope" })]) {
+    const b = await one(project({ briefs: { "x.brief.yaml": fixture("gap-repeated-question-id") } }), "x", text, emptyM2());
+    assert.equal(b.valid, false);
+    assert.deepEqual(paths(b), ["/openQuestions/1/id"]);
+  }
+});
+
+test("a schema stating a requirement this build does not know is refused, from either source", async () => {
+  const text = listing(["UNKNOWN_PROPERTIES_ARE_ERRORS", "SOMETHING_NEW"]);
+  const root = project({ briefs: { "x.brief.yaml": fixture("minimal") } });
+  for (const [schema, m2] of [[text, emptyM2()], [undefined, m2With(text)]] as const) {
+    const r = await run(root, { area: "x" }, schema, m2);
+    assert.equal(r.res.isError, true);
+    const body = r.payload as unknown as { error: string; reason: string; remedy: string };
+    assert.equal(body.error, "brief_schema_unusable");
+    assert.match(body.reason, /SOMETHING_NEW/);
+    assert.match(body.remedy, /Upgrade @exeris\/ai-bridge/);
+  }
+});
+
+test("the rules do not double-report a shape the schema already rejects", async () => {
+  const wrong = fixture("minimal") + "openQuestions: nope\n";
+  const a = await one(project({ briefs: { "x.brief.yaml": wrong } }), "x");
+  assert.equal(a.valid, false);
+  assert.deepEqual(paths(a), ["/openQuestions"]);
+
+  const noActors = fixture("minimal").replace("actors:\n  - name: Clerk\n", "actors: 5\n").replace("workflows:\n", "workflows:\n  - actors: [Ghost]\n    name: W\n    criteria: []\n");
+  const b = await one(project({ briefs: { "y.brief.yaml": noActors } }), "y");
+  assert.equal(b.errors.some((e) => e.message === "names no actor the brief declares"), false);
+});
+
+test("the unknown-concern-hint fixture is invalid on the schema alone, at the hint", async () => {
+  const b = await one(project({ briefs: { "h.brief.yaml": fixture("gap-unknown-concern-hint") } }), "h");
+  assert.deepEqual(paths(b), ["/glossary/0/concernHints/0"]);
+});
+
 // ---- skew is the schema used against the pin ----------------------------------------------
 
 test("a project schema that matches the pin is aligned and carries no warning", async () => {
@@ -792,7 +871,7 @@ test("the definition names the pom chain read from the local Maven repository an
   assert.match(description, /valid:false, ready:false with the skew reported, and is not validated/);
 });
 
-test("the fixture directory holds exactly the SDK's nine briefs", () => {
+test("the fixture directory holds exactly the SDK's twelve briefs", () => {
   const names = readdirSync(BRIEFS).filter((n) => n.endsWith(".brief.yaml")).map((n) => n.replace(".brief.yaml", "")).sort();
   assert.deepEqual(names, [...ALL_FIXTURES].sort());
 });
