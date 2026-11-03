@@ -395,8 +395,8 @@ function collectSdkSources(
   },
 ): SourceEntry[] {
   const { repo, warnFn, failFn, findJar, extract, allowSnapshots, explicitVersion } = options;
-  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.13.1" });
-  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.13.1" });
+  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.13.2" });
+  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.13.2" });
 
   if (!ann || !model) {
     if (options.strict) {

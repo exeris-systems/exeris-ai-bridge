@@ -21,7 +21,7 @@ const BRIEFS = join(REPO, "test", "fixtures", "briefs");
 const FIXTURE_M2 = join(REPO, "test", "fixtures", "m2");
 const FIXTURE_JAR = join(
   FIXTURE_M2,
-  "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar",
+  "eu/exeris/exeris-sdk-source-model/0.13.2/exeris-sdk-source-model-0.13.2.jar",
 );
 const ENTRY = "META-INF/exeris/brief-schema.json";
 const SCHEMA_TEXT = extractFromJar(FIXTURE_JAR, ENTRY).toString("utf8");
@@ -51,7 +51,7 @@ interface ProjectOptions {
 /** A project with the named briefs (file name to text) and, optionally, emitted metadata. */
 function project(options: ProjectOptions = {}): string {
   const root = scratch("exeris-brief-");
-  const sdk = options.sdk === undefined ? "0.13.1" : options.sdk;
+  const sdk = options.sdk === undefined ? "0.13.2" : options.sdk;
   if (sdk !== null) writeFileSync(join(root, "pom.xml"), pom(sdk));
   if (options.briefs !== undefined) {
     mkdirSync(join(root, "docs", "briefs"), { recursive: true });
@@ -88,7 +88,7 @@ const ALL_FIXTURES = [
   "gap-unknown-concern-hint",
 ];
 
-/** The bundle as the package ships it: the brief schema vendored from the 0.13.1 release. */
+/** The bundle as the package ships it: the brief schema vendored from the 0.13.2 release. */
 function briefBundle(schemaText: string = SCHEMA_TEXT): { bundle: BundleState; dir: string } {
   const dir = scratch("exeris-brief-bundle-");
   writeFileSync(join(dir, "brief-schema.json"), schemaText);
@@ -104,7 +104,7 @@ function briefBundle(schemaText: string = SCHEMA_TEXT): { bundle: BundleState; d
           path: "brief-schema.json",
           sha256: createHash("sha256").update(Buffer.from(schemaText, "utf8")).digest("hex"),
           bytes: Buffer.byteLength(schemaText),
-          sourceArtifact: "eu.exeris:exeris-sdk-source-model:0.13.1",
+          sourceArtifact: "eu.exeris:exeris-sdk-source-model:0.13.2",
         },
       ],
     },
@@ -357,7 +357,7 @@ test("a brief that is a symlink to a file inside the project but outside docs/br
 // ---- which schema validates ---------------------------------------------------------------
 
 /** A local Maven repository whose pinned source-model jar carries `text` as its brief schema. */
-function m2With(text: string, version = "0.13.1"): string {
+function m2With(text: string, version = "0.13.2"): string {
   const repo = emptyM2();
   writeJar(join(repo, "eu/exeris/exeris-sdk-source-model", version, `exeris-sdk-source-model-${version}.jar`), { [ENTRY]: text });
   return repo;
@@ -366,7 +366,7 @@ function m2With(text: string, version = "0.13.1"): string {
 function stricterSchema(): string {
   const schema = JSON.parse(SCHEMA_TEXT) as { sdkVersion: string; $defs: { Brief: { required: string[] } } };
   schema.$defs.Brief.required.push("goals");
-  schema.sdkVersion = "0.13.1-pinned";
+  schema.sdkVersion = "0.13.2-pinned";
   return JSON.stringify(schema);
 }
 
@@ -382,9 +382,9 @@ test("the schema in the project's pinned jar wins over the bundled one", async (
   assert.equal(viaProject.valid, false);
   assert.ok(paths(viaProject).includes("/goals"), JSON.stringify(viaProject.errors));
   assert.equal(viaProject.skew.schemaSource, "project");
-  assert.equal(viaProject.skew.schemaSdkVersion, "0.13.1-pinned");
-  assert.equal(viaProject.skew.projectSdkVersion, "0.13.1");
-  assert.equal(viaProject.skew.bundledSdkVersion, "0.13.1");
+  assert.equal(viaProject.skew.schemaSdkVersion, "0.13.2-pinned");
+  assert.equal(viaProject.skew.projectSdkVersion, "0.13.2");
+  assert.equal(viaProject.skew.bundledSdkVersion, "0.13.2");
   assert.equal(viaProject.skew.status, "aligned");
 });
 
@@ -393,7 +393,7 @@ test("skew has the shape sdk-* reports, and says when the pin differs from the b
   const b = await one(root, "m", undefined, emptyM2());
   assert.equal(b.skew.status, "skew_detected");
   assert.equal(b.skew.projectSdkVersion, "0.13.0");
-  assert.equal(b.skew.bundledSdkVersion, "0.13.1");
+  assert.equal(b.skew.bundledSdkVersion, "0.13.2");
   assert.equal(b.skew.schemaSource, "bundled");
   assert.equal(b.skew.source, "dependency");
   assert.match(String(b.skew.warning), /0\.13\.0/);
@@ -437,11 +437,11 @@ test("a brief written against a newer SDK than the project pins is skew and is n
   assert.equal(b.skew.briefSchema, "0.14.0");
   assert.equal(b.errors.length, 1);
   assert.equal(b.errors[0].path, "/briefSchema");
-  assert.match(b.errors[0].message, /newer than the SDK 0\.13\.1/);
+  assert.match(b.errors[0].message, /newer than the SDK 0\.13\.2/);
   assert.deepEqual(b.assumed, []);
 
   // At the pin it is validated.
-  const same = fixture("ready").replace("briefSchema: 0.13.0", "briefSchema: 0.13.1");
+  const same = fixture("ready").replace("briefSchema: 0.13.0", "briefSchema: 0.13.2");
   assert.equal((await one(project({ briefs: { "n.brief.yaml": same } }), "n")).ready, true);
 });
 
@@ -461,7 +461,7 @@ test("a project pinned below the first SDK with a brief contract gets a reason a
 
 const INVOICE = {
   "Invoice.json": {
-    schemaVersion: "0.13.1",
+    schemaVersion: "0.13.2",
     entityName: "Invoice",
     packageName: "com.acme.billing",
     actions: [{ name: "issue" }],
@@ -490,7 +490,7 @@ test("references that match the emitted metadata resolve", async () => {
 test("a reference that matches nothing is unresolved, and does not change readiness", async () => {
   const metadata = {
     "Customer.json": {
-      schemaVersion: "0.13.1",
+      schemaVersion: "0.13.2",
       entityName: "Customer",
       packageName: "com.acme.crm",
       actions: [{ name: "enrol" }],
@@ -661,7 +661,6 @@ test("the brief schema states no format keyword, so skipping format validation l
 
 // ---- validity is the schema plus its reader requirements -----------------------------------
 
-/** The 0.13.1 schema as released: it lists only UNKNOWN_PROPERTIES_ARE_ERRORS. */
 function listing(ids: readonly string[] | undefined): string {
   const schema = JSON.parse(SCHEMA_TEXT) as Record<string, unknown>;
   if (ids === undefined) delete schema["x-exeris-reader-requirements"];
@@ -669,9 +668,9 @@ function listing(ids: readonly string[] | undefined): string {
   return JSON.stringify(schema);
 }
 
-test("the released 0.13.1 schema lists only the unknown-properties requirement", () => {
+test("the released 0.13.2 schema lists all three reader requirements", () => {
   const ids = (JSON.parse(SCHEMA_TEXT)["x-exeris-reader-requirements"] as { id: string }[]).map((r) => r.id);
-  assert.deepEqual(ids, ["UNKNOWN_PROPERTIES_ARE_ERRORS"]);
+  assert.deepEqual(ids, ["UNKNOWN_PROPERTIES_ARE_ERRORS", "QUESTION_IDS_ARE_UNIQUE", "WORKFLOW_ACTORS_ARE_DECLARED"]);
 });
 
 test("a repeated open-question id is reported at the later question", async () => {
@@ -746,15 +745,15 @@ test("a pin whose jar is absent falls back to the bundled schema, and a newer br
   const root = project({ sdk: "0.14.0", briefs: { "n.brief.yaml": newer, "o.brief.yaml": fixture("minimal") } });
   const n = await one(root, "n", undefined, emptyM2());
   assert.equal(n.skew.schemaSource, "bundled");
-  assert.equal(n.skew.schemaSdkVersion, "0.13.1");
+  assert.equal(n.skew.schemaSdkVersion, "0.13.2");
   assert.equal(n.skew.projectSdkVersion, "0.14.0");
   assert.equal(n.skew.status, "skew_detected");
-  assert.match(String(n.skew.warning), /bundled with this bridge, from 0\.13\.1/);
+  assert.match(String(n.skew.warning), /bundled with this bridge, from 0\.13\.2/);
   assert.match(String(n.skew.warning), /0\.14\.0 is newer/);
   assert.equal(n.valid, false);
   assert.equal(n.ready, false);
   assert.equal(n.errors[0].path, "/briefSchema");
-  assert.match(n.errors[0].message, /newer than the SDK 0\.13\.1 whose brief schema was used/);
+  assert.match(n.errors[0].message, /newer than the SDK 0\.13\.2 whose brief schema was used/);
   // A brief at the schema's own release is validated, with the skew still reported.
   const o = await one(root, "o", undefined, emptyM2());
   assert.equal(o.valid, true);
@@ -765,7 +764,7 @@ test("with no readable pin a brief newer than the schema used is still not valid
   const newer = fixture("ready").replace("briefSchema: 0.13.0", "briefSchema: 0.14.0");
   const b = await one(project({ sdk: null, briefs: { "n.brief.yaml": newer } }), "n");
   assert.equal(b.skew.projectSdkVersion, undefined);
-  assert.equal(b.skew.schemaSdkVersion, "0.13.1");
+  assert.equal(b.skew.schemaSdkVersion, "0.13.2");
   assert.equal(b.skew.status, "skew_detected");
   assert.equal(b.valid, false);
   assert.equal(b.errors[0].path, "/briefSchema");
@@ -776,7 +775,7 @@ test("with no readable pin a brief newer than the schema used is still not valid
 
 test("a corrupt pinned jar is reported as unreadable with its cause, not as lacking the entry", async () => {
   const repo = emptyM2();
-  const jar = join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar");
+  const jar = join(repo, "eu/exeris/exeris-sdk-source-model/0.13.2/exeris-sdk-source-model-0.13.2.jar");
   mkdirSync(dirname(jar), { recursive: true });
   writeFileSync(jar, Buffer.alloc(300, 1));
   const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m", undefined, repo);
@@ -788,7 +787,7 @@ test("a corrupt pinned jar is reported as unreadable with its cause, not as lack
 
 test("a pinned jar without the entry says it carries none", async () => {
   const repo = emptyM2();
-  writeJar(join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar"), { "x.txt": "y" });
+  writeJar(join(repo, "eu/exeris/exeris-sdk-source-model/0.13.2/exeris-sdk-source-model-0.13.2.jar"), { "x.txt": "y" });
   const b = await one(project({ briefs: { "m.brief.yaml": fixture("minimal") } }), "m", undefined, repo);
   assert.match(String(b.skew.note), /carries no META-INF\/exeris\/brief-schema\.json/);
 });
@@ -796,7 +795,7 @@ test("a pinned jar without the entry says it carries none", async () => {
 test("a deflated schema in the pinned jar is used", async () => {
   const repo = emptyM2();
   writeJar(
-    join(repo, "eu/exeris/exeris-sdk-source-model/0.13.1/exeris-sdk-source-model-0.13.1.jar"),
+    join(repo, "eu/exeris/exeris-sdk-source-model/0.13.2/exeris-sdk-source-model-0.13.2.jar"),
     { [ENTRY]: stricterSchema() },
     { deflate: true },
   );

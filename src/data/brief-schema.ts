@@ -75,7 +75,7 @@ export function loadBriefSchema(bundle: BundleState, rootOverride?: string): Bri
       state: "unavailable",
       reason: "The bundled reference data carries no brief schema.",
       remedy:
-        "Install a published @exeris/ai-bridge, or run npm run vendor:data with EXERIS_SDK_VERSION set to 0.13.1 or later.",
+        "Install a published @exeris/ai-bridge, or run npm run vendor:data with EXERIS_SDK_VERSION set to 0.13.2 or later.",
     };
   }
   const read = readBundleEntry(bundle, BRIEF_SCHEMA_ENTRY, rootOverride);

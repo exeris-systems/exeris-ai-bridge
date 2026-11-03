@@ -20,7 +20,7 @@ const SCHEMA = JSON.stringify({
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://exeris.eu/schema/sdk/brief/1.json",
   briefSchemaFormat: 1,
-  sdkVersion: "0.13.1",
+  sdkVersion: "0.13.2",
 });
 
 const config: BridgeConfig = {
@@ -58,7 +58,7 @@ function bundleWith(text: string, digestOf: string = text): BundleState {
         path: "brief-schema.json",
         sha256: createHash("sha256").update(digestOf, "utf8").digest("hex"),
         bytes: Buffer.byteLength(text),
-        sourceArtifact: "eu.exeris:exeris-sdk-source-model:0.13.1",
+        sourceArtifact: "eu.exeris:exeris-sdk-source-model:0.13.2",
       },
     ],
   };
