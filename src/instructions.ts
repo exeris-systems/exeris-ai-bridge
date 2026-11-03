@@ -64,7 +64,10 @@ Tool names are \`family-tool\`:
             application — ask it before hand-writing either.
             \`build-preview_generation\` runs the project's pinned generator over
             the emitted metadata and returns what it would write, diffed against
-            the committed tree, without writing to the project
+            the committed tree, without writing to the project.
+            \`build-validate_brief\` checks the project's discovery briefs
+            (docs/briefs/<area>.brief.yaml) against the brief schema and says
+            whether each is ready; it is local only and writes nothing
   caps-*    the capability composition of YOUR OWN project, from the
             cap-manifest.json produced at build time — modules, provided services, init order, stamp
   bridge-*  this server itself; never unavailable

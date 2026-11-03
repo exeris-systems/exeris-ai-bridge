@@ -248,6 +248,7 @@ function assertBootsDark({
   starter,
   previewJava,
   previewTs,
+  briefs,
   sdkList,
   sdkAst,
   sdkDescribe,
@@ -387,6 +388,12 @@ function assertBootsDark({
   assert.equal(diagnosticPayload.recognised, true, "the diagnostic catalogue did not survive packaging");
   assert.equal(diagnosticPayload.matches[0].id, "processor/universe-tier-reserved");
 
+  assert.ok(!briefs.isError, `build-validate_brief errored on a project with no briefs: ${briefs.content[0].text}`);
+  const briefsPayload = JSON.parse(briefs.content[0].text);
+  assert.equal(briefsPayload.present, false, "a project with no docs/briefs must answer present:false");
+  assert.deepEqual(briefsPayload.briefs, []);
+  assert.equal(briefs.content[0].text.includes('"ready": true'), false, "a project with no briefs must never be ready");
+
   assert.ok(!starter.isError, `build-get_starter errored: ${starter.content[0].text}`);
   const starterPayload = JSON.parse(starter.content[0].text);
   assert.deepEqual(
@@ -494,6 +501,7 @@ function assertSurfaceInvariant(dark, lit) {
   for (const family of ["docs", "sdk", "lsp", "kernel", "build", "caps"]) {
     assert.ok(names.some((n) => n.startsWith(`${family}-`)), `${family}:* vanished from tools/list`);
   }
+  assert.ok(names.includes("build-validate_brief"), "build-validate_brief vanished from tools/list");
 }
 
 /** The launch ladder resolves through a real install, not only in a unit test. */
@@ -626,6 +634,13 @@ async function interrogate(project, home, extraEnv) {
       arguments: { target: "ts" },
     });
 
+    // The brief tool is local to the project: with no docs/briefs it says none
+    // exist, as state, and never says a brief is ready.
+    const briefs = await client.request("tools/call", {
+      name: "build-validate_brief",
+      arguments: {},
+    });
+
     const sdkList = await client.request("tools/call", {
       name: "sdk-list_annotations",
       arguments: {},
@@ -671,6 +686,7 @@ async function interrogate(project, home, extraEnv) {
       starter,
       previewJava,
       previewTs,
+      briefs,
       sdkList,
       sdkAst,
       sdkDescribe,

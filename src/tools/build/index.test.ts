@@ -80,7 +80,7 @@ const BUILT = {
   "README.md": "not metadata",
 };
 
-test("registerBuildTools registers exactly the six build-* tools", () => {
+test("registerBuildTools registers exactly the eight build-* tools", () => {
   const names = registerBuildTools(configFor(null))
     .map((t) => t.definition.name)
     .sort();
@@ -92,6 +92,7 @@ test("registerBuildTools registers exactly the six build-* tools", () => {
     "build-get_starter",
     "build-list_domains",
     "build-preview_generation",
+    "build-validate_brief",
   ]);
 });
 

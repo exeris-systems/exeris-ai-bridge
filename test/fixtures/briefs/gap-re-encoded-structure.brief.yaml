@@ -1,0 +1,17 @@
+briefSchema: 0.13.0
+purpose: Keep a list of customers.
+nonGoals:
+  - Marketing.
+actors:
+  - name: Clerk
+glossary:
+  - term: Customer
+    meaning: Someone who buys.
+    fields:
+      - name: email
+        type: String
+workflows:
+  - name: Register a customer
+    criteria:
+      - kind: ubiquitous
+        response: the system keeps one record per customer

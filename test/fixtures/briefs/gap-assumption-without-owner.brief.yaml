@@ -1,0 +1,17 @@
+briefSchema: 0.13.0
+purpose: Keep a list of customers.
+nonGoals:
+  - Marketing.
+actors:
+  - name: Clerk
+workflows:
+  - name: Register a customer
+    criteria:
+      - kind: ubiquitous
+        response: the system keeps one record per customer
+openQuestions:
+  - id: Q1
+    question: Is a customer a person or a company?
+    blocking: true
+    status: assumed
+    assumption: A company.

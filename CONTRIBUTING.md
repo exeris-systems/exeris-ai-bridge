@@ -133,7 +133,7 @@ printf '%s\n' \
   | node dist/server.js
 ```
 
-`tools/list` advertises all 33 tool definitions (9 `docs-*`, 4 `lsp-*`, 4 `kernel-*`, 7 `build-*`, 2 `caps-*`, 5 `sdk-*`, 2 `bridge-*`); `tools/call` on `docs-get_adr` returns the ADR-024 body.
+`tools/list` advertises all 34 tool definitions (9 `docs-*`, 4 `lsp-*`, 4 `kernel-*`, 8 `build-*`, 2 `caps-*`, 5 `sdk-*`, 2 `bridge-*`); `tools/call` on `docs-get_adr` returns the ADR-024 body.
 
 ## Repository layout
 
@@ -179,11 +179,15 @@ src/
                              per SPI method (cap-blind — no list_capabilities)
     kernel/shapes.ts         KernelDiagnostics wire shapes + validators (Providers/BootstrapDag/
                              Subsystem/RuntimeErgonomics)
-    build/index.ts           registers the seven build-* tools; build-list_domains,
+    build/index.ts           registers the eight build-* tools; build-list_domains,
                              build-get_domain_metadata, build-get_detach_state and
                              build-explain_diagnostic read the annotation processor's own output
                              in target/classes/exeris-metadata and the codegen output tree in
                              src/main/generated/java
+    build/brief-tool.ts      build-validate_brief — docs/briefs/<area>.brief.yaml against the brief schema
+                             (the pinned SDK jar's, else the bundled one); brief.ts parses YAML and
+                             restates the readiness gate, brief-source.ts reads the emitted metadata
+                             a fulfilledBy reference resolves against; writes nothing
     build/starter.ts         build-get_starter — pom.xml / package.json for a new application, from
                              the vendored exeris-app-bom triple; bundled data only, writes nothing
     build/tooling-skew.ts    toolingSkew — the project's pinned tooling release against the one the

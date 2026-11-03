@@ -1,0 +1,20 @@
+briefSchema: 0.13.0
+purpose: Keep a list of customers.
+nonGoals:
+  - Marketing.
+actors:
+  - name: Clerk
+glossary:
+  - term: Customer
+    meaning: Someone who buys.
+    fulfilledBy:
+      - kind: entity
+        ref: com.acme.crm.Customer
+workflows:
+  - name: Register a customer
+    criteria:
+      - kind: ubiquitous
+        response: the system keeps one record per customer
+    fulfilledBy:
+      - kind: action
+        ref: com.acme.crm.Customer#register
