@@ -10,6 +10,7 @@ import type { BridgeConfig } from "../config/env.js";
 import type { BundleState } from "../data/bundle.js";
 import { authorDomain } from "./author-domain.js";
 import { diagnoseBuildFailure } from "./diagnose-build-failure.js";
+import { discoverRequirements } from "./discover-requirements.js";
 import { draftAdr } from "./draft-adr.js";
 import { explainMyBuild } from "./explain-my-build.js";
 import { migrateSdkVersion } from "./migrate-sdk-version.js";
@@ -39,6 +40,7 @@ export const PROMPTS: readonly PromptDefinition[] = [
   explainMyBuild,
   diagnoseBuildFailure,
   migrateSdkVersion,
+  discoverRequirements,
 ];
 
 /**

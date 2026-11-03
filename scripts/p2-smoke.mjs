@@ -350,6 +350,7 @@ function assertBootsDark({
     [
       "author-domain",
       "diagnose-build-failure",
+      "discover-requirements",
       "draft-adr",
       "explain-my-build",
       "migrate-sdk-version",
