@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-10-28
+last-verified: 2026-11-03
 ---
 
 # Contributing to `exeris-ai-bridge`
@@ -234,14 +234,18 @@ src/
     subscriptions.ts         resources/subscribe for exeris://docs/adr-index, on the shared watcher
     index.ts                 wires the resource handlers and the subscription state to the server
   prompts/
-    index.ts                 the eight stateless prompt templates: list, argument validation, render
+    index.ts                 the nine stateless prompt templates: list, argument validation, render
     context.ts               what a prompt embeds — docs resources and bundled SDK data
     types.ts                 prompt definition shape and the argument bounds
-    *.ts                     one file per prompt (author-domain, diagnose-build-failure, draft-adr,
-                             explain-my-build, migrate-sdk-version, review-three-tier-violations,
+    *.ts                     one file per prompt (author-domain, diagnose-build-failure,
+                             discover-requirements, draft-adr, explain-my-build,
+                             migrate-sdk-version, review-three-tier-violations,
                              route-this-task, wall-audit)
   data/bundle.ts             reader for the bundled reference corpus — manifest parse,
                              per-entry SHA-256 verification, sandboxed to data/
+  data/brief-schema.ts       the vendored brief schema: format check (briefSchemaFormat 1) and a loader
+                             that re-checks the digest
+  data/jar-entry.ts          bounded in-process read of one entry from a Maven jar; no child process
   data/generator-catalogue.ts  loader and matcher for the vendored exeris-tooling generator
                              catalogue (ADR-097); never throws, reports why it is absent
   data/app-starter.ts        reads the tested tooling + kernel + SDK triple out of the exeris-app-bom
@@ -267,7 +271,7 @@ docs/
 
 ## Releasing
 
-A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag, and the whole run for a manual dispatch against an existing tag: it checks the tag against `package.json` and `server.json`, fetches the vendored artefacts with Maven, runs the tests and `smoke:p2`, packs the tarball (prepack vendors, strictly, the SDK reference data, the generator catalogue, the application starter and the docs registry snapshot), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. The fetched artefacts are the two `exeris-sdk` jars (`exeris-sdk-annotations`, `exeris-sdk-source-model`), the `exeris-codegen-java` jar and the `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs. The job needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog, AST schema and brief schema are vendored from (`0.13.1`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java`, and the application starter from the three POMs (`0.10.0`). Everything is fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only for the two SDK jars, and only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
+A `v*` tag runs [`release.yml`](.github/workflows/release.yml). Its `package` job is a dry run on every tag, and the whole run for a manual dispatch against an existing tag: it checks the tag against `package.json` and `server.json`, fetches the vendored artefacts with Maven, runs the tests and `smoke:p2`, packs the tarball (prepack vendors, strictly, the SDK reference data, the generator catalogue, the application starter and the docs registry snapshot), builds the `.mcpb` bundle from that tarball, and keeps all three with a `SHA256SUMS` as a workflow artifact. The fetched artefacts are the two `exeris-sdk` jars (`exeris-sdk-annotations`, `exeris-sdk-source-model`), the `exeris-codegen-java` jar and the `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs. The job needs two repository variables: `EXERIS_SDK_VERSION` — the released `exeris-sdk` version the annotation catalog, AST schema and brief schema are vendored from (`0.13.2`) — and `EXERIS_TOOLING_VERSION` — the released `exeris-tooling` version the generator catalogue is vendored from, out of `eu.exeris:exeris-codegen-java`, and the application starter from the three POMs (`0.10.0`). Everything is fetched from Maven Central; the secret `PACKAGES_READ_TOKEN` is consulted only for the two SDK jars, and only when set, for a release not yet on Central. The jobs that publish additionally need `RELEASE_PUBLISH`, below.
 
 Publishing runs only for a pushed tag when the repository variable `RELEASE_PUBLISH` is `true`, in two jobs.
 

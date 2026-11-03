@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-ai-bridge
 status: active
-last-verified: 2026-10-28
+last-verified: 2026-11-03
 ---
 
 # Configuration reference
@@ -39,7 +39,7 @@ When something is dark, **`bridge-health` is the tool to call**. It reports the 
 
 ## Briefs
 
-`build-validate_brief` checks the discovery briefs of **the developer's own project**: `docs/briefs/<area>.brief.yaml` under the project root, never anywhere else. It is local only by family, reads nothing but the briefs, the project's `pom.xml`, the brief schema and, when present, `target/classes/exeris-metadata`, and writes nothing. Its bounds, each named in the answer that hits it:
+`build-validate_brief` checks the discovery briefs of **the developer's own project**: `docs/briefs/<area>.brief.yaml` under the project root, never anywhere else. It is local only by family, reads nothing but the briefs, the project's `pom.xml` (and the application BOM POMs it inherits from, in the local Maven repository), the brief schema and, when present, `target/classes/exeris-metadata`, and writes nothing. Its bounds, each named in the answer that hits it:
 
 - `area` is a name matching `^[a-z0-9][a-z0-9-]*$`, at most 64 characters, resolved inside `docs/briefs`; a path, an uppercase name or a symlink that leaves `docs/briefs` is refused. Without it every `*.brief.yaml` directly in that directory is validated, at most 50 per call; files whose stem is not such a name are listed under `ignored`.
 - A brief larger than 256 KiB is not read. It is parsed as one YAML 1.2 core-schema document: no custom tags, unique keys, at most 10 alias expansions; a second document, a non-mapping root or an empty file is an error, not a brief.
@@ -78,10 +78,10 @@ reason and remedy instead.
 
 ## Resources and prompts
 
-Neither has a variable of its own. The `exeris://docs/*` resources and the eight prompt templates are fixed lists, identical in every mode and environment for the reason `tools/list` is; what varies is whether a read or a render finds its content. `exeris://sdk/brief-schema` is the one resource that depends on the bundle: it is listed only when the bundle carries the brief schema, and it needs no project and no ecosystem root. Reading it with the entry missing, corrupt or of a `briefSchemaFormat` this build does not read answers with an internal error whose data names the `sdk` family, the reason and the remedy.
+Neither has a variable of its own. The `exeris://docs/*` resources and the nine prompt templates are fixed lists, identical in every mode and environment for the reason `tools/list` is; what varies is whether a read or a render finds its content. `exeris://sdk/brief-schema` is the one resource that depends on the bundle: it is listed only when the bundle carries the brief schema, and it needs no project and no ecosystem root. Reading it with the entry missing, corrupt or of a `briefSchemaFormat` this build does not read answers with an internal error whose data names the `sdk` family, the reason and the remedy.
 
 - **Resources** read the registry tier of `docs-*` — the same functions, the same checkout-or-snapshot resolution, the same sandbox and public-scope policy — so `EXERIS_DOCS_ROOT` decides what they return. With `docs` unavailable, a read answers with an internal error whose data is the `family_unavailable` reason and remedy.
-- **Prompts** embed that content as resource messages and the bundled SDK data as text. Where context cannot be embedded, the prompt says which resource to read instead. `route-this-task` embeds the ecosystem's top-level `CLAUDE.md`, which only a checkout has: over the snapshot, or with `docs` unavailable, it answers that routing needs a checkout.
+- **Prompts** embed that content as resource messages and the bundled SDK data as text. Where context cannot be embedded, the prompt says which resource to read instead. `route-this-task` embeds the ecosystem's top-level `CLAUDE.md`, which only a checkout has: over the snapshot, or with `docs` unavailable, it answers that routing needs a checkout. `discover-requirements` embeds nothing: it points at the `exeris://sdk/brief-schema` resource as the contract and ends in `build-validate_brief`, which needs a local server with a project root; the prompt tells the agent to write the brief itself, because the bridge writes nothing. `author-domain` names the same tool before it authors.
 
 ## Launching the Java children
 
@@ -120,7 +120,7 @@ The published package carries a small read-only corpus so an application develop
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 5, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.10.0", "eu.exeris:exeris-codegen-java:0.10.0", "eu.exeris:exeris-sdk-annotations:0.13.1", "eu.exeris:exeris-sdk-source-model:0.13.1"] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 5, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.10.0", "eu.exeris:exeris-codegen-java:0.10.0", "eu.exeris:exeris-sdk-annotations:0.13.2", "eu.exeris:exeris-sdk-source-model:0.13.2"] }
 ```
 
 The bundle ships with the **annotation catalog, AST schema and brief schema** (from the released `exeris-sdk` jars; the brief schema is pinned by the `briefSchemaFormat` it declares, and `exeris://sdk/brief-schema` serves it), the **generator catalogue** (from the released `exeris-codegen-java` jar) and the **application starter** (the tested tooling + kernel + SDK triple, from the released `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs at `EXERIS_TOOLING_VERSION`; `build-get_starter` reads it), all generated at prepack time, from the local Maven repository: the SDK jars at `EXERIS_SDK_VERSION` and the tooling artefacts at `EXERIS_TOOLING_VERSION`. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.

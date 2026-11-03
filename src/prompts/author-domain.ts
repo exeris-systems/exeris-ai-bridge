@@ -5,7 +5,7 @@ export const authorDomain: PromptDefinition = {
   name: "author-domain",
   title: "Author an @ExerisDomain entity",
   description:
-    "Pre-loads the SDK scoping rules and the AST schema, walks the agent through the @Field / @Validation split, and has it preview the change with lsp-preview_mutation instead of hand-writing it. Reads a discovery brief first when one exists.",
+    "Pre-loads the SDK scoping rules and the AST schema, walks the agent through the @Field / @Validation split, and has it preview the change with lsp-preview_mutation instead of hand-writing it. Validates the discovery brief first with build-validate_brief when one exists.",
   arguments: [
     {
       name: "entity",
@@ -43,7 +43,7 @@ export const authorDomain: PromptDefinition = {
           [
             "Follow these steps in order.",
             "",
-            `1. Brief first. If \`${briefPath}\` exists in the project, read it before anything else, and do not proceed while it is not ready. \`build-validate_brief\` is not available yet, so check by hand: the brief is not ready while any blocking question is \`open\`, and an \`assumed\` answer needs both an \`assumption\` and an \`owner\`. Stop and tell the user which entries block. If no brief exists, continue: authoring a single entity without one is a valid path.`,
+            `1. Brief first. If \`${briefPath}\` exists in the project, call \`build-validate_brief\` for the area before anything else, and do not author while it does not answer \`ready\`. A brief that is invalid, or valid with a blocking question still \`open\`, is not ready: stop and tell the user which entries block, and do not read the YAML by hand to decide otherwise. ` + NEEDS_LOCAL_SERVER + " If no brief exists, continue: authoring a single entity without one is a valid path. To write one, use the `discover-requirements` prompt.",
             "2. Look before writing. Call `lsp-list_domains` and `lsp-describe_domain` to see whether the entity exists, and `build-explain_artefacts` to see what the build already emits for it; do not hand-write SQL, a DTO or a controller the generator produces. " + NEEDS_LOCAL_SERVER,
             "3. Apply the `@Field` / `@Validation` split from the scoping rules above. `@Field` says what a field is: data shape, persistence and form lifecycle. `@Validation` is the only place a constraint is declared (min, max, length, pattern, email, url, past, future). Do not put a constraint on `@Field`, and do not put persistence or lifecycle on `@Validation`. Both land in one `FieldMetadata` record of the AST, so there is no parallel validation record.",
             "4. Preview, do not hand-write. Express the change as one SDK mutation and call `lsp-preview_mutation` with the entity's qualified name, the operation, and the `sourceDigest` from `lsp-describe_domain` as `concurrencyToken`. It returns a diff and an outcome (SUCCESS, CONFLICT, VALIDATION_ERROR, NO_BASELINE); nothing is written. " + NEEDS_LOCAL_SERVER,

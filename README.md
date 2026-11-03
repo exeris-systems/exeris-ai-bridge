@@ -94,7 +94,7 @@ error (`-32002`); docs being unavailable answers with an internal error whose da
 
 ## Prompts
 
-Eight stateless prompt templates, listed in every session on every transport. A prompt returns
+Nine stateless prompt templates, listed in every session on every transport. A prompt returns
 messages built from its template and the arguments you give it: the bridge keeps no state, runs no
 loop and calls no model or tool. Where a step needs a tool, the prompt tells the agent to call it.
 Context is embedded as resource messages (the `exeris://docs/*` resources) or as bundled SDK data;
@@ -108,7 +108,8 @@ letters, digits and hyphens).
 | `draft-adr` | `title?` | ADR template, registry index | no |
 | `route-this-task` | `task` | the ecosystem's routing rules, from an ecosystem checkout only | no |
 | `wall-audit` | `target?` | ADR-006 | no |
-| `author-domain` | `entity`, `area?` | SDK scoping rules, AST schema | `lsp-*` and `build-*` steps |
+| `author-domain` | `entity`, `area?` | SDK scoping rules, AST schema | `build-validate_brief`, `lsp-*` and `build-*` steps |
+| `discover-requirements` | `area`, `summary?` | nothing; the contract is the `exeris://sdk/brief-schema` resource; ends in `build-validate_brief` | the validation step |
 | `explain-my-build` | none | nothing; calls `build-explain_artefacts`, `build-get_detach_state` | yes |
 | `diagnose-build-failure` | `output` | SDK deprecation list | the `build-explain_diagnostic` step |
 | `migrate-sdk-version` | `targetVersion?` | SDK deprecation list | no |
@@ -150,7 +151,7 @@ The package follows semver. Until 1.0, a minor release may change a tool's outpu
 release notes list every change a client may notice. At 1.0 the tool names and input schemas are
 frozen.
 
-The next release targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.13.1 and `exeris-tooling` 0.10.0, all on
+The next release targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.13.2 and `exeris-tooling` 0.10.0, all on
 Maven Central.
 
 ## Links
