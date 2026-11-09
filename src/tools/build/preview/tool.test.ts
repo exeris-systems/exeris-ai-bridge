@@ -78,7 +78,7 @@ function fake(name: string, source: string, kind: "java" | "typescript" = "java"
   return () => ({
     state: "available",
     kind,
-    version: "0.10.0",
+    version: "0.11.0",
     source: kind === "java" ? "m2" : "node_modules",
     pinSource: kind === "java" ? "app-parent" : "node-modules",
     path: "fake/generator",
@@ -168,7 +168,7 @@ test("the preview writes nothing into the project and leaves no scratch director
   const out = payload(res);
   assert.equal(out.exitCode, 0);
   assert.equal(out.outcome, "generated");
-  assert.deepEqual(out.generator, { kind: "java", version: "0.10.0", source: "m2", path: "fake/generator" });
+  assert.deepEqual(out.generator, { kind: "java", version: "0.11.0", source: "m2", path: "fake/generator" });
   assert.deepEqual(out.files.changed.map((f: { path: string }) => f.path), ["A.java"]);
   assert.deepEqual(out.l1, { root: JAVA_L1, source: "default", seeded: true });
   assert.match(out.files.changed.find((f: { path: string }) => f.path === "A.java").diff, /-class A \{ int old; \}/);
@@ -379,7 +379,7 @@ test("a generator that cannot start is a structured error", async () => {
   const unlaunchable = (): GeneratorResolution => ({
     state: "available",
     kind: "java",
-    version: "0.10.0",
+    version: "0.11.0",
     source: "m2",
     pinSource: "app-parent",
     path: "fake/generator",
@@ -602,7 +602,7 @@ function installFakeCodegenTs(binSource: string): void {
   mkdirSync(join(dir, "dist"), { recursive: true });
   writeFileSync(
     join(dir, "package.json"),
-    JSON.stringify({ name: "@exeris/codegen-ts", version: "0.10.0", bin: { "exeris-gen": "./dist/index.js" } }),
+    JSON.stringify({ name: "@exeris/codegen-ts", version: "0.11.0", bin: { "exeris-gen": "./dist/index.js" } }),
   );
   writeFileSync(join(dir, "dist", "index.js"), binSource);
 }
@@ -688,8 +688,8 @@ test("the preview reports the pinned generator's release against the catalogue t
   );
   assert.deepEqual(aligned.toolingSkew, {
     status: "aligned",
-    bundledToolingVersion: "0.10.0",
-    projectToolingVersion: "0.10.0",
+    bundledToolingVersion: "0.11.0",
+    projectToolingVersion: "0.11.0",
     source: "app-parent",
   });
 

@@ -101,7 +101,7 @@ test("a jar produced by the Maven build is readable", () => {
     here,
     "..",
     "..",
-    "test/fixtures/m2/eu/exeris/exeris-sdk-source-model/0.13.2/exeris-sdk-source-model-0.13.2.jar",
+    "test/fixtures/m2/eu/exeris/exeris-sdk-source-model/0.13.3/exeris-sdk-source-model-0.13.3.jar",
   );
   const read = readJarEntry(real, "META-INF/exeris/brief-schema.json", 1024 * 1024);
   assert.equal(read.kind, "ok");

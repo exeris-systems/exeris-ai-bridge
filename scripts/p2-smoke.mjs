@@ -401,8 +401,8 @@ function assertBootsDark({
     starterPayload.files.map((f) => f.path),
     ["backend/pom.xml", "frontend/package.json"],
   );
-  assert.deepEqual(starterPayload.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
-  assert.equal(starterPayload.bomVersion, "0.10.0", "the application starter did not survive packaging");
+  assert.deepEqual(starterPayload.triple, { tooling: "0.11.0", kernel: "0.13.1", sdk: "0.13.3" });
+  assert.equal(starterPayload.bomVersion, "0.11.0", "the application starter did not survive packaging");
   for (const [target, result] of [
     ["java", previewJava],
     ["ts", previewTs],

@@ -117,36 +117,40 @@ const SAMPLES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * Every identifier `DiagnosticId` registers at exeris-tooling v0.10.0 —
+ * Every identifier `DiagnosticId` registers at exeris-tooling v0.11.0 —
  * exeris-diagnostics/src/main/java/eu/exeris/tooling/diagnostics/DiagnosticId.java
- * at the v0.10.0 tag. Hard-coded rather than read from anywhere, so that a
+ * at the v0.11.0 tag. Hard-coded rather than read from anywhere, so that a
  * tooling release adding identifiers is a deliberate edit here, made together
  * with the catalogue entries that explain them.
  */
-const V0_10_0_IDS: readonly string[] = [
+const V0_11_0_IDS: readonly string[] = [
   "EXT-PROC-1001", "EXT-PROC-1002", "EXT-PROC-1003", "EXT-PROC-1004", "EXT-PROC-1005",
   "EXT-PROC-1006", "EXT-PROC-1007", "EXT-PROC-1008", "EXT-PROC-1009", "EXT-PROC-1010",
-  "EXT-PROC-1011", "EXT-PROC-1012", "EXT-PROC-1013", "EXT-PROC-1014", "EXT-PROC-1015",
-  "EXT-PROC-1016", "EXT-PROC-1017", "EXT-PROC-1018", "EXT-PROC-1019",
+  "EXT-PROC-1011", "EXT-PROC-1012", "EXT-PROC-1014", "EXT-PROC-1015",
+  "EXT-PROC-1016", "EXT-PROC-1017", "EXT-PROC-1018", "EXT-PROC-1019", "EXT-PROC-1020",
+  "EXT-PROC-1021", "EXT-PROC-1022", "EXT-PROC-1023", "EXT-PROC-1024", "EXT-PROC-1025",
+  "EXT-PROC-1026", "EXT-PROC-1027", "EXT-PROC-1028", "EXT-PROC-1029", "EXT-PROC-1030",
+  "EXT-PROC-1031", "EXT-PROC-1032", "EXT-PROC-1033", "EXT-PROC-1034",
   "EXT-PROC-1101", "EXT-PROC-1102", "EXT-PROC-1103", "EXT-PROC-1105", "EXT-PROC-1106",
+  "EXT-PROC-1108", "EXT-PROC-1109",
   "EXT-PROC-1201", "EXT-PROC-1202", "EXT-PROC-1203",
   "EXT-PROC-1901", "EXT-PROC-1902",
-  "EXT-PLUG-2001", "EXT-PLUG-2002", "EXT-PLUG-2003", "EXT-PLUG-2004",
+  "EXT-PLUG-2001", "EXT-PLUG-2002", "EXT-PLUG-2003", "EXT-PLUG-2004", "EXT-PLUG-2005",
   "EXT-PLUG-2101", "EXT-PLUG-2102",
   "EXT-PLUG-2201", "EXT-PLUG-2202", "EXT-PLUG-2203", "EXT-PLUG-2204", "EXT-PLUG-2205", "EXT-PLUG-2206",
   "EXT-PLUG-2301", "EXT-PLUG-2302",
   "EXT-GEN-3001", "EXT-GEN-3002", "EXT-GEN-3003", "EXT-GEN-3004",
-  "EXT-GEN-3101", "EXT-GEN-3102", "EXT-GEN-3103", "EXT-GEN-3104",
+  "EXT-GEN-3101", "EXT-GEN-3102", "EXT-GEN-3103", "EXT-GEN-3104", "EXT-GEN-3105",
   "EXT-INIT-5001", "EXT-INIT-5002", "EXT-INIT-5003",
 ];
 
 /**
- * Identifiers exeris-tooling 0.9.0 printed and 0.10.0 retired — the "Retired
- * identifiers" section of docs/diagnostics.md at v0.10.0. A developer still on
- * 0.9.0 prints them, and a retired number is never reallocated, so their
- * entries stay.
+ * Identifiers earlier exeris-tooling releases printed and 0.10.0 or 0.11.0
+ * retired — the "Retired identifiers" section of docs/diagnostics.md at v0.11.0.
+ * A developer still on an earlier release prints them, and a retired number is
+ * never reallocated, so their entries stay.
  */
-const RETIRED_IDS: readonly string[] = ["EXT-PROC-1104", "EXT-PROC-1107"];
+const RETIRED_IDS: readonly string[] = ["EXT-PROC-1013", "EXT-PROC-1104", "EXT-PROC-1107"];
 
 /** The one identifier ADR-095 maps to several entries, told apart by their text. */
 const SHARED_IDS: ReadonlySet<string> = new Set(["EXT-PLUG-2201"]);
@@ -166,10 +170,10 @@ test("every anchored entry has a sample, and every sample an anchored entry", ()
   assert.deepEqual(sampled, anchored);
 });
 
-test("every v0.10.0 and retired identifier resolves to a catalogue entry", () => {
-  assert.equal(V0_10_0_IDS.length, 54);
-  assert.equal(new Set(V0_10_0_IDS).size, V0_10_0_IDS.length, "fixture lists an identifier twice");
-  for (const code of [...V0_10_0_IDS, ...RETIRED_IDS]) {
+test("every v0.11.0 and retired identifier resolves to a catalogue entry", () => {
+  assert.equal(V0_11_0_IDS.length, 72);
+  assert.equal(new Set(V0_11_0_IDS).size, V0_11_0_IDS.length, "fixture lists an identifier twice");
+  for (const code of [...V0_11_0_IDS, ...RETIRED_IDS]) {
     const entries = DIAGNOSTICS.filter((d) => extIdsOf(d).includes(code));
     assert.ok(entries.length > 0, `${code} has no catalogue entry`);
     if (!SHARED_IDS.has(code)) {
@@ -184,10 +188,10 @@ test("every v0.10.0 and retired identifier resolves to a catalogue entry", () =>
 });
 
 test("the catalogue names no identifier upstream does not register", () => {
-  const known = new Set([...V0_10_0_IDS, ...RETIRED_IDS]);
+  const known = new Set([...V0_11_0_IDS, ...RETIRED_IDS]);
   for (const entry of DIAGNOSTICS) {
     for (const code of extIdsOf(entry)) {
-      assert.ok(known.has(code), `${entry.id} names ${code}, which v0.10.0 neither registers nor retired`);
+      assert.ok(known.has(code), `${entry.id} names ${code}, which v0.11.0 neither registers nor retired`);
     }
   }
 });

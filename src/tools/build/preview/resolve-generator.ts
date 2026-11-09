@@ -115,7 +115,7 @@ export function resolveJavaGenerator(projectRoot: string, deps: JavaResolveDeps)
   if (!isSafeVersion(version)) {
     return unavailable(
       "The tooling version pinned in pom.xml is not a plain Maven version, so no generator is resolved for it.",
-      "Pin a release version such as 0.10.0 on exeris-app-parent or exeris-codegen-maven-plugin, then retry.",
+      "Pin a release version such as 0.11.0 on exeris-app-parent or exeris-codegen-maven-plugin, then retry.",
     );
   }
 

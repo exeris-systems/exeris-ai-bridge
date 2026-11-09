@@ -78,11 +78,11 @@ function unavailable(r: GeneratorResolution): { reason: string; remedy: string }
 }
 
 test("java: the app-parent version pins the jar, and the launch follows ADR-097", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
-  const jar = installCli("0.10.0");
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
+  const jar = installCli("0.11.0");
   const gen = available(resolveJavaGenerator(project, java(26)));
   assert.equal(gen.kind, "java");
-  assert.equal(gen.version, "0.10.0");
+  assert.equal(gen.version, "0.11.0");
   const launch = gen.launch("/meta", "/work");
   assert.equal(launch.command, "java");
   // The crash log and the JVM's working directory are the scratch directory, never the project.
@@ -102,11 +102,11 @@ test("java: the app-parent version pins the jar, and the launch follows ADR-097"
 test("java: the app-parent version wins over a plugin version", () => {
   writeFileSync(
     join(project, "pom.xml"),
-    parentPom("0.10.0").replace("</project>", pluginPom("0.9.1").replace(/<\/?project>/g, "") + "</project>"),
+    parentPom("0.11.0").replace("</project>", pluginPom("0.9.1").replace(/<\/?project>/g, "") + "</project>"),
   );
-  installCli("0.10.0");
+  installCli("0.11.0");
   installCli("0.9.1");
-  assert.equal(available(resolveJavaGenerator(project, java(25))).version, "0.10.0");
+  assert.equal(available(resolveJavaGenerator(project, java(25))).version, "0.11.0");
 });
 
 test("java: without an app parent the codegen plugin version pins the jar", () => {
@@ -122,18 +122,18 @@ test("java: a plugin version given as a property is resolved", () => {
 });
 
 test("java: the pinned jar missing is unavailable, never another version", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
   installCli("0.9.0");
-  installCli("0.11.0");
+  installCli("0.12.0");
   const r = unavailable(resolveJavaGenerator(project, java(26)));
-  assert.match(r.reason, /exeris-codegen-cli:0\.10\.0 is not in the local Maven repository/);
+  assert.match(r.reason, /exeris-codegen-cli:0\.11\.0 is not in the local Maven repository/);
   assert.match(r.reason, /does not download/);
-  assert.match(r.remedy, /0\.10\.0/);
+  assert.match(r.remedy, /0\.11\.0/);
 });
 
 test("java: the launch environment carries no *_OPTIONS variable", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
-  installCli("0.10.0");
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
+  installCli("0.11.0");
   const gen = available(
     resolveJavaGenerator(project, {
       env: { ...env(), JAVA_TOOL_OPTIONS: "-Xmx1m", JDK_JAVA_OPTIONS: "-Xmx1m", NODE_OPTIONS: "--x", PATH: "/usr/bin" },
@@ -148,7 +148,7 @@ test("java: a version that is a path is unavailable and nothing outside the repo
   const evil = join(work, "evil");
   mkdirSync(evil);
   writeFileSync(join(evil, "exeris-codegen-cli-9.jar"), "not ours");
-  for (const version of ["../../../../evil", "..", "0.10.0/../../x", "0..1", "-1.0"]) {
+  for (const version of ["../../../../evil", "..", "0.11.0/../../x", "0..1", "-1.0"]) {
     writeFileSync(join(project, "pom.xml"), parentPom(version));
     const r = unavailable(resolveJavaGenerator(project, java(26)));
     assert.match(r.reason, /not a plain Maven version/, version);
@@ -156,17 +156,17 @@ test("java: a version that is a path is unavailable and nothing outside the repo
 });
 
 test("java: a jar that is a link out of the local repository is not launched", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
   const elsewhere = join(work, "elsewhere.jar");
   writeFileSync(elsewhere, "not ours");
-  const dir = join(repo, "eu", "exeris", "exeris-codegen-cli", "0.10.0");
+  const dir = join(repo, "eu", "exeris", "exeris-codegen-cli", "0.11.0");
   mkdirSync(dir, { recursive: true });
-  symlinkSync(elsewhere, join(dir, "exeris-codegen-cli-0.10.0.jar"));
+  symlinkSync(elsewhere, join(dir, "exeris-codegen-cli-0.11.0.jar"));
   assert.match(unavailable(resolveJavaGenerator(project, java(26))).reason, /outside the local Maven repository/);
 });
 
 test("java: no local Maven repository is unavailable", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
   const r = unavailable(
     resolveJavaGenerator(project, { env: { EXERIS_MAVEN_REPO: join(work, "absent") }, javaMajor: () => 26 }),
   );
@@ -175,7 +175,7 @@ test("java: no local Maven repository is unavailable", () => {
 
 test("java: a pom that pins no tooling version is unavailable", () => {
   writeFileSync(join(project, "pom.xml"), "<project><artifactId>x</artifactId></project>");
-  installCli("0.10.0");
+  installCli("0.11.0");
   assert.match(unavailable(resolveJavaGenerator(project, java(26))).reason, /no tooling version is pinned/);
 });
 
@@ -189,15 +189,15 @@ test("java: no pom.xml is unavailable", () => {
 });
 
 test("java: an old JDK is unavailable and names the minimum", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
-  installCli("0.10.0");
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
+  installCli("0.11.0");
   const r = unavailable(resolveJavaGenerator(project, java(MIN_JAVA_MAJOR - 1)));
   assert.match(r.reason, /Java 25 or newer; the 'java' found is version 24/);
 });
 
 test("java: no runnable java is unavailable", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
-  installCli("0.10.0");
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
+  installCli("0.11.0");
   assert.match(unavailable(resolveJavaGenerator(project, java(null))).reason, /No 'java' executable/);
 });
 
@@ -230,10 +230,10 @@ function installCodegenTs(manifest: object, binFile: string | null): string {
 }
 
 test("typescript: the installed package's exeris-gen bin is launched with node", () => {
-  const dir = installCodegenTs({ name: "@exeris/codegen-ts", version: "0.10.0", bin: { "exeris-gen": "./dist/index.js" } }, "dist/index.js");
+  const dir = installCodegenTs({ name: "@exeris/codegen-ts", version: "0.11.0", bin: { "exeris-gen": "./dist/index.js" } }, "dist/index.js");
   const gen = available(resolveTypeScriptGenerator(project));
   assert.equal(gen.kind, "typescript");
-  assert.equal(gen.version, "0.10.0");
+  assert.equal(gen.version, "0.11.0");
   const launch = gen.launch("/meta", "/work");
   assert.equal(launch.command, process.execPath);
   assert.equal(launch.outputDir, join("/work", "out"));
@@ -246,8 +246,8 @@ test("typescript: the installed package's exeris-gen bin is launched with node",
 });
 
 test("typescript: a string bin is accepted", () => {
-  installCodegenTs({ version: "0.10.0", bin: "./dist/index.js" }, "dist/index.js");
-  assert.equal(available(resolveTypeScriptGenerator(project)).version, "0.10.0");
+  installCodegenTs({ version: "0.11.0", bin: "./dist/index.js" }, "dist/index.js");
+  assert.equal(available(resolveTypeScriptGenerator(project)).version, "0.11.0");
 });
 
 test("typescript: no node_modules is unavailable with a remedy", () => {
@@ -257,20 +257,20 @@ test("typescript: no node_modules is unavailable with a remedy", () => {
 });
 
 test("typescript: a manifest without the exeris-gen bin is unavailable", () => {
-  installCodegenTs({ version: "0.10.0", bin: { other: "./dist/index.js" } }, "dist/index.js");
+  installCodegenTs({ version: "0.11.0", bin: { other: "./dist/index.js" } }, "dist/index.js");
   assert.match(unavailable(resolveTypeScriptGenerator(project)).reason, /no exeris-gen entry/);
 });
 
 test("typescript: a bin that does not exist, or leaves the package, is unavailable", () => {
-  installCodegenTs({ version: "0.10.0", bin: { "exeris-gen": "./dist/index.js" } }, null);
+  installCodegenTs({ version: "0.11.0", bin: { "exeris-gen": "./dist/index.js" } }, null);
   assert.match(unavailable(resolveTypeScriptGenerator(project)).reason, /missing or outside the package/);
-  installCodegenTs({ version: "0.10.0", bin: { "exeris-gen": "../../../../outside.js" } }, null);
+  installCodegenTs({ version: "0.11.0", bin: { "exeris-gen": "../../../../outside.js" } }, null);
   writeFileSync(join(project, "outside.js"), "//");
   assert.match(unavailable(resolveTypeScriptGenerator(project)).reason, /missing or outside the package/);
 });
 
 test("resolver messages carry no absolute paths", () => {
-  writeFileSync(join(project, "pom.xml"), parentPom("0.10.0"));
+  writeFileSync(join(project, "pom.xml"), parentPom("0.11.0"));
   const r = unavailable(resolveJavaGenerator(project, java(26)));
   assert.ok(!r.reason.includes(work) && !r.remedy.includes(work));
   const t = unavailable(resolveTypeScriptGenerator(project));

@@ -28,30 +28,30 @@ function poms() {
   };
 }
 
-test("the committed 0.10.0 POMs name the tested triple", () => {
+test("the committed 0.11.0 POMs name the tested triple", () => {
   const starter = parseAppStarterPoms(poms());
-  assert.equal(starter.bomVersion, "0.10.0");
-  assert.deepEqual(starter.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
+  assert.equal(starter.bomVersion, "0.11.0");
+  assert.deepEqual(starter.triple, { tooling: "0.11.0", kernel: "0.13.1", sdk: "0.13.3" });
   assert.deepEqual(starter.coordinates.starter, {
     groupId: "eu.exeris",
     artifactId: "exeris-app-starter",
-    version: "0.10.0",
+    version: "0.11.0",
   });
   assert.deepEqual(starter, fixtureAppStarter());
 });
 
 test("a version that is an expression, not a literal, is refused", () => {
-  const bom = poms().bom.replace("<exeris.kernel.version>0.12.0<", "<exeris.kernel.version>${project.version}<");
+  const bom = poms().bom.replace("<exeris.kernel.version>0.13.1<", "<exeris.kernel.version>${project.version}<");
   assert.throws(() => parseAppStarterPoms({ ...poms(), bom }), /exeris\.kernel\.version.*not a literal/);
 });
 
 test("a tooling version that differs from the BOM version is refused", () => {
-  const bom = poms().bom.replace("<exeris.tooling.version>0.10.0<", "<exeris.tooling.version>0.9.0<");
+  const bom = poms().bom.replace("<exeris.tooling.version>0.11.0<", "<exeris.tooling.version>0.9.0<");
   assert.throws(() => parseAppStarterPoms({ ...poms(), bom }), AppStarterFormatError);
 });
 
 test("a starter that does not inherit the BOM at its version is refused", () => {
-  const starter = poms().starter.replace("<version>0.10.0</version>", "<version>0.9.0</version>");
+  const starter = poms().starter.replace("<version>0.11.0</version>", "<version>0.9.0</version>");
   assert.throws(() => parseAppStarterPoms({ ...poms(), starter }), /exeris-app-starter does not inherit/);
 });
 
@@ -68,7 +68,7 @@ test("loadAppStarter reads the vendored entry and keeps its source artifact", ()
   const state = loadAppStarter(writeAppStarterBundle(dir), dir);
   assert.equal(state.state, "available");
   if (state.state === "available") {
-    assert.equal(state.starter.bomVersion, "0.10.0");
+    assert.equal(state.starter.bomVersion, "0.11.0");
     assert.equal(state.sourceArtifact, APP_STARTER_FIXTURE_SOURCE);
   }
 });

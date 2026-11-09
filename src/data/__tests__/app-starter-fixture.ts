@@ -12,14 +12,14 @@ import type { BundleState } from "../bundle.js";
 
 const M2 = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "test", "fixtures", "m2", "eu", "exeris");
 
-export const APP_STARTER_FIXTURE_SOURCE = "eu.exeris:exeris-app-bom:0.10.0";
+export const APP_STARTER_FIXTURE_SOURCE = "eu.exeris:exeris-app-bom:0.11.0";
 
 export function starterPomText(artifactId: string): string {
-  return readFileSync(join(M2, artifactId, "0.10.0", `${artifactId}-0.10.0.pom`), "utf8");
+  return readFileSync(join(M2, artifactId, "0.11.0", `${artifactId}-0.11.0.pom`), "utf8");
 }
 
 /** The starter a fixture bundle vendors; `triple` replaces the committed versions when given. */
-export function fixtureAppStarter(triple = { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" }): AppStarter {
+export function fixtureAppStarter(triple = { tooling: "0.11.0", kernel: "0.13.1", sdk: "0.13.3" }): AppStarter {
   const at = (artifactId: string) => ({ groupId: "eu.exeris", artifactId, version: triple.tooling });
   return {
     appStarterFormat: 1,
