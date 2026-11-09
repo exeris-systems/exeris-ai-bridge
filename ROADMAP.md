@@ -248,6 +248,10 @@ The mechanism: the agent sends a `MutationOp`, the platform applies it **in-memo
 - [ ] **Dockerfile** — multi-stage build, distroless final image, non-root user, `~50MB`
 - [ ] **Deployment example** — one container behind TLS termination, documented as the reference hosting shape. Kubernetes manifests and multi-tenancy (one instance fronting several kernel adapters) are out of scope: the hosted surface spawns nothing, so there is no per-tenant child to route to
 
+### Discovery: the area is found, not named up front
+
+- [ ] **`discover-requirements` takes `area` as optional** — a `summary` alone starts the interview. After purpose, actors and workflows the agent proposes the bounded area, either one name or a split into several, and the user confirms it before any brief is written; each confirmed area gets its own `docs/briefs/<area>.brief.yaml`, validated on its own by `build-validate_brief`. A boundary usually emerges from the workflows rather than preceding them, and requiring the name first fixes the file before the interview has shown what the area is. When `area` is given, the prompt behaves as in 0.9.0. The prompt proposes boundaries and asks; it does not plan a decomposition across areas, which RFC-2026-10-24 leaves to the planning stage (ADR-086 V2). The brief schema, `build-validate_brief` and the slug rule are unchanged: a confirmed area is still a name, never a path
+
 ## 0.11.0 — observability + diagnostics
 
 > Goal: the bridge is itself observable. JFR-equivalent telemetry. Self-diagnostic surface for debugging "why isn't this tool working".
