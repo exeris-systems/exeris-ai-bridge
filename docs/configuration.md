@@ -120,7 +120,7 @@ The published package carries a small read-only corpus so an application develop
 
 ```jsonc
 "bundle": { "state": "unavailable", "reason": "No bundled reference data is present…", "remedy": "…run npm run vendor:data…" }
-"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 5, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.10.0", "eu.exeris:exeris-codegen-java:0.10.0", "eu.exeris:exeris-sdk-annotations:0.13.2", "eu.exeris:exeris-sdk-source-model:0.13.2"] }
+"bundle": { "state": "available", "generatedAt": "…", "bridgeVersion": "0.8.0", "entryCount": 5, "sourceArtifacts": ["eu.exeris:exeris-app-bom:0.11.0", "eu.exeris:exeris-codegen-java:0.11.0", "eu.exeris:exeris-sdk-annotations:0.13.3", "eu.exeris:exeris-sdk-source-model:0.13.3"] }
 ```
 
 The bundle ships with the **annotation catalog, AST schema and brief schema** (from the released `exeris-sdk` jars; the brief schema is pinned by the `briefSchemaFormat` it declares, and `exeris://sdk/brief-schema` serves it), the **generator catalogue** (from the released `exeris-codegen-java` jar) and the **application starter** (the tested tooling + kernel + SDK triple, from the released `exeris-app-bom`, `exeris-app-parent` and `exeris-app-starter` POMs at `EXERIS_TOOLING_VERSION`; `build-get_starter` reads it), all generated at prepack time, from the local Maven repository: the SDK jars at `EXERIS_SDK_VERSION` and the tooling artefacts at `EXERIS_TOOLING_VERSION`. Every entry carries a SHA-256 that is verified on each read (a truncated file parses fine and is quietly wrong) and a `sourceArtifact` coordinate, so an answer can say which upstream release it reflects.

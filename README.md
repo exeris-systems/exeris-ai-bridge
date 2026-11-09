@@ -151,7 +151,7 @@ The package follows semver. Until 1.0, a minor release may change a tool's outpu
 release notes list every change a client may notice. At 1.0 the tool names and input schemas are
 frozen.
 
-The next release targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.13.2 and `exeris-tooling` 0.10.0, all on
+The next release targets `exeris-kernel` 0.12.0, `exeris-sdk` 0.13.3 and `exeris-tooling` 0.11.0, all on
 Maven Central.
 
 ## Links
