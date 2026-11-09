@@ -34,18 +34,18 @@ test("backend returns a pom.xml on exeris-app-parent that depends on exeris-app-
   assert.ok(!res.isError);
   const out = payload(res);
   assert.equal(out.variant, "backend");
-  assert.equal(out.bomVersion, "0.10.0");
-  assert.deepEqual(out.triple, { tooling: "0.10.0", kernel: "0.12.0", sdk: "0.12.0" });
+  assert.equal(out.bomVersion, "0.11.0");
+  assert.deepEqual(out.triple, { tooling: "0.11.0", kernel: "0.13.1", sdk: "0.13.3" });
   assert.equal(out.files.length, 1);
   assert.equal(out.files[0].path, "pom.xml");
   const pom: string = out.files[0].content;
   assert.match(
     pom,
-    /<parent>\s*<groupId>eu\.exeris<\/groupId>\s*<artifactId>exeris-app-parent<\/artifactId>\s*<version>0\.10\.0<\/version>/,
+    /<parent>\s*<groupId>eu\.exeris<\/groupId>\s*<artifactId>exeris-app-parent<\/artifactId>\s*<version>0\.11\.0<\/version>/,
   );
   assert.match(pom, /<artifactId>exeris-app-starter<\/artifactId>\s*<type>pom<\/type>/);
   // The tooling version is stated once, in <parent>; the starter dependency carries none.
-  assert.equal(pom.match(/0\.10\.0/g)?.length, 1);
+  assert.equal(pom.match(/0\.11\.0/g)?.length, 1);
   // The consumer blanks the publication metadata it would otherwise inherit.
   assert.match(pom, /<url\/>\s*<licenses>\s*<license\/>/);
   assert.ok(out.supplied.some(hasName(/JDBC/)));
@@ -58,7 +58,7 @@ test("frontend returns a package.json with @exeris/codegen-ts and its exeris-gen
   assert.equal(out.files.length, 1);
   assert.equal(out.files[0].path, "package.json");
   const manifest = JSON.parse(out.files[0].content);
-  assert.equal(manifest.devDependencies["@exeris/codegen-ts"], "0.10.0");
+  assert.equal(manifest.devDependencies["@exeris/codegen-ts"], "0.11.0");
   assert.match(
     manifest.scripts.generate,
     /^exeris-gen generate --input \.\.\/backend\/target\/classes\/exeris-metadata /,
@@ -87,9 +87,9 @@ test("every version comes from the vendored entry", async () => {
   assert.deepEqual(out.triple, other);
   const [pom, pkg] = out.files.map((f: { content: string }) => f.content);
   assert.match(pom, /<version>7\.8\.9<\/version>/);
-  assert.doesNotMatch(pom, /0\.10\.0/);
+  assert.doesNotMatch(pom, /0\.11\.0/);
   assert.equal(JSON.parse(pkg).devDependencies["@exeris/codegen-ts"], "7.8.9");
-  assert.doesNotMatch(pkg, /0\.10\.0/);
+  assert.doesNotMatch(pkg, /0\.11\.0/);
 });
 
 test("an unknown or missing variant is an error naming the choices", async () => {

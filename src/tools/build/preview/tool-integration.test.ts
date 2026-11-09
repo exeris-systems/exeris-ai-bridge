@@ -18,7 +18,7 @@ import { MIN_JAVA_MAJOR, probeJavaMajor } from "./resolve-generator.js";
 // -> `java -jar`). Skipped when the jar is not in the local repository or no
 // Java of the required major is on PATH; the bridge's own CI carries neither.
 
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 
 function skipReason(): string | false {
   const repo = resolveLocalRepository(process.env);

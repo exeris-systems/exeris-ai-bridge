@@ -25,10 +25,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("the committed 0.10.0 catalogue parses, in catalogue order", () => {
+test("the committed 0.11.0 catalogue parses, in catalogue order", () => {
   const catalogue = parseGeneratorCatalogue(catalogueFixtureText());
   assert.equal(catalogue.catalogueFormat, 1);
-  assert.equal(catalogue.rows.length, 33);
+  assert.equal(catalogue.rows.length, 35);
   assert.equal(catalogue.rows[0]?.id, "spectate-stream-handler");
   const ids = catalogue.rows.map((r) => r.id);
   assert.equal(new Set(ids).size, ids.length);
@@ -50,7 +50,7 @@ test("unknown keys are ignored and rows for other trees are skipped", () => {
   parsed.rows[0].futureColumn = 7;
   parsed.rows.push({ ...parsed.rows[0], id: "ts-thing", outputRoot: "ts" });
   const catalogue = parseGeneratorCatalogue(JSON.stringify(parsed));
-  assert.equal(catalogue.rows.length, 33);
+  assert.equal(catalogue.rows.length, 35);
 });
 
 test("a row missing a format-1 key, or with a bad pattern, is refused", () => {
@@ -70,7 +70,7 @@ test("loadGeneratorCatalogue reads the vendored entry and names its source", () 
   assert.equal(state.state, "available");
   if (state.state === "available") {
     assert.equal(state.sourceArtifact, CATALOGUE_FIXTURE_SOURCE);
-    assert.equal(state.catalogue.rows.length, 33);
+    assert.equal(state.catalogue.rows.length, 35);
   }
 });
 

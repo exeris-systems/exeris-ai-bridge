@@ -8,7 +8,7 @@
     <parent>
         <groupId>eu.exeris</groupId>
         <artifactId>exeris-app-bom</artifactId>
-        <version>0.10.0</version>
+        <version>0.11.0</version>
         <relativePath>../exeris-app-bom/pom.xml</relativePath>
     </parent>
 
@@ -155,4 +155,44 @@
             <!-- END exeris build block. -->
         </plugins>
     </build>
+
+    <profiles>
+        <!-- BEGIN exeris integration-test profile. README.md ("Generated tests") carries a copy for
+             an application that cannot take this parent; keep the two identical.
+
+             Runs the generated integration tests (ADR-058 Amendment 1) with Failsafe in
+             integration-test and verify. Active only in a project that has
+             src/test/generated-it/java when the build starts, so an application without that root
+             binds no Failsafe and an *IT class of its own runs exactly as it would without this
+             parent. Maven decides activation before exeris:generate runs: the build that first
+             writes the root compiles the integration tests, and the builds after it run them.
+             ${basedir} in an inherited file activation is the building project's directory. -->
+        <profile>
+            <id>exeris-integration-tests</id>
+            <activation>
+                <file>
+                    <exists>${basedir}/src/test/generated-it/java</exists>
+                </file>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>3.2.5</version>
+                        <executions>
+                            <execution>
+                                <id>exeris-integration-tests</id>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- END exeris integration-test profile. -->
+    </profiles>
 </project>

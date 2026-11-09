@@ -592,7 +592,7 @@ const toolingParent = (version: string) =>
   `<project><parent><groupId>eu.exeris</groupId><artifactId>exeris-app-parent</artifactId><version>${version}</version></parent></project>`;
 
 test("bridge-health reports build toolingSkew aligned when the project pins the catalogue's release", async () => {
-  const skew = await buildToolingSkew(toolingParent("0.10.0"));
+  const skew = await buildToolingSkew(toolingParent("0.11.0"));
   assert.equal(skew.status, "aligned");
   assert.equal(skew.source, "app-parent");
 });
@@ -601,7 +601,7 @@ test("bridge-health reports build toolingSkew skew_detected when the project pin
   const skew = await buildToolingSkew(toolingParent("0.9.1"));
   assert.equal(skew.status, "skew_detected");
   assert.equal(skew.projectToolingVersion, "0.9.1");
-  assert.equal(skew.bundledToolingVersion, "0.10.0");
+  assert.equal(skew.bundledToolingVersion, "0.11.0");
 });
 
 test("bridge-health reports build toolingSkew unknown when the project pins no tooling", async () => {

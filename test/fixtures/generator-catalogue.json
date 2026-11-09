@@ -58,7 +58,7 @@
     {
       "id": "handler",
       "generator": "KernelHandlerGenerator",
-      "artefact": "The HTTP handler serving the entity's routes.",
+      "artefact": "The HTTP handler serving the entity's routes, the routes of its `@Blob` fields included (ADR-108).",
       "outputRoot": "main",
       "pathPattern": "^(?:[^/]+/)*handler/[^/]+Handler\\.java$",
       "pathTemplate": "{base}/handler/{E}Handler.java",
@@ -192,7 +192,7 @@
     {
       "id": "list-query",
       "generator": "KernelListQueryGenerator",
-      "artefact": "The list route's query record: page, sort and filters.",
+      "artefact": "The list route's query record: page, sort, filters and search.",
       "outputRoot": "main",
       "pathPattern": "^(?:[^/]+/)*repository/[^/]+ListQuery\\.java$",
       "pathTemplate": "{base}/repository/{E}ListQuery.java",
@@ -248,7 +248,7 @@
     {
       "id": "graph-sync",
       "generator": "KernelGraphSyncGenerator",
-      "artefact": "The projection of the entity and its edges into the graph SPI.",
+      "artefact": "The projection of the entity and its edges into the graph SPI, built in RuntimeComponents, registered at boot, and called by the service unless the entity is tenant-partitioned.",
       "outputRoot": "main",
       "pathPattern": "^(?:[^/]+/)*graph/[^/]+GraphSync\\.java$",
       "pathTemplate": "{base}/graph/{E}GraphSync.java",
@@ -256,7 +256,7 @@
       "cardinality": "zero-or-one",
       "condition": "`@Graph`",
       "ambiguousWith": [],
-      "adr": null,
+      "adr": "ADR-070",
       "since": "0.10.0"
     },
     {
@@ -302,9 +302,23 @@
       "since": "0.10.0"
     },
     {
+      "id": "tenant-policy-migration",
+      "generator": "KernelTenantPolicyMigrationGenerator",
+      "artefact": "The Flyway migration replacing the tenant RLS policy with an unguarded tenant cast and shared-scope tag pinning.",
+      "outputRoot": "main",
+      "pathPattern": "^db/migration/V5[0-9]{6}__tenant_policy_[^/]+\\.sql$",
+      "pathTemplate": "db/migration/V5{nnnnnn}__tenant_policy_{table}.sql",
+      "scope": "entity",
+      "cardinality": "zero-or-one",
+      "condition": "`dataScope` `TENANT` or `UNIVERSE`; `{nnnnnn}` is the one in the table's create migration",
+      "ambiguousWith": [],
+      "adr": "ADR-012",
+      "since": "0.11.0"
+    },
+    {
       "id": "openapi",
       "generator": "KernelOpenApiGenerator",
-      "artefact": "The OpenAPI 3.1 document of the entity's routes.",
+      "artefact": "The OpenAPI 3.1 document of the entity's routes; a route whose route-policy requirement demands an identity declares the `bearerAuth` scheme, 401, and 403 where it demands scopes.",
       "outputRoot": "main",
       "pathPattern": "^openapi/[^/]+-api\\.yaml$",
       "pathTemplate": "openapi/{kebab(E)}-api.yaml",
@@ -374,7 +388,7 @@
     {
       "id": "generated-route-policy",
       "generator": "KernelApplicationGenerator",
-      "artefact": "The generated half of the route policy the application binds; its table holds no row, so it abstains on every route (ADR-105).",
+      "artefact": "The generated half of the route policy the application binds: a table mirroring the router's matching, answering each declared route's requirement (nearest declaration wins, any-of over permissions) and abstaining on every other route; with no declaration anywhere it holds no row (ADR-105).",
       "outputRoot": "main",
       "pathPattern": "^(?:[^/]+/)*GeneratedRoutePolicy\\.java$",
       "pathTemplate": "{app}/GeneratedRoutePolicy.java",
@@ -418,14 +432,28 @@
       "generator": "KernelTestSupportGenerator",
       "artefact": "The recording doubles of the kernel SPIs that the generated tests use.",
       "outputRoot": "test",
-      "pathPattern": "^(?:[^/]+/)*testsupport/(?:RecordingHttpExchange|RecordingPersistence|RecordingFlow|RecordingRequestBody|RecordingEventEngine)\\.java$",
-      "pathTemplate": "{app}/testsupport/Recording{HttpExchange,Persistence,Flow,RequestBody,EventEngine}.java",
+      "pathPattern": "^(?:[^/]+/)*testsupport/(?:RecordingHttpExchange|RecordingPersistence|RecordingFlow|RecordingRequestBody|RecordingEventEngine|RecordingStreamExchange)\\.java$",
+      "pathTemplate": "{app}/testsupport/Recording{HttpExchange,Persistence,Flow,RequestBody,EventEngine,StreamExchange}.java",
       "scope": "project",
       "cardinality": "fixed-set",
       "condition": "at least one `@ExerisDomain`",
       "ambiguousWith": [],
       "adr": "ADR-058",
       "since": "0.10.0"
+    },
+    {
+      "id": "application-test",
+      "generator": "KernelApplicationTestGenerator",
+      "artefact": "The generated tests of the route policy the application binds.",
+      "outputRoot": "test",
+      "pathPattern": "^(?:[^/]+/)*ApplicationRoutePolicyTest\\.java$",
+      "pathTemplate": "{app}/ApplicationRoutePolicyTest.java",
+      "scope": "project",
+      "cardinality": "one",
+      "condition": "at least one `@ExerisDomain`",
+      "ambiguousWith": [],
+      "adr": "ADR-058",
+      "since": "0.11.0"
     },
     {
       "id": "handler-test",
@@ -482,6 +510,62 @@
       "ambiguousWith": [],
       "adr": "ADR-058",
       "since": "0.10.0"
+    },
+    {
+      "id": "integration-test-support",
+      "generator": "KernelIntegrationSupportGenerator",
+      "artefact": "The class that boots the generated application once per test JVM on in-memory H2, and the HTTP helper the integration tests send their requests through.",
+      "outputRoot": "integration-test",
+      "pathPattern": "^(?:[^/]+/)*testsupport/(?:ApplicationUnderTest|IntegrationHttp)\\.java$",
+      "pathTemplate": "{app}/testsupport/{ApplicationUnderTest,IntegrationHttp}.java",
+      "scope": "project",
+      "cardinality": "fixed-set",
+      "condition": "every entity `GLOBAL`, none with graph metadata or a `@Blob` field, and no `@CapabilityModule`; otherwise nothing is written (`EXT-GEN-3105`)",
+      "ambiguousWith": [],
+      "adr": "ADR-058",
+      "since": "0.11.0"
+    },
+    {
+      "id": "integration-test-tokens",
+      "generator": "KernelIntegrationSupportGenerator",
+      "artefact": "The RSA key pair made at test runtime, its JWKS document, and the RS256 tokens the integration tests present.",
+      "outputRoot": "integration-test",
+      "pathPattern": "^(?:[^/]+/)*testsupport/IntegrationTokens\\.java$",
+      "pathTemplate": "{app}/testsupport/IntegrationTokens.java",
+      "scope": "project",
+      "cardinality": "zero-or-one",
+      "condition": "as `integration-test-support`, and some route demands a verified identity (ADR-105)",
+      "ambiguousWith": [],
+      "adr": "ADR-058",
+      "since": "0.11.0"
+    },
+    {
+      "id": "route-policy-integration-test",
+      "generator": "KernelRoutePolicyIntegrationTestGenerator",
+      "artefact": "The integration test of the route policy the booted application binds: 401, 403 and admission per declared requirement.",
+      "outputRoot": "integration-test",
+      "pathPattern": "^(?:[^/]+/)*GeneratedRoutePolicyIT\\.java$",
+      "pathTemplate": "{app}/GeneratedRoutePolicyIT.java",
+      "scope": "project",
+      "cardinality": "zero-or-one",
+      "condition": "as `integration-test-support`, and some route demands a verified identity (ADR-105)",
+      "ambiguousWith": [],
+      "adr": "ADR-058",
+      "since": "0.11.0"
+    },
+    {
+      "id": "crud-integration-test",
+      "generator": "KernelCrudIntegrationTestGenerator",
+      "artefact": "The integration test of the entity's CRUD routes on the booted application.",
+      "outputRoot": "integration-test",
+      "pathPattern": "^(?:[^/]+/)*handler/[^/]+CrudIT\\.java$",
+      "pathTemplate": "{base}/handler/{E}CrudIT.java",
+      "scope": "entity",
+      "cardinality": "one",
+      "condition": "every entity, when `integration-test-support` is written",
+      "ambiguousWith": [],
+      "adr": "ADR-058",
+      "since": "0.11.0"
     }
   ],
   "retired": []

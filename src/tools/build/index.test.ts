@@ -290,7 +290,7 @@ test("build-explain_artefacts explains every emitted path", async () => {
   assert.deepEqual(payload.catalogue, {
     state: "available",
     catalogueFormat: 1,
-    sourceArtifact: "eu.exeris:exeris-codegen-java:0.10.0",
+    sourceArtifact: "eu.exeris:exeris-codegen-java:0.11.0",
   });
   assert.equal(byPath.get("openapi/station-api.yaml")?.generator, "KernelOpenApiGenerator");
 });
@@ -613,10 +613,10 @@ async function explainSkew(pom: string, tools: (root: string) => Map<string, Reg
 }
 
 test("build-explain_artefacts reports a project on the catalogue's tooling release as aligned", async () => {
-  assert.deepEqual(await explainSkew(appParentPom("0.10.0")), {
+  assert.deepEqual(await explainSkew(appParentPom("0.11.0")), {
     status: "aligned",
-    bundledToolingVersion: "0.10.0",
-    projectToolingVersion: "0.10.0",
+    bundledToolingVersion: "0.11.0",
+    projectToolingVersion: "0.11.0",
     source: "app-parent",
   });
 });
@@ -625,23 +625,23 @@ test("build-explain_artefacts reports a project on another tooling release as sk
   const skew = await explainSkew(appParentPom("0.9.1"));
   assert.equal(skew.status, "skew_detected");
   assert.equal(skew.projectToolingVersion, "0.9.1");
-  assert.equal(skew.bundledToolingVersion, "0.10.0");
+  assert.equal(skew.bundledToolingVersion, "0.11.0");
   assert.match(skew.warning, /0\.9\.1/);
 });
 
 test("build-explain_artefacts reports the tooling skew as unknown when the project pins nothing", async () => {
   const skew = await explainSkew("<project/>");
   assert.equal(skew.status, "unknown");
-  assert.equal(skew.bundledToolingVersion, "0.10.0");
+  assert.equal(skew.bundledToolingVersion, "0.11.0");
   assert.match(skew.reason, /no tooling version is pinned/);
 });
 
 test("build-explain_artefacts reports the tooling skew as unknown when the bundle carries no catalogue", async () => {
   const absent: BundleState = { state: "unavailable", reason: "no bundle (test)", remedy: "pack it (test)" };
-  const skew = await explainSkew(appParentPom("0.10.0"), (root) =>
+  const skew = await explainSkew(appParentPom("0.11.0"), (root) =>
     new Map(registerBuildTools(configFor(root), absent).map((t) => [t.definition.name, t])),
   );
   assert.equal(skew.status, "unknown");
   assert.equal(skew.bundledToolingVersion, "unknown");
-  assert.equal(skew.projectToolingVersion, "0.10.0");
+  assert.equal(skew.projectToolingVersion, "0.11.0");
 });

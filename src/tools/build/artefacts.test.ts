@@ -63,7 +63,8 @@ test("every row of the catalogue is reached by the path its own template names",
       .replace("{tier}{nnnnnn}", "2123456")
       .replace("{nnnnnn}", "123456")
       .replace("{table}", "stations")
-      .replace("{HttpExchange,Persistence,Flow,RequestBody,EventEngine}", "Persistence");
+      .replace("{HttpExchange,Persistence,Flow,RequestBody,EventEngine,StreamExchange}", "Persistence")
+      .replace("{ApplicationUnderTest,IntegrationHttp}", "ApplicationUnderTest");
   for (const row of catalogue.rows) {
     const path = fill(row.pathTemplate);
     const explained = explainArtefact(path, catalogue, row.outputRoot);

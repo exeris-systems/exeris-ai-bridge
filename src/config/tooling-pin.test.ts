@@ -29,8 +29,8 @@ function installCodegenTs(version: string): void {
 }
 
 test("the app-parent version is the pin", () => {
-  writeFileSync(join(root, "pom.xml"), parentPom("0.10.0"));
-  assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.10.0", source: "app-parent" });
+  writeFileSync(join(root, "pom.xml"), parentPom("0.11.0"));
+  assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.11.0", source: "app-parent" });
 });
 
 const wrapPlugin = (inner: string) => `<project><build><plugins><plugin>${inner}</plugin></plugins></build></project>`;
@@ -59,8 +59,8 @@ test("a dependency named like the codegen plugin inside another plugin is not th
 });
 
 test("the app-parent pin wins over the codegen plugin's", () => {
-  writeFileSync(join(root, "pom.xml"), parentPom("0.10.0").replace("</project>", `${pluginPom("0.9.1").slice(9)}`));
-  assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.10.0", source: "app-parent" });
+  writeFileSync(join(root, "pom.xml"), parentPom("0.11.0").replace("</project>", `${pluginPom("0.9.1").slice(9)}`));
+  assert.deepEqual(resolveJavaToolingPin(root), { kind: "pinned", version: "0.11.0", source: "app-parent" });
 });
 
 test("without an app parent, the codegen plugin's version is the pin", () => {
@@ -89,8 +89,8 @@ test("an unresolvable parent version, a missing pom and an unpinned pom each say
 });
 
 test("the installed @exeris/codegen-ts is the TypeScript pin", () => {
-  installCodegenTs("0.10.0");
-  assert.deepEqual(resolveTypeScriptToolingPin(root), { kind: "pinned", version: "0.10.0", source: "node-modules" });
+  installCodegenTs("0.11.0");
+  assert.deepEqual(resolveTypeScriptToolingPin(root), { kind: "pinned", version: "0.11.0", source: "node-modules" });
 });
 
 test("no installed @exeris/codegen-ts is no TypeScript pin", () => {
@@ -99,8 +99,8 @@ test("no installed @exeris/codegen-ts is no TypeScript pin", () => {
 
 test("the project pin prefers Maven and falls back to the installed TypeScript generator", () => {
   installCodegenTs("0.8.0");
-  writeFileSync(join(root, "pom.xml"), parentPom("0.10.0"));
-  assert.deepEqual(resolveProjectToolingVersion(root), { kind: "pinned", version: "0.10.0", source: "app-parent" });
+  writeFileSync(join(root, "pom.xml"), parentPom("0.11.0"));
+  assert.deepEqual(resolveProjectToolingVersion(root), { kind: "pinned", version: "0.11.0", source: "app-parent" });
 
   rmSync(join(root, "pom.xml"));
   assert.deepEqual(resolveProjectToolingVersion(root), { kind: "pinned", version: "0.8.0", source: "node-modules" });

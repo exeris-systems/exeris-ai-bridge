@@ -54,7 +54,7 @@ async function emit(strict = false) {
   const repo = resolveMavenRepo({
     explicitVersion,
     checkArtifacts: ["exeris-sdk-annotations", "exeris-sdk-source-model"],
-    minVersion: "0.13.2",
+    minVersion: "0.13.3",
   });
 
   let sources;

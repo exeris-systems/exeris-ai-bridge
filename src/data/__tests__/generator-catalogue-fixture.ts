@@ -21,7 +21,7 @@ const FIXTURE = join(
   "generator-catalogue.json",
 );
 
-export const CATALOGUE_FIXTURE_SOURCE = "eu.exeris:exeris-codegen-java:0.10.0";
+export const CATALOGUE_FIXTURE_SOURCE = "eu.exeris:exeris-codegen-java:0.11.0";
 
 export function catalogueFixtureText(): string {
   return readFileSync(FIXTURE, "utf8");

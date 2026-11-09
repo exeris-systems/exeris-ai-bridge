@@ -395,8 +395,8 @@ function collectSdkSources(
   },
 ): SourceEntry[] {
   const { repo, warnFn, failFn, findJar, extract, allowSnapshots, explicitVersion } = options;
-  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.13.2" });
-  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.13.2" });
+  const ann = findJar(repo, "exeris-sdk-annotations", explicitVersion, { allowSnapshots, minVersion: "0.13.3" });
+  const model = findJar(repo, "exeris-sdk-source-model", explicitVersion, { allowSnapshots, minVersion: "0.13.3" });
 
   if (!ann || !model) {
     if (options.strict) {
@@ -457,7 +457,7 @@ function collectGeneratorCatalogue(
   const version = options.toolingVersion;
   const jar = findJar(repo, "exeris-codegen-java", version, {
     allowSnapshots: Boolean(version || options.allowSnapshots),
-    minVersion: "0.10.0",
+    minVersion: "0.11.0",
   });
   if (!jar) {
     if (options.strict) {
@@ -499,7 +499,7 @@ function collectAppStarter(
 ): SourceEntry | null {
   const { repo, warnFn, failFn } = options;
   const version = options.toolingVersion;
-  const pomOptions = { allowSnapshots: Boolean(version || options.allowSnapshots), minVersion: "0.10.0" };
+  const pomOptions = { allowSnapshots: Boolean(version || options.allowSnapshots), minVersion: "0.11.0" };
   const bom = findArtifactPom(repo, APP_BOM_ARTIFACT, version, pomOptions);
   if (!bom) {
     if (options.strict) {

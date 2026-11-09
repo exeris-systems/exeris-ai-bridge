@@ -14,7 +14,7 @@
     -->
     <groupId>eu.exeris</groupId>
     <artifactId>exeris-app-bom</artifactId>
-    <version>0.10.0</version>
+    <version>0.11.0</version>
     <packaging>pom</packaging>
 
     <name>Exeris Tooling :: Application BOM</name>
@@ -61,23 +61,26 @@
         passes these properties on by inheritance, and an inherited value is interpolated in the
         consumer's model, where ${project.version} is the consumer's own version.
 
-        exeris.kernel.version, exeris.sdk.version and jackson3.version equal the values of the same
-        properties in exeris-tooling-bom: the versions this tooling release's suites ran against.
+        exeris.kernel.version, exeris.sdk.version, jackson3.version and h2.version equal the values of
+        the same properties in exeris-tooling-bom: the versions this tooling release's suites ran against.
         exeris.tooling.version equals the reactor version. tools/release-readiness fails a release
         where either does not hold, or where any of the three Exeris versions is a -SNAPSHOT.
     -->
     <properties>
-        <exeris.tooling.version>0.10.0</exeris.tooling.version>
-        <exeris.kernel.version>0.12.0</exeris.kernel.version>
-        <exeris.sdk.version>0.12.0</exeris.sdk.version>
+        <exeris.tooling.version>0.11.0</exeris.tooling.version>
+        <exeris.kernel.version>0.13.1</exeris.kernel.version>
+        <exeris.sdk.version>0.13.3</exeris.sdk.version>
         <!-- The kernel's Jackson 3 line. Emitted main code imports tools.jackson for an entity
              with a List<X> field. -->
         <jackson3.version>3.2.3</jackson3.version>
+        <!-- The H2 the generated integration tests boot on (ADR-058 Amendment 1). -->
+        <h2.version>2.3.232</h2.version>
     </properties>
 
     <!-- What generated code and its build need, and nothing else: no JavaPoet, swagger, Jackson 2,
-         H2, compile-testing, JUnit or AssertJ. Those are tooling's internal pins
-         (exeris-tooling-bom) or the application's own choices. -->
+         compile-testing, JUnit or AssertJ. Those are tooling's internal pins (exeris-tooling-bom)
+         or the application's own choices. H2 is managed because the generated integration tests
+         boot on it. -->
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -132,6 +135,14 @@
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
                 <version>${jackson3.version}</version>
+            </dependency>
+
+            <!-- The database the generated integration tests boot the application on. Declare it at
+                 test scope; no generated file imports it. -->
+            <dependency>
+                <groupId>com.h2database</groupId>
+                <artifactId>h2</artifactId>
+                <version>${h2.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
