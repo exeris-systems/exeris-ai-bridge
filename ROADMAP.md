@@ -201,7 +201,7 @@ The mechanism: the agent sends a `MutationOp`, the platform applies it **in-memo
 ---
 
 
-## 0.9.0 — MCP resources + prompts, and generation from the app's side (both personas)
+## 0.9.0 — MCP resources + prompts, and generation from the app's side (both personas) — COMPLETED 2026-11-09
 
 > Goal: the bridge stops being tools-only. It publishes ADRs, HLA, whitepaper as MCP **resources** (URI-addressable) and ships canned **prompts** that bootstrap an agent into common Exeris workflows. And an application developer's agent can start a project on the published starter and see what the generator will emit before it runs, instead of hand-writing the build and guessing at the output (ADR-025 2026-10-04 amendment).
 
